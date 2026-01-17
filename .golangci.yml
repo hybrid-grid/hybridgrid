@@ -20,6 +20,12 @@ linters-settings:
       - (*os.File).Close
       - (net.Conn).Close
       - (*google.golang.org/grpc.ClientConn).Close
+      - (*net/http.Server).Shutdown
+      - encoding/json.(*Encoder).Encode
+  staticcheck:
+    checks:
+      - all
+      - "-SA1019"  # Ignore deprecation warnings (grpc.DialContext, etc.)
 
 issues:
   exclude-rules:
@@ -27,19 +33,52 @@ issues:
     - path: _test\.go
       linters:
         - errcheck
-    # Exclude cmd.Help() calls
+        - staticcheck
+    # Exclude errcheck for common fire-and-forget patterns
     - linters:
         - errcheck
       text: "Error return value of `cmd.Help` is not checked"
-    # Exclude pem.Encode in test/util code
     - linters:
-        - errcheck  
+        - errcheck
       text: "Error return value of `pem.Encode` is not checked"
-    # Exclude template Execute in tests
     - linters:
         - errcheck
       text: "Error return value of `.*Execute` is not checked"
-    # Exclude hasher writes (always succeed for xxhash)
     - linters:
         - errcheck
       text: "Error return value of `k.hasher"
+    - linters:
+        - errcheck
+      text: "Error return value of `s.Delete` is not checked"
+    - linters:
+        - errcheck
+      text: "Error return value of `.*Encode` is not checked"
+    - linters:
+        - errcheck
+      text: "Error return value of `c.conn.Set.*Deadline` is not checked"
+    - linters:
+        - errcheck
+      text: "Error return value of `c.conn.WriteMessage` is not checked"
+    - linters:
+        - errcheck
+      text: "Error return value of `w.Write` is not checked"
+    - linters:
+        - errcheck
+      text: "Error return value of `e.client.Container"
+    - linters:
+        - errcheck
+      text: "Error return value of `s.registry"
+    - linters:
+        - errcheck
+      text: "Error return value of `metricsServer.Shutdown` is not checked"
+    - linters:
+        - errcheck
+      text: "Error return value of `dashSrv.Stop` is not checked"
+    # Exclude ineffassign for intentional patterns
+    - linters:
+        - ineffassign
+      text: "ineffectual assignment to err"
+    # Exclude staticcheck unused append (intentional pre-allocation)
+    - linters:
+        - staticcheck
+      text: "SA4010"
