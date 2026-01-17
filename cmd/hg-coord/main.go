@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	coordserver "github.com/h3nr1-d14z/hybridgrid/internal/coordinator/server"
+	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/dashboard"
 )
 
@@ -46,6 +47,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			grpcPort, _ := cmd.Flags().GetInt("grpc-port")
 			httpPort, _ := cmd.Flags().GetInt("http-port")
 			token, _ := cmd.Flags().GetString("token")
+			noMdns, _ := cmd.Flags().GetBool("no-mdns")
 
 			log.Info().
 				Int("grpc_port", grpcPort).
@@ -85,9 +87,33 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 
 			log.Info().Int("port", httpPort).Msg("Dashboard server started")
 
+			// Start mDNS announcer (unless disabled)
+			var mdnsAnnouncer *mdns.CoordAnnouncer
+			if !noMdns {
+				hostname, _ := os.Hostname()
+				mdnsAnnouncer = mdns.NewCoordAnnouncer(mdns.CoordAnnouncerConfig{
+					Instance:   fmt.Sprintf("hg-coord-%s", hostname),
+					GRPCPort:   grpcPort,
+					HTTPPort:   httpPort,
+					Version:    version,
+					InstanceID: fmt.Sprintf("%s-%d", hostname, os.Getpid()),
+				})
+
+				if err := mdnsAnnouncer.Start(); err != nil {
+					log.Warn().Err(err).Msg("Failed to start mDNS announcer (continuing without)")
+				} else {
+					log.Info().
+						Str("service", mdns.CoordServiceType).
+						Msg("Coordinator discoverable via mDNS")
+				}
+			}
+
 			select {
 			case sig := <-sigCh:
 				log.Info().Str("signal", sig.String()).Msg("Received shutdown signal")
+				if mdnsAnnouncer != nil {
+					mdnsAnnouncer.Stop()
+				}
 				dashSrv.Stop()
 				srv.Stop()
 				return nil
@@ -101,6 +127,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 	serveCmd.Flags().Int("http-port", 8080, "HTTP/Dashboard port")
 	serveCmd.Flags().String("config", "", "Path to config file")
 	serveCmd.Flags().String("token", "", "Authentication token")
+	serveCmd.Flags().Bool("no-mdns", false, "Disable mDNS advertisement")
 
 	rootCmd.AddCommand(versionCmd, serveCmd)
 

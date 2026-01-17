@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
+	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
 	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/client"
 	workerserver "github.com/h3nr1-d14z/hybridgrid/internal/worker/server"
 )
@@ -53,10 +54,24 @@ It executes build tasks received from the coordinator.`,
 			httpPort, _ := cmd.Flags().GetInt("http-port")
 			token, _ := cmd.Flags().GetString("token")
 			maxParallel, _ := cmd.Flags().GetInt("max-parallel")
+			discoveryTimeout, _ := cmd.Flags().GetDuration("discovery-timeout")
 
+			// Resolve coordinator address
 			if coordinator == "" {
-				// TODO: Implement mDNS auto-discovery
-				return fmt.Errorf("coordinator address required (auto-discovery not implemented)")
+				log.Info().Dur("timeout", discoveryTimeout).Msg("No coordinator specified, trying mDNS discovery")
+
+				browser := mdns.NewCoordBrowser(mdns.CoordBrowserConfig{
+					Timeout: discoveryTimeout,
+				})
+
+				// Check for env var fallback
+				envCoord := os.Getenv("HG_COORDINATOR")
+
+				coordAddr, err := browser.DiscoverWithFallback(context.Background(), envCoord)
+				if err != nil {
+					return fmt.Errorf("coordinator discovery failed: %w\n\nHint: start coordinator with mDNS enabled, or specify --coordinator flag, or set HG_COORDINATOR env var", err)
+				}
+				coordinator = coordAddr
 			}
 
 			if maxParallel == 0 {
@@ -181,10 +196,11 @@ It executes build tasks received from the coordinator.`,
 
 	serveCmd.Flags().Int("port", 50052, "Worker gRPC port")
 	serveCmd.Flags().Int("http-port", 9090, "Worker HTTP/metrics port")
-	serveCmd.Flags().String("coordinator", "", "Coordinator address (empty for auto-discovery)")
+	serveCmd.Flags().String("coordinator", "", "Coordinator address (empty for mDNS auto-discovery)")
 	serveCmd.Flags().String("config", "", "Path to config file")
 	serveCmd.Flags().String("token", "", "Authentication token")
 	serveCmd.Flags().Int("max-parallel", 0, "Max parallel tasks (0 = auto)")
+	serveCmd.Flags().Duration("discovery-timeout", 10*time.Second, "mDNS discovery timeout")
 
 	rootCmd.AddCommand(versionCmd, serveCmd)
 

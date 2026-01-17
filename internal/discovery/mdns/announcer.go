@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/grandcat/zeroconf"
 	"github.com/rs/zerolog/log"
@@ -12,12 +13,14 @@ import (
 )
 
 const (
-	ServiceType = "_hybridgrid._tcp"
-	Domain      = "local."
+	ServiceType      = "_hybridgrid._tcp"
+	CoordServiceType = "_hybridgrid-coord._tcp"
+	Domain           = "local."
 )
 
 // Announcer advertises a worker via mDNS.
 type Announcer struct {
+	mu       sync.Mutex
 	server   *zeroconf.Server
 	instance string
 	port     int
@@ -39,6 +42,9 @@ func NewAnnouncer(cfg AnnouncerConfig) *Announcer {
 
 // Start begins advertising the worker service via mDNS.
 func (a *Announcer) Start(caps *pb.WorkerCapabilities) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
 	if a.server != nil {
 		return fmt.Errorf("announcer already started")
 	}
@@ -77,6 +83,9 @@ func (a *Announcer) Start(caps *pb.WorkerCapabilities) error {
 
 // Stop stops advertising the worker service.
 func (a *Announcer) Stop() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
 	if a.server != nil {
 		a.server.Shutdown()
 		a.server = nil
@@ -142,4 +151,93 @@ func ParseTXTRecords(txt []string) map[string]string {
 		}
 	}
 	return result
+}
+
+// CoordAnnouncerConfig holds coordinator announcer configuration.
+type CoordAnnouncerConfig struct {
+	Instance   string // e.g., "coord-hostname"
+	GRPCPort   int
+	HTTPPort   int
+	Version    string
+	InstanceID string // unique ID for this coordinator instance
+}
+
+// CoordAnnouncer advertises a coordinator via mDNS.
+type CoordAnnouncer struct {
+	mu     sync.Mutex
+	server *zeroconf.Server
+	cfg    CoordAnnouncerConfig
+}
+
+// NewCoordAnnouncer creates a new coordinator mDNS announcer.
+func NewCoordAnnouncer(cfg CoordAnnouncerConfig) *CoordAnnouncer {
+	return &CoordAnnouncer{cfg: cfg}
+}
+
+// Start begins advertising the coordinator service via mDNS.
+func (a *CoordAnnouncer) Start() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.server != nil {
+		return fmt.Errorf("coordinator announcer already started")
+	}
+
+	txt := a.buildTXTRecords()
+
+	log.Debug().
+		Str("instance", a.cfg.Instance).
+		Int("grpc_port", a.cfg.GRPCPort).
+		Int("http_port", a.cfg.HTTPPort).
+		Strs("txt", txt).
+		Msg("Starting coordinator mDNS announcer")
+
+	server, err := zeroconf.Register(
+		a.cfg.Instance,
+		CoordServiceType,
+		Domain,
+		a.cfg.GRPCPort,
+		txt,
+		nil, // all interfaces
+	)
+	if err != nil {
+		return fmt.Errorf("failed to register coordinator mDNS: %w", err)
+	}
+
+	a.server = server
+
+	log.Info().
+		Str("instance", a.cfg.Instance).
+		Str("service", CoordServiceType).
+		Int("grpc_port", a.cfg.GRPCPort).
+		Msg("Coordinator mDNS announcer started")
+
+	return nil
+}
+
+// buildTXTRecords creates TXT records for coordinator.
+func (a *CoordAnnouncer) buildTXTRecords() []string {
+	txt := []string{
+		"grpc_port=" + strconv.Itoa(a.cfg.GRPCPort),
+		"http_port=" + strconv.Itoa(a.cfg.HTTPPort),
+	}
+	if a.cfg.Version != "" {
+		txt = append(txt, "version="+a.cfg.Version)
+	}
+	if a.cfg.InstanceID != "" {
+		txt = append(txt, "instance_id="+a.cfg.InstanceID)
+	}
+	return txt
+}
+
+// Stop stops advertising the coordinator service.
+func (a *CoordAnnouncer) Stop() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.server != nil {
+		a.server.Shutdown()
+		a.server = nil
+		log.Info().Str("instance", a.cfg.Instance).Msg("Coordinator mDNS announcer stopped")
+	}
 }
