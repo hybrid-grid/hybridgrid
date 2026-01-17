@@ -1,5 +1,8 @@
 # Binaries
 bin/
+hg-coord
+hg-worker
+hgbuild
 *.exe
 *.exe~
 *.dll
