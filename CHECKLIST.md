@@ -17,30 +17,30 @@
 ### CLI (hgbuild)
 - [x] Cobra CLI structure
 - [x] Basic command parsing
-- [ ] `build` command (submit build job)
-- [ ] `status` command (check job status)
-- [ ] `workers` command (list workers)
-- [ ] `cache` command (cache management)
+- [x] `build` command (submit build job)
+- [x] `status` command (check job status)
+- [x] `workers` command (list workers)
+- [x] `cache` command (cache management)
 
 ### Configuration
 - [x] Config file loading (YAML)
 - [x] Environment variable support
+- [x] Default config generation (WriteExample)
 - [ ] Config validation
-- [ ] Default config generation
 
 ### Compiler Parser
 - [x] GCC/Clang argument parsing
 - [x] Input/output file detection
 - [x] Flag extraction
-- [ ] Include path handling
-- [ ] Preprocessor integration
+- [x] Include path handling (-I flags)
+- [x] Preprocessor detection (-E flag)
 
 ### Cache
 - [x] Content-addressable store (xxhash)
 - [x] Key generation from compiler args
 - [x] Put/Get operations
 - [x] Size tracking
-- [ ] LRU eviction
+- [x] LRU eviction (evictIfNeeded)
 - [ ] Distributed cache sync
 
 ### Capability Detection
@@ -86,7 +86,7 @@
 - [x] Thread-safe announcer with mutex protection
 - [x] mDNS unit tests (90%+ coverage on new code)
 
-### WAN Registry (Deferred to Phase 4)
+### WAN Registry
 - [ ] HTTP registration endpoint
 - [ ] HTTP heartbeat endpoint
 - [ ] HTTP worker list endpoint
@@ -149,8 +149,8 @@
 - [x] Stats cards (tasks, cache hit rate, workers)
 - [x] Real-time event feed
 - [x] StatsProvider interface for coordinator
-- [ ] Task queue view (future)
-- [ ] Build history (future)
+- [ ] Task queue view
+- [ ] Build history
 
 ### TLS/Security
 - [x] TLS configuration (config.go)
@@ -165,7 +165,7 @@
 
 ### Logging
 - [x] Structured logging (zerolog)
-- [ ] Log levels configuration
+- [ ] Log levels runtime configuration
 - [ ] Request ID tracing
 - [ ] Log rotation
 
@@ -184,7 +184,7 @@
 - [x] Load testing script (test/load/load_test.go)
 - [x] Chaos testing script (test/chaos/chaos_test.go)
 - [x] Network partition tests (in chaos suite)
-- [ ] 80% overall coverage (currently ~70% for tested packages)
+- [ ] 80% overall coverage (currently ~70%)
 
 ### Documentation
 - [x] README.md
@@ -202,8 +202,8 @@
 - [x] CI/CD pipeline - GitHub Actions (ci.yml, docker.yml, release.yml)
 
 ### Release
-- [ ] Version tagging
-- [ ] Changelog
+- [x] Version tagging (v0.1.0)
+- [ ] Changelog (CHANGELOG.md)
 - [x] Binary releases (goreleaser) - .goreleaser.yaml configured
 - [ ] Homebrew formula
 
@@ -213,12 +213,13 @@
 
 | Phase | Status | Progress |
 |-------|--------|----------|
-| Phase 1 | ✅ Complete | 29/35 tasks |
+| Phase 1 | ✅ Complete | 34/35 tasks |
 | Phase 2 | ✅ Complete | 17/17 tasks |
 | Phase 3 | ✅ Complete | 32/36 tasks |
 | Phase 4 | ✅ Complete | 19/22 tasks |
-| Phase 5 | ⏳ In Progress | 14/25 tasks |
+| Phase 5 | ⏳ In Progress | 15/24 tasks |
 
-**Overall:** ~111/135 tasks (~82%)
+**Overall:** ~117/134 tasks (~87%)
 **Tests:** 170+ passing (19 packages)
-**Last Update:** 2026-01-17 - mDNS auto-discovery complete
+**Coverage:** ~70% average (target 80%)
+**Last Update:** 2026-01-17 - Full audit completed
