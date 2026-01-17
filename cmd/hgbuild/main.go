@@ -2,13 +2,17 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cache"
 	"github.com/h3nr1-d14z/hybridgrid/internal/config"
 	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/client"
@@ -178,9 +182,12 @@ func newWorkersCmd() *cobra.Command {
 
 func newBuildCmd() *cobra.Command {
 	var (
-		buildType string
-		output    string
-		compiler  string
+		buildType  string
+		output     string
+		compiler   string
+		compArgs   []string
+		verbose    bool
+		targetArch string
 	)
 
 	cmd := &cobra.Command{
@@ -189,39 +196,164 @@ func newBuildCmd() *cobra.Command {
 		Long: `Submit source files for distributed compilation.
 
 Examples:
-  hgbuild build main.c            Compile single file
-  hgbuild build *.c -o myapp      Compile multiple files
-  hgbuild build --type=cpp src/   Compile directory`,
+  hgbuild build main.c                    Compile single file
+  hgbuild build main.c -o main.o          Compile with output name
+  hgbuild build -c gcc main.c -- -O2      Compile with compiler args
+  hgbuild build *.c -o myapp              Compile multiple files`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := client.New(client.Config{
 				Address:  coordinator,
 				Insecure: insecure,
-				Timeout:  timeout,
+				Timeout:  5 * time.Minute, // Builds take longer
 			})
 			if err != nil {
 				return fmt.Errorf("failed to connect: %w", err)
 			}
 			defer c.Close()
 
-			fmt.Printf("Submitting build job to %s...\n", coordinator)
-			fmt.Printf("Files: %v\n", args)
-			fmt.Printf("Type:  %s\n", buildType)
+			// Process each file
+			successCount := 0
+			failCount := 0
 
-			// TODO: Implement actual build submission
-			// For now, show that the command structure works
-			fmt.Println("\nBuild submission not fully implemented yet.")
-			fmt.Println("Use hg-coord and hg-worker directly for compilation.")
+			for _, file := range args {
+				// Read source file
+				source, err := os.ReadFile(file)
+				if err != nil {
+					fmt.Printf("Error reading %s: %v\n", file, err)
+					failCount++
+					continue
+				}
 
+				// Detect compiler if not specified
+				comp := compiler
+				if comp == "" {
+					comp = detectCompiler(file)
+				}
+
+				// Generate task ID
+				taskID := generateTaskID()
+
+				// Determine output file
+				outFile := output
+				if outFile == "" {
+					outFile = strings.TrimSuffix(file, filepath.Ext(file)) + ".o"
+				}
+
+				// Parse target architecture
+				arch := parseArch(targetArch)
+
+				if verbose {
+					fmt.Printf("Compiling %s → %s (compiler: %s)\n", file, outFile, comp)
+				} else {
+					fmt.Printf("Compiling %s...", file)
+				}
+
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+
+				// Create compile request
+				req := &pb.CompileRequest{
+					TaskId:             taskID,
+					Compiler:           comp,
+					CompilerArgs:       compArgs,
+					PreprocessedSource: source,
+					TargetArch:         arch,
+					TimeoutSeconds:     300,
+				}
+
+				// Send to coordinator
+				start := time.Now()
+				resp, err := c.Compile(ctx, req)
+				cancel()
+
+				if err != nil {
+					fmt.Printf(" FAILED (%v)\n", err)
+					failCount++
+					continue
+				}
+
+				if resp.Status == pb.TaskStatus_STATUS_COMPLETED {
+					// Write output file
+					if err := os.WriteFile(outFile, resp.ObjectFile, 0644); err != nil {
+						fmt.Printf(" FAILED (write error: %v)\n", err)
+						failCount++
+						continue
+					}
+
+					duration := time.Since(start)
+					if verbose {
+						fmt.Printf(" OK (%.2fs, %d bytes, queue: %dms, compile: %dms)\n",
+							duration.Seconds(), len(resp.ObjectFile),
+							resp.QueueTimeMs, resp.CompilationTimeMs)
+					} else {
+						fmt.Printf(" OK (%.2fs)\n", duration.Seconds())
+					}
+					successCount++
+				} else {
+					fmt.Printf(" FAILED (exit %d)\n", resp.ExitCode)
+					if resp.Stderr != "" {
+						fmt.Printf("  stderr: %s\n", resp.Stderr)
+					}
+					failCount++
+				}
+			}
+
+			// Summary
+			fmt.Printf("\nResults: %d succeeded, %d failed\n", successCount, failCount)
+
+			if failCount > 0 {
+				return fmt.Errorf("%d files failed to compile", failCount)
+			}
 			return nil
 		},
 	}
 
 	cmd.Flags().StringVarP(&buildType, "type", "t", "cpp", "build type (cpp, flutter, unity, rust, go)")
-	cmd.Flags().StringVarP(&output, "output", "o", "", "output file/directory")
+	cmd.Flags().StringVarP(&output, "output", "o", "", "output file (for single file builds)")
 	cmd.Flags().StringVar(&compiler, "compiler", "", "compiler to use (auto-detect if empty)")
+	cmd.Flags().StringSliceVar(&compArgs, "args", nil, "compiler arguments")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
+	cmd.Flags().StringVar(&targetArch, "arch", "", "target architecture (x86_64, arm64)")
 
 	return cmd
+}
+
+// detectCompiler returns an appropriate compiler based on file extension.
+func detectCompiler(file string) string {
+	ext := strings.ToLower(filepath.Ext(file))
+	switch ext {
+	case ".c":
+		return "gcc"
+	case ".cpp", ".cc", ".cxx":
+		return "g++"
+	case ".m":
+		return "clang"
+	case ".mm":
+		return "clang++"
+	default:
+		return "gcc"
+	}
+}
+
+// generateTaskID creates a unique task identifier.
+func generateTaskID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return fmt.Sprintf("task-%s-%d", hex.EncodeToString(b), time.Now().UnixNano()%10000)
+}
+
+// parseArch converts architecture string to proto enum.
+func parseArch(arch string) pb.Architecture {
+	switch strings.ToLower(arch) {
+	case "x86_64", "amd64", "x64":
+		return pb.Architecture_ARCH_X86_64
+	case "arm64", "aarch64":
+		return pb.Architecture_ARCH_ARM64
+	case "arm", "armv7":
+		return pb.Architecture_ARCH_ARMV7
+	default:
+		return pb.Architecture_ARCH_UNSPECIFIED
+	}
 }
 
 func newConfigCmd() *cobra.Command {
