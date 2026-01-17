@@ -100,12 +100,12 @@ jobs:
         uses: securego/gosec@master
         with:
           # G104: Unhandled errors (intentional fire-and-forget)
-          # G109: Integer overflow (bounded by protocol)
+          # G109/G115: Integer overflow (bounded by protocol, worker counts)
           # G112: Slowloris (internal metrics server)
           # G204: Subprocess with variable input (build system executes compilers)
           # G301/G304/G306: File permissions (build artifacts need read access)
           # G402: TLS InsecureSkipVerify (configurable option)
-          args: -exclude=G104,G109,G112,G204,G301,G304,G306,G402 -exclude-dir=gen -exclude-dir=test ./...
+          args: -exclude=G104,G109,G112,G115,G204,G301,G304,G306,G402 -exclude-dir=gen -exclude-dir=test ./...
 
       - name: Run govulncheck
         run: |
