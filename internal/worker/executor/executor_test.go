@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -282,6 +283,10 @@ int main() { return add(1, 2); }`)
 	t.Log("Starting Docker compilation with dockcross/linux-x64...")
 	result, err := dockerExec.Execute(ctx, req)
 	if err != nil {
+		// Skip if image not available (common in CI)
+		if strings.Contains(err.Error(), "No such image") {
+			t.Skipf("Docker image not available: %v", err)
+		}
 		t.Fatalf("Docker executor failed: %v", err)
 	}
 
@@ -329,6 +334,10 @@ func TestDockerExecutor_CompileError(t *testing.T) {
 
 	result, err := dockerExec.Execute(ctx, req)
 	if err != nil {
+		// Skip if image not available (common in CI)
+		if strings.Contains(err.Error(), "No such image") {
+			t.Skipf("Docker image not available: %v", err)
+		}
 		t.Fatalf("Docker executor returned error: %v", err)
 	}
 

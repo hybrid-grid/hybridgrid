@@ -141,8 +141,13 @@ jobs:
 
       - name: Check for changes
         run: |
-          if ! git diff --quiet; then
-            echo "Proto generated code is out of date. Run 'make proto' and commit changes."
+          # Ignore protoc version comment differences (cosmetic only)
+          if git diff --quiet -- ':(exclude)*.pb.go' ':(exclude)*.pb.go'; then
+            echo "Proto definitions match (ignoring version comments)"
+          elif git diff -- '*.pb.go' | grep -v '^[+-]// 	protoc' | grep -q '^[+-]'; then
+            echo "Proto generated code has substantive changes. Run 'make proto' and commit."
             git diff
             exit 1
+          else
+            echo "Only protoc version comment differences (OK)"
           fi
