@@ -1,0 +1,150 @@
+# Hybrid-Grid Build - GoReleaser Configuration
+# Documentation: https://goreleaser.com
+
+version: 2
+
+project_name: hybridgrid
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  # hg-coord: Coordinator server
+  - id: hg-coord
+    main: ./cmd/hg-coord
+    binary: hg-coord
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.buildTime={{.Date}}
+
+  # hg-worker: Worker agent
+  - id: hg-worker
+    main: ./cmd/hg-worker
+    binary: hg-worker
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.buildTime={{.Date}}
+
+  # hgbuild: CLI tool
+  - id: hgbuild
+    main: ./cmd/hgbuild
+    binary: hgbuild
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.buildTime={{.Date}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE*
+      - README*
+      - CHANGELOG*
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: "Features"
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: "Bug Fixes"
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: "Performance"
+      regexp: "^.*perf[(\\w)]*:+.*$"
+      order: 2
+    - title: "Others"
+      order: 999
+
+release:
+  github:
+    owner: h3nr1-d14z
+    name: hybridgrid
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## Hybrid-Grid Build {{ .Tag }}
+
+    ### Installation
+
+    **macOS (Homebrew)**
+    ```bash
+    brew install h3nr1-d14z/tap/hybridgrid
+    ```
+
+    **Linux/macOS (Binary)**
+    ```bash
+    curl -sSL https://github.com/h3nr1-d14z/hybridgrid/releases/latest/download/hybridgrid_{{ .Version }}_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m).tar.gz | tar xz
+    ```
+
+    **Docker**
+    ```bash
+    docker pull ghcr.io/h3nr1-d14z/hybridgrid/hg-coord:{{ .Version }}
+    docker pull ghcr.io/h3nr1-d14z/hybridgrid/hg-worker:{{ .Version }}
+    ```
+
+# Homebrew tap (optional - requires separate tap repo)
+# brews:
+#   - repository:
+#       owner: h3nr1-d14z
+#       name: homebrew-tap
+#     homepage: https://github.com/h3nr1-d14z/hybridgrid
+#     description: Distributed multi-platform build system
+#     license: MIT
+#     install: |
+#       bin.install "hg-coord"
+#       bin.install "hg-worker"
+#       bin.install "hgbuild"

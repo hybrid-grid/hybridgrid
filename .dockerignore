@@ -1,0 +1,59 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# Build artifacts
+bin/
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+coverage.out
+coverage.html
+*.test
+*.prof
+
+# Documentation (not needed in image)
+docs/
+*.md
+!README.md
+
+# CI/CD configs
+.github/
+.gitlab-ci.yml
+.travis.yml
+Jenkinsfile
+Makefile
+
+# Docker files (avoid recursive)
+Dockerfile*
+docker-compose*.yml
+.docker/
+
+# GoReleaser
+.goreleaser.yaml
+.goreleaser.yml
+
+# Misc
+.env
+.env.*
+*.log
+tmp/
+temp/
+
+# Plans/Research
+plans/
+
+# Test data (large files)
+testdata/large/

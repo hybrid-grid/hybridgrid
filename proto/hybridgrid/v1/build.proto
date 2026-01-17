@@ -1,0 +1,369 @@
+syntax = "proto3";
+
+package hybridgrid.v1;
+
+option go_package = "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1;hybridgridv1";
+
+// ============================================================
+// Enums
+// ============================================================
+
+enum Architecture {
+  ARCH_UNSPECIFIED = 0;
+  ARCH_X86_64 = 1;
+  ARCH_ARM64 = 2;
+  ARCH_ARMV7 = 3;
+}
+
+enum BuildType {
+  BUILD_TYPE_UNSPECIFIED = 0;
+  BUILD_TYPE_CPP = 1;
+  BUILD_TYPE_FLUTTER = 2;
+  BUILD_TYPE_UNITY = 3;
+  BUILD_TYPE_COCOS = 4;
+  BUILD_TYPE_RUST = 5;
+  BUILD_TYPE_GO = 6;
+  BUILD_TYPE_NODEJS = 7;
+}
+
+enum TargetPlatform {
+  PLATFORM_UNSPECIFIED = 0;
+  PLATFORM_ANDROID = 1;
+  PLATFORM_IOS = 2;
+  PLATFORM_WEB = 3;
+  PLATFORM_WINDOWS = 4;
+  PLATFORM_LINUX = 5;
+  PLATFORM_MACOS = 6;
+  PLATFORM_WEBGL = 7;
+}
+
+enum TaskStatus {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_QUEUED = 1;
+  STATUS_RUNNING = 2;
+  STATUS_COMPLETED = 3;
+  STATUS_FAILED = 4;
+  STATUS_TIMEOUT = 5;
+}
+
+// ============================================================
+// Build Configs (per build type)
+// ============================================================
+
+message CppConfig {
+  string compiler = 1;              // gcc, g++, clang, clang++
+  repeated string flags = 2;
+  Architecture target_arch = 3;
+  string cmake_options = 4;
+}
+
+message FlutterConfig {
+  string flutter_version = 1;
+  string build_mode = 2;            // debug, profile, release
+  string flavor = 3;
+  map<string, string> dart_defines = 4;
+}
+
+message UnityConfig {
+  string unity_version = 1;
+  string build_method = 2;          // e.g., "BuildScript.Build"
+  string scripting_backend = 3;     // mono, il2cpp
+  map<string, string> extra_args = 4;
+}
+
+message CocosConfig {
+  string cocos_version = 1;
+  string build_mode = 2;            // debug, release
+  map<string, string> platform_options = 3;
+}
+
+message RustConfig {
+  string toolchain = 1;             // stable, nightly, beta
+  string target = 2;                // e.g., aarch64-linux-android
+  repeated string features = 3;
+  bool release = 4;
+}
+
+message GoConfig {
+  string go_version = 1;
+  string goos = 2;
+  string goarch = 3;
+  repeated string build_tags = 4;
+  map<string, string> ldflags = 5;
+}
+
+message NodeConfig {
+  string node_version = 1;
+  string package_manager = 2;       // npm, yarn, pnpm
+  string build_script = 3;          // e.g., "build", "build:prod"
+  map<string, string> env_vars = 4;
+}
+
+// ============================================================
+// Worker Capabilities
+// ============================================================
+
+message CppCapability {
+  repeated string compilers = 1;    // [gcc, clang]
+  bool cross_compile = 2;
+  repeated string docker_images = 3;
+}
+
+message FlutterCapability {
+  string sdk_version = 1;
+  repeated TargetPlatform platforms = 2;
+  bool android_sdk = 3;
+  bool xcode_available = 4;
+}
+
+message UnityCapability {
+  repeated string versions = 1;
+  string license_type = 2;          // pro, personal
+  repeated TargetPlatform build_targets = 3;
+}
+
+message CocosCapability {
+  repeated string versions = 1;
+  repeated TargetPlatform platforms = 2;
+}
+
+message RustCapability {
+  repeated string toolchains = 1;
+  repeated string targets = 2;
+}
+
+message GoCapability {
+  string version = 1;
+  bool cross_compile = 2;
+}
+
+message NodeCapability {
+  repeated string versions = 1;
+  repeated string package_managers = 2;
+}
+
+message WorkerCapabilities {
+  string worker_id = 1;
+  string hostname = 2;
+  int32 cpu_cores = 3;
+  int64 memory_bytes = 4;
+  int64 disk_space_bytes = 5;
+  Architecture native_arch = 6;
+  string os = 7;                    // linux, darwin, windows
+  bool docker_available = 8;
+  repeated string docker_images = 9;
+  int32 max_parallel_tasks = 10;
+  string version = 11;
+
+  // Multi-platform capabilities
+  CppCapability cpp = 20;
+  FlutterCapability flutter = 21;
+  UnityCapability unity = 22;
+  CocosCapability cocos = 23;
+  RustCapability rust = 24;
+  GoCapability go = 25;
+  NodeCapability nodejs = 26;
+}
+
+// ============================================================
+// Worker Registration
+// ============================================================
+
+message HandshakeRequest {
+  WorkerCapabilities capabilities = 1;
+  string auth_token = 2;
+  string worker_address = 3;        // Worker's gRPC address (host:port)
+}
+
+message HandshakeResponse {
+  bool accepted = 1;
+  string message = 2;
+  string assigned_worker_id = 3;
+  int32 heartbeat_interval_seconds = 4;
+}
+
+// ============================================================
+// Build Request/Response (Generic Multi-Platform)
+// ============================================================
+
+message BuildRequest {
+  // Task identification
+  string task_id = 1;
+  string source_hash = 2;
+
+  // Build type and target
+  BuildType build_type = 3;
+  TargetPlatform target_platform = 4;
+
+  // Source data (tar.zst compressed project files)
+  bytes source_archive = 5;
+
+  // Type-specific configuration (oneof)
+  oneof config {
+    CppConfig cpp_config = 10;
+    FlutterConfig flutter_config = 11;
+    UnityConfig unity_config = 12;
+    CocosConfig cocos_config = 13;
+    RustConfig rust_config = 14;
+    GoConfig go_config = 15;
+    NodeConfig node_config = 16;
+  }
+
+  // Optional overrides
+  string docker_image = 20;         // Override default image
+  int32 timeout_seconds = 21;       // Override default timeout
+  int32 priority = 22;              // Task priority (0-100)
+}
+
+message ArtifactInfo {
+  string name = 1;                  // e.g., "app-release.apk"
+  string path = 2;                  // Path within archive
+  int64 size_bytes = 3;
+  string checksum = 4;              // SHA256
+}
+
+message BuildResponse {
+  // Result
+  TaskStatus status = 1;
+
+  // Output artifacts (tar.zst compressed)
+  bytes artifacts = 2;
+
+  // Artifact metadata
+  repeated ArtifactInfo artifact_list = 3;
+
+  // Diagnostics
+  int32 exit_code = 4;
+  string stdout = 5;
+  string stderr = 6;
+
+  // Metrics
+  int64 build_time_ms = 7;
+  int64 queue_time_ms = 8;
+  string worker_id = 9;
+  bool from_cache = 10;
+}
+
+// ============================================================
+// Streaming Build (for large projects >10MB)
+// ============================================================
+
+message BuildChunk {
+  oneof payload {
+    BuildMetadata metadata = 1;
+    bytes source_chunk = 2;
+  }
+}
+
+message BuildMetadata {
+  string task_id = 1;
+  string source_hash = 2;
+  BuildType build_type = 3;
+  TargetPlatform target_platform = 4;
+  int64 total_size_bytes = 5;
+  string config_json = 6;           // Config as JSON for flexibility
+  string docker_image = 7;
+}
+
+// ============================================================
+// Legacy C/C++ Compilation (backward compatibility)
+// ============================================================
+
+message CompileRequest {
+  string task_id = 1;
+  string source_hash = 2;
+  bytes preprocessed_source = 3;
+  repeated string compiler_args = 4;
+  string compiler = 5;
+  string compiler_version = 6;
+  Architecture target_arch = 7;
+  string docker_image = 8;
+  int32 timeout_seconds = 9;
+}
+
+message CompileResponse {
+  TaskStatus status = 1;
+  bytes object_file = 2;
+  int32 exit_code = 3;
+  string stdout = 4;
+  string stderr = 5;
+  int64 compilation_time_ms = 6;
+  int64 queue_time_ms = 7;
+  string worker_id = 8;
+  bool from_cache = 9;
+}
+
+// ============================================================
+// Health & Status
+// ============================================================
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool healthy = 1;
+  int32 active_tasks = 2;
+  int32 queued_tasks = 3;
+  float cpu_usage_percent = 4;
+  float memory_usage_percent = 5;
+  int64 uptime_seconds = 6;
+}
+
+message WorkerStatusRequest {}
+
+message WorkerStatusResponse {
+  message WorkerInfo {
+    string worker_id = 1;
+    string host = 2;
+    int32 port = 3;
+    Architecture native_arch = 4;
+    int32 cpu_cores = 5;
+    int64 memory_bytes = 6;
+    int32 active_tasks = 7;
+    int64 total_tasks_completed = 8;
+    float avg_latency_ms = 9;
+    string circuit_state = 10;      // CLOSED, HALF_OPEN, OPEN
+    string discovery_source = 11;   // LAN, WAN
+    int64 last_heartbeat_unix = 12;
+  }
+
+  repeated WorkerInfo workers = 1;
+  int32 total_workers = 2;
+  int32 healthy_workers = 3;
+}
+
+message WorkersForBuildRequest {
+  BuildType build_type = 1;
+  TargetPlatform target_platform = 2;
+}
+
+message WorkersForBuildResponse {
+  repeated string worker_ids = 1;
+  int32 available_count = 2;
+}
+
+// ============================================================
+// Service Definition
+// ============================================================
+
+service BuildService {
+  // Worker registration (Worker → Coordinator)
+  rpc Handshake(HandshakeRequest) returns (HandshakeResponse);
+
+  // Generic build (Multi-Platform)
+  rpc Build(BuildRequest) returns (BuildResponse);
+
+  // Streaming build for large projects (>10MB)
+  rpc StreamBuild(stream BuildChunk) returns (BuildResponse);
+
+  // Legacy C/C++ compilation (backward compatibility)
+  rpc Compile(CompileRequest) returns (CompileResponse);
+
+  // Health check
+  rpc HealthCheck(HealthRequest) returns (HealthResponse);
+
+  // Worker status (Client → Coordinator)
+  rpc GetWorkerStatus(WorkerStatusRequest) returns (WorkerStatusResponse);
+
+  // Query workers by capability
+  rpc GetWorkersForBuild(WorkersForBuildRequest) returns (WorkersForBuildResponse);
+}

@@ -1,0 +1,101 @@
+# Hybrid-Grid Build - Development Environment
+# Usage: docker compose up -d
+# Scale workers: docker compose up -d --scale worker=3
+#
+# NOTE: Uses alpine-based all-in-one image for development (has wget for healthcheck)
+# Production deployments should use scratch-based images (hg-coord, hg-worker targets)
+
+services:
+  coordinator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: all-in-one  # Alpine-based for dev (has wget)
+      args:
+        VERSION: dev
+        COMMIT: local
+        BUILD_TIME: ${BUILD_TIME:-unknown}
+    container_name: hg-coordinator
+    command: ["/usr/local/bin/hg-coord", "serve", "--grpc-port=9000", "--http-port=8080"]
+    ports:
+      - "9000:9000"   # gRPC
+      - "8080:8080"   # HTTP dashboard + metrics
+    environment:
+      - HG_LOG_LEVEL=debug
+      - HG_HEARTBEAT_TTL=30s
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - hybridgrid
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: all-in-one  # Alpine-based for dev (has wget)
+      args:
+        VERSION: dev
+        COMMIT: local
+        BUILD_TIME: ${BUILD_TIME:-unknown}
+    command: ["/usr/local/bin/hg-worker", "serve", "--grpc-port=50052", "--http-port=9090", "--coordinator=coordinator:9000"]
+    deploy:
+      replicas: 2
+    environment:
+      - HG_LOG_LEVEL=debug
+      - HG_MAX_CONCURRENT_TASKS=4
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:9090/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    networks:
+      - hybridgrid
+    restart: unless-stopped
+
+networks:
+  hybridgrid:
+    driver: bridge
+
+# Optional: Prometheus + Grafana for monitoring
+# Uncomment to enable full observability stack
+#
+# prometheus:
+#   image: prom/prometheus:v2.48.0
+#   container_name: hg-prometheus
+#   ports:
+#     - "9091:9090"
+#   volumes:
+#     - ./configs/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+#   command:
+#     - '--config.file=/etc/prometheus/prometheus.yml'
+#     - '--storage.tsdb.path=/prometheus'
+#   networks:
+#     - hybridgrid
+#   depends_on:
+#     - coordinator
+#
+# grafana:
+#   image: grafana/grafana:10.2.2
+#   container_name: hg-grafana
+#   ports:
+#     - "3000:3000"
+#   environment:
+#     - GF_SECURITY_ADMIN_PASSWORD=admin
+#   volumes:
+#     - grafana-data:/var/lib/grafana
+#   networks:
+#     - hybridgrid
+#   depends_on:
+#     - prometheus
+#
+# volumes:
+#   grafana-data:
