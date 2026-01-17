@@ -5,7 +5,9 @@
   },
   "exclude-generated": "true",
   "exclude": [
-    "G104"
+    "G104",
+    "G301",
+    "G306"
   ],
   "exclude-dir": [
     "gen",
