@@ -1,0 +1,135 @@
+# Stress test setup for hybridgrid on M1 Mac Air
+# Simulates distributed compilation with resource-limited workers
+
+services:
+  # Coordinator - lightweight, just schedules tasks
+  coordinator:
+    build:
+      context: ../..
+      dockerfile: test/stress/Dockerfile.base
+    command: hg-coord serve --grpc-port=9000 --http-port=8080
+    ports:
+      - "9000:9000"
+      - "8080:8080"
+    networks:
+      - hgnet
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  # Workers - resource limited to simulate slower machines
+  worker-1:
+    build:
+      context: ../..
+      dockerfile: test/stress/Dockerfile.base
+    command: hg-worker serve --coordinator=coordinator:9000 --port=50051
+    networks:
+      - hgnet
+    depends_on:
+      - coordinator
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  worker-2:
+    build:
+      context: ../..
+      dockerfile: test/stress/Dockerfile.base
+    command: hg-worker serve --coordinator=coordinator:9000 --port=50051
+    networks:
+      - hgnet
+    depends_on:
+      - coordinator
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  worker-3:
+    build:
+      context: ../..
+      dockerfile: test/stress/Dockerfile.base
+    command: hg-worker serve --coordinator=coordinator:9000 --port=50051
+    networks:
+      - hgnet
+    depends_on:
+      - coordinator
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  worker-4:
+    build:
+      context: ../..
+      dockerfile: test/stress/Dockerfile.base
+    command: hg-worker serve --coordinator=coordinator:9000 --port=50051
+    networks:
+      - hgnet
+    depends_on:
+      - coordinator
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  worker-5:
+    build:
+      context: ../..
+      dockerfile: test/stress/Dockerfile.base
+    command: hg-worker serve --coordinator=coordinator:9000 --port=50051
+    networks:
+      - hgnet
+    depends_on:
+      - coordinator
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # Builder - where we run hgbuild make
+  builder:
+    build:
+      context: ../..
+      dockerfile: test/stress/Dockerfile.base
+    command: sleep infinity
+    environment:
+      - HG_COORDINATOR=coordinator:9000
+    networks:
+      - hgnet
+    depends_on:
+      - coordinator
+      - worker-1
+      - worker-2
+      - worker-3
+      - worker-4
+      - worker-5
+    volumes:
+      - build-cache:/root/.hybridgrid/cache
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    stdin_open: true
+    tty: true
+
+networks:
+  hgnet:
+    driver: bridge
+
+volumes:
+  build-cache:

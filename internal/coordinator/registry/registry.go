@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog/log"
+
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 )
 
@@ -190,12 +192,19 @@ func (r *InMemoryRegistry) ListByCapability(buildType pb.BuildType, arch pb.Arch
 // matchesCapability checks if worker capabilities match the requirements.
 func (r *InMemoryRegistry) matchesCapability(caps *pb.WorkerCapabilities, buildType pb.BuildType, arch pb.Architecture) bool {
 	if caps == nil {
+		log.Debug().Msg("matchesCapability: caps is nil")
 		return false
 	}
 
 	// Check architecture
 	if arch != pb.Architecture_ARCH_UNSPECIFIED {
 		if caps.NativeArch != arch && !caps.DockerAvailable {
+			log.Debug().
+				Str("worker", caps.WorkerId).
+				Str("native_arch", caps.NativeArch.String()).
+				Str("requested_arch", arch.String()).
+				Bool("docker_available", caps.DockerAvailable).
+				Msg("matchesCapability: architecture mismatch")
 			return false
 		}
 	}
@@ -203,9 +212,18 @@ func (r *InMemoryRegistry) matchesCapability(caps *pb.WorkerCapabilities, buildT
 	// Check build type support
 	switch buildType {
 	case pb.BuildType_BUILD_TYPE_CPP:
-		if caps.Cpp == nil || len(caps.Cpp.Compilers) == 0 {
+		hasCpp := caps.Cpp != nil && len(caps.Cpp.Compilers) > 0
+		if !hasCpp {
+			log.Debug().
+				Str("worker", caps.WorkerId).
+				Bool("cpp_nil", caps.Cpp == nil).
+				Msg("matchesCapability: no C++ capability")
 			return false
 		}
+		log.Debug().
+			Str("worker", caps.WorkerId).
+			Strs("compilers", caps.Cpp.Compilers).
+			Msg("matchesCapability: C++ capability found")
 	case pb.BuildType_BUILD_TYPE_GO:
 		if caps.Go == nil {
 			return false

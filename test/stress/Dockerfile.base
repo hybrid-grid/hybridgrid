@@ -1,0 +1,54 @@
+# Base image with build tools and hybridgrid binaries
+FROM golang:1.24-bookworm AS builder
+
+ENV GOTOOLCHAIN=auto
+
+WORKDIR /src
+COPY . .
+RUN go build -o /bin/hg-coord ./cmd/hg-coord && \
+    go build -o /bin/hg-worker ./cmd/hg-worker && \
+    go build -o /bin/hgbuild ./cmd/hgbuild
+
+# Runtime image with build tools
+FROM debian:bookworm-slim
+
+# Install build essentials
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    g++ \
+    make \
+    autoconf \
+    automake \
+    libtool \
+    pkg-config \
+    git \
+    curl \
+    ca-certificates \
+    bc \
+    procps \
+    libssl-dev \
+    zlib1g-dev \
+    libffi-dev \
+    libbz2-dev \
+    libreadline-dev \
+    libsqlite3-dev \
+    libncurses5-dev \
+    libgdbm-dev \
+    libnss3-dev \
+    liblzma-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy binaries
+COPY --from=builder /bin/hg-coord /usr/local/bin/
+COPY --from=builder /bin/hg-worker /usr/local/bin/
+COPY --from=builder /bin/hgbuild /usr/local/bin/
+
+# Create cache directory
+RUN mkdir -p /root/.hybridgrid/cache
+
+WORKDIR /workspace
+
+# Copy test script
+COPY test/stress/run-test.sh /workspace/run-test.sh
+RUN chmod +x /workspace/run-test.sh

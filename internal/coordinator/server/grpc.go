@@ -140,10 +140,19 @@ func (s *Server) Handshake(ctx context.Context, req *pb.HandshakeRequest) (*pb.H
 		}
 	}
 
+	// Log C++ capabilities for debugging
+	var compilers []string
+	if req.Capabilities.Cpp != nil {
+		compilers = req.Capabilities.Cpp.Compilers
+	}
+
 	log.Info().
 		Str("worker_id", workerID).
 		Str("hostname", req.Capabilities.Hostname).
 		Int32("cpu_cores", req.Capabilities.CpuCores).
+		Str("arch", req.Capabilities.NativeArch.String()).
+		Strs("cpp_compilers", compilers).
+		Bool("docker", req.Capabilities.DockerAvailable).
 		Msg("Worker registered")
 
 	return &pb.HandshakeResponse{

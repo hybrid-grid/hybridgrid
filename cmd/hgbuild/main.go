@@ -6,15 +6,22 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cache"
+	"github.com/h3nr1-d14z/hybridgrid/internal/cli/build"
+	"github.com/h3nr1-d14z/hybridgrid/internal/compiler"
 	"github.com/h3nr1-d14z/hybridgrid/internal/config"
+	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
 	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/client"
 )
 
@@ -24,9 +31,14 @@ var (
 	coordinator string
 	insecure    bool
 	timeout     time.Duration
+	verbose     bool
 )
 
 func main() {
+	// Configure logging
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+
 	rootCmd := &cobra.Command{
 		Use:   "hgbuild",
 		Short: "Hybrid-Grid Build - Distributed multi-platform build system",
@@ -34,10 +46,16 @@ func main() {
 It intercepts compiler commands and distributes them to remote workers.
 
 Quick start:
+  hgbuild make -j8            Wrap make with distributed compilation
+  hgbuild cc -c main.c        Compile C file (drop-in gcc replacement)
+  hgbuild c++ -c main.cpp     Compile C++ file (drop-in g++ replacement)
   hgbuild status              Check coordinator status
   hgbuild workers             List available workers
-  hgbuild build <file>        Submit a build job
-  hgbuild cache stats         View cache statistics`,
+
+Environment:
+  HG_COORDINATOR    Coordinator address (default: auto-discover via mDNS)
+  HG_CC             C compiler to use (default: gcc)
+  HG_CXX            C++ compiler to use (default: g++)`,
 		Run: func(cmd *cobra.Command, args []string) {
 			cmd.Help()
 		},
@@ -45,9 +63,10 @@ Quick start:
 
 	// Global flags
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file (default: ~/.hybridgrid/config.yaml)")
-	rootCmd.PersistentFlags().StringVarP(&coordinator, "coordinator", "C", "localhost:50051", "coordinator address")
+	rootCmd.PersistentFlags().StringVarP(&coordinator, "coordinator", "C", "", "coordinator address (auto-discover if empty)")
 	rootCmd.PersistentFlags().BoolVar(&insecure, "insecure", true, "use insecure connection")
 	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 10*time.Second, "connection timeout")
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 
 	// Commands
 	rootCmd.AddCommand(
@@ -57,6 +76,13 @@ Quick start:
 		newBuildCmd(),
 		newConfigCmd(),
 		newCacheCmd(),
+		// Compiler wrappers
+		newCCCmd(),
+		newCXXCmd(),
+		// Build wrappers
+		newMakeCmd(),
+		newNinjaCmd(),
+		newWrapCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -354,6 +380,22 @@ func parseArch(arch string) pb.Architecture {
 		return pb.Architecture_ARCH_ARM64
 	case "arm", "armv7":
 		return pb.Architecture_ARCH_ARMV7
+	case "":
+		// Default to local architecture
+		return getLocalArch()
+	default:
+		return pb.Architecture_ARCH_UNSPECIFIED
+	}
+}
+
+func getLocalArch() pb.Architecture {
+	switch runtime.GOARCH {
+	case "amd64":
+		return pb.Architecture_ARCH_X86_64
+	case "arm64":
+		return pb.Architecture_ARCH_ARM64
+	case "arm":
+		return pb.Architecture_ARCH_ARMV7
 	default:
 		return pb.Architecture_ARCH_UNSPECIFIED
 	}
@@ -493,4 +535,368 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max-3] + "..."
+}
+
+// =============================================================================
+// Compiler Wrappers (cc, c++)
+// =============================================================================
+
+func newCCCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:                "cc [flags] [files...]",
+		Short:              "C compiler wrapper (drop-in gcc replacement)",
+		Long: `Distributed C compiler wrapper. Use as a drop-in replacement for gcc.
+
+Examples:
+  hgbuild cc -c main.c -o main.o
+  CC="hgbuild cc" make
+  CC="hgbuild cc" cmake --build .`,
+		DisableFlagParsing: true,
+		SilenceUsage:       true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCompiler("gcc", "HG_CC", args)
+		},
+	}
+}
+
+func newCXXCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:                "c++ [flags] [files...]",
+		Short:              "C++ compiler wrapper (drop-in g++ replacement)",
+		Long: `Distributed C++ compiler wrapper. Use as a drop-in replacement for g++.
+
+Examples:
+  hgbuild c++ -c main.cpp -o main.o
+  CXX="hgbuild c++" make
+  CXX="hgbuild c++" cmake --build .`,
+		DisableFlagParsing: true,
+		SilenceUsage:       true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCompiler("g++", "HG_CXX", args)
+		},
+	}
+}
+
+// filterHgbuildFlags removes hgbuild-specific flags from compiler arguments.
+// These flags are parsed by hgbuild but should not be passed to the compiler.
+func filterHgbuildFlags(args []string) []string {
+	var filtered []string
+	skipNext := false
+
+	for i, arg := range args {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+
+		// Skip hgbuild-specific flags
+		switch {
+		case arg == "--coordinator" || arg == "-C":
+			skipNext = true // skip next arg (the value)
+			continue
+		case strings.HasPrefix(arg, "--coordinator="):
+			continue
+		case arg == "--config" || arg == "-c":
+			// Note: -c is also compiler flag for compile-only, but we only skip
+			// if next arg looks like a file path
+			if i+1 < len(args) && (strings.HasSuffix(args[i+1], ".yaml") || strings.HasSuffix(args[i+1], ".yml")) {
+				skipNext = true
+				continue
+			}
+		case strings.HasPrefix(arg, "--config="):
+			continue
+		case arg == "--timeout":
+			skipNext = true
+			continue
+		case strings.HasPrefix(arg, "--timeout="):
+			continue
+		case arg == "--insecure":
+			continue
+		case arg == "--verbose" || arg == "-v":
+			// Set verbose flag and skip
+			verbose = true
+			continue
+		}
+
+		filtered = append(filtered, arg)
+	}
+
+	return filtered
+}
+
+// runCompiler handles distributed compilation for cc/c++ commands.
+func runCompiler(defaultCompiler, envVar string, args []string) error {
+	// Filter out hgbuild-specific flags from compiler args
+	compilerArgs := filterHgbuildFlags(args)
+
+	// Determine compiler from env or default
+	comp := os.Getenv(envVar)
+	if comp == "" {
+		comp = defaultCompiler
+	}
+
+	// Parse arguments
+	fullArgs := append([]string{comp}, compilerArgs...)
+	parsed := compiler.Parse(fullArgs)
+
+	if parsed == nil {
+		return fmt.Errorf("failed to parse compiler arguments")
+	}
+
+	// Check if this is distributable
+	if !parsed.IsDistributable() {
+		// Run locally for linking, preprocessing-only, etc.
+		if verbose {
+			fmt.Fprintf(os.Stderr, "[local] Non-distributable: %s\n", strings.Join(fullArgs, " "))
+		}
+		return runLocalCompiler(comp, compilerArgs)
+	}
+
+	// Get coordinator address (auto-discover if not specified)
+	coordAddr := getCoordinatorAddress()
+	if coordAddr == "" {
+		// No coordinator available, run locally
+		if verbose {
+			fmt.Fprintf(os.Stderr, "[local] No coordinator available\n")
+		} else {
+			fmt.Fprintln(os.Stderr, "Warning: coordinator not available, compiling locally")
+		}
+		return runLocalCompiler(comp, compilerArgs)
+	}
+
+	// Create build service with defaults
+	cfg := build.DefaultConfig()
+	cfg.CoordinatorAddr = coordAddr
+	cfg.Insecure = insecure
+	cfg.Timeout = 5 * time.Minute
+	cfg.FallbackEnabled = true
+	cfg.Verbose = verbose
+
+	svc, err := build.New(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create build service: %w", err)
+	}
+	defer svc.Close()
+
+	// Connect to coordinator
+	clientCfg := client.Config{
+		Address:  coordAddr,
+		Insecure: insecure,
+		Timeout:  timeout,
+	}
+	c, err := client.New(clientCfg)
+	if err != nil {
+		// Fallback to local
+		if verbose {
+			fmt.Fprintf(os.Stderr, "[local] Connection failed: %v\n", err)
+		} else {
+			fmt.Fprintln(os.Stderr, "Warning: coordinator not available, compiling locally")
+		}
+		return runLocalCompiler(comp, compilerArgs)
+	}
+	svc.SetClient(c)
+
+	// Determine output file
+	outputFile := parsed.OutputFile
+	if outputFile == "" && len(parsed.InputFiles) > 0 {
+		// Default: replace extension with .o
+		base := strings.TrimSuffix(parsed.InputFiles[0], filepath.Ext(parsed.InputFiles[0]))
+		outputFile = base + ".o"
+	}
+
+	// Build request
+	req := &build.Request{
+		TaskID:     generateTaskID(),
+		SourceFile: parsed.InputFiles[0],
+		OutputFile: outputFile,
+		Args:       parsed,
+		TargetArch: parseArch(parsed.TargetArch),
+		Timeout:    5 * time.Minute,
+	}
+
+	ctx := context.Background()
+	result, err := svc.Build(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	// Check exit code
+	if result.ExitCode != 0 {
+		if result.Stderr != "" {
+			fmt.Fprint(os.Stderr, result.Stderr)
+		}
+		os.Exit(result.ExitCode)
+	}
+
+	// Write output file
+	if err := os.WriteFile(outputFile, result.ObjectFile, 0644); err != nil {
+		return fmt.Errorf("failed to write output: %w", err)
+	}
+
+	// Print status
+	if verbose {
+		status := "[remote]"
+		if result.CacheHit {
+			status = "[cache]"
+		} else if result.Fallback {
+			status = "[local]"
+		}
+		fmt.Fprintf(os.Stderr, "%s %s -> %s (%.2fs)\n",
+			status, parsed.InputFiles[0], outputFile, result.Duration.Seconds())
+	}
+
+	return nil
+}
+
+// runLocalCompiler runs the compiler locally (for non-distributable operations).
+func runLocalCompiler(compiler string, args []string) error {
+	cmd := exec.Command(compiler, args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// getCoordinatorAddress gets the coordinator address from flags, env, or mDNS.
+func getCoordinatorAddress() string {
+	// 1. Check command-line flag
+	if coordinator != "" {
+		return coordinator
+	}
+
+	// 2. Check environment variable
+	if addr := os.Getenv("HG_COORDINATOR"); addr != "" {
+		return addr
+	}
+
+	// 3. Try mDNS auto-discovery
+	browser := mdns.NewCoordBrowser(mdns.CoordBrowserConfig{
+		Timeout: 3 * time.Second,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	coord, err := browser.Discover(ctx)
+	if err == nil && coord != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "[mdns] Discovered coordinator at %s\n", coord.Address)
+		}
+		return coord.Address
+	}
+
+	return ""
+}
+
+// =============================================================================
+// Build Wrappers (make, ninja, wrap)
+// =============================================================================
+
+func newMakeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:                "make [make-args...]",
+		Short:              "Run make with distributed compilation",
+		Long: `Wrap make with distributed compilation by setting CC/CXX automatically.
+
+Examples:
+  hgbuild make
+  hgbuild make -j8
+  hgbuild make clean all`,
+		DisableFlagParsing: true,
+		SilenceUsage:       true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return wrapBuildCommand("make", args)
+		},
+	}
+}
+
+func newNinjaCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:                "ninja [ninja-args...]",
+		Short:              "Run ninja with distributed compilation",
+		Long: `Wrap ninja with distributed compilation by setting CC/CXX automatically.
+
+Examples:
+  hgbuild ninja
+  hgbuild ninja -j8`,
+		DisableFlagParsing: true,
+		SilenceUsage:       true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return wrapBuildCommand("ninja", args)
+		},
+	}
+}
+
+func newWrapCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:                "wrap <command> [args...]",
+		Short:              "Wrap any build command with distributed compilation",
+		Long: `Wrap any build command with distributed compilation.
+Sets CC and CXX to use hgbuild for distributed compilation.
+
+Examples:
+  hgbuild wrap cmake --build .
+  hgbuild wrap ./build.sh`,
+		DisableFlagParsing: true,
+		SilenceUsage:       true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return fmt.Errorf("no command specified")
+			}
+			return wrapBuildCommand(args[0], args[1:])
+		},
+	}
+}
+
+// wrapBuildCommand wraps a build command with CC/CXX set to hgbuild.
+func wrapBuildCommand(command string, args []string) error {
+	// Find our own executable
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to find hgbuild executable: %w", err)
+	}
+
+	// Build environment
+	env := os.Environ()
+
+	// Set CC and CXX to use hgbuild
+	env = setEnv(env, "CC", self+" cc")
+	env = setEnv(env, "CXX", self+" c++")
+
+	// Pass through coordinator address if specified
+	if coordinator != "" {
+		env = setEnv(env, "HG_COORDINATOR", coordinator)
+	}
+
+	// Pass through verbose flag
+	if verbose {
+		env = setEnv(env, "HG_VERBOSE", "1")
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "[wrap] CC=%s cc\n", self)
+		fmt.Fprintf(os.Stderr, "[wrap] CXX=%s c++\n", self)
+		fmt.Fprintf(os.Stderr, "[wrap] Running: %s %s\n", command, strings.Join(args, " "))
+	}
+
+	// Execute wrapped command
+	cmd := exec.Command(command, args...)
+	cmd.Env = env
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
+}
+
+// setEnv sets an environment variable in the env slice.
+func setEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
 }

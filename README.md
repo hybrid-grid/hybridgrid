@@ -35,7 +35,23 @@ Hybrid-Grid distributes compilation tasks across multiple machines on your LAN (
 
 ## Quick Start
 
-### Using Docker Compose (Recommended)
+### Zero-Config C/C++ Compilation
+
+```bash
+# On coordinator machine
+hg-coord serve
+
+# On worker machines (auto-discovers coordinator via mDNS)
+hg-worker serve
+
+# Compile your project - just prefix with 'hgbuild'
+hgbuild make -j8            # Wraps make, distributes compilation
+hgbuild ninja               # Wraps ninja
+hgbuild cc -c main.c        # Direct gcc replacement
+hgbuild c++ -c main.cpp     # Direct g++ replacement
+```
+
+### Using Docker Compose
 
 ```bash
 # Start coordinator + 2 workers
@@ -57,8 +73,116 @@ hg-coord serve --grpc-port=9000 --http-port=8080
 # Start workers (on each machine)
 hg-worker serve --coordinator=coordinator-host:9000
 
-# Submit a build
-hgbuild build -c gcc main.c -o main
+# If hostname resolution is problematic, use --advertise-address
+hg-worker serve --coordinator=coordinator-host:9000 --advertise-address=192.168.1.50:50052
+
+# Compile with distributed compilation
+hgbuild make -j8
+```
+
+## C/C++ Compilation
+
+### How It Works
+
+```
+hgbuild make
+    │
+    ├─► Sets CC="hgbuild cc", CXX="hgbuild c++"
+    │
+    └─► make invokes hgbuild cc/c++ for each file
+            │
+            ├─► 1. Parse compiler args
+            ├─► 2. Check local cache → hit? return immediately
+            ├─► 3. Preprocess locally (gcc -E)
+            ├─► 4. Send to coordinator → worker compiles
+            ├─► 5. If coordinator down → compile locally (fallback)
+            └─► 6. Store result in cache
+```
+
+### Using with Make
+
+```bash
+# Simple usage
+hgbuild make
+
+# Parallel build
+hgbuild make -j8
+
+# With custom target
+hgbuild make clean all
+
+# Verbose output (shows [remote]/[local]/[cache] per file)
+hgbuild -v make -j4
+```
+
+### Using with CMake
+
+```bash
+# Configure
+mkdir build && cd build
+cmake ..
+
+# Build with hgbuild
+hgbuild make -j8
+
+# Or use ninja
+cmake -G Ninja ..
+hgbuild ninja
+```
+
+### Using with Autotools
+
+```bash
+./configure
+hgbuild make -j8
+```
+
+### Direct Compiler Replacement
+
+```bash
+# Use as drop-in gcc/g++ replacement
+hgbuild cc -c main.c -o main.o
+hgbuild c++ -c main.cpp -o main.o -std=c++17
+
+# All gcc/g++ flags work
+hgbuild cc -O2 -Wall -I/usr/include -DDEBUG -c src.c
+```
+
+### Environment Variables
+
+```bash
+# Override coordinator address
+export HG_COORDINATOR=192.168.1.100:9000
+
+# Override compiler
+export HG_CC=clang
+export HG_CXX=clang++
+
+# Then use normally
+hgbuild make -j8
+```
+
+### Output Modes
+
+With `-v` (verbose), you see the status per file:
+
+```
+[cache]  main.c → main.o (0.01s)
+[remote] utils.c → utils.o (1.23s, worker-1)
+[local]  config.c → config.o (2.45s, fallback)
+```
+
+### Local Fallback
+
+When coordinator is unavailable, hgbuild automatically falls back to local compilation:
+
+```
+Warning: coordinator not available, compiling locally
+```
+
+To disable fallback (fail if no coordinator):
+```bash
+hgbuild --no-fallback make
 ```
 
 ## Installation
@@ -117,6 +241,53 @@ tls:
 ```
 
 See [Configuration Reference](docs/configuration.md) for all options.
+
+## Troubleshooting
+
+### "no workers match requirements"
+
+Workers may not be matching for C++ builds if:
+1. Worker hasn't registered C++ capabilities (check gcc/g++/clang in PATH on worker)
+2. Worker's heartbeat expired (coordinator TTL is 60s by default)
+3. Architecture mismatch and Docker not available
+
+Check coordinator logs:
+```bash
+# Should see: cpp_compilers=["gcc","g++","clang","clang++"]
+tail -f /tmp/coord.log | grep -i worker
+```
+
+### Worker not reachable from coordinator
+
+If coordinator can't connect back to worker:
+```bash
+# Use explicit advertise address
+hg-worker serve --coordinator=coord:9000 --advertise-address=192.168.1.50:50052
+```
+
+### Compilation falls back to local
+
+Reasons for local fallback:
+- Coordinator not available (check `hg-coord serve` is running)
+- Worker timeout (increase with `--timeout`)
+- Network issues between coordinator and worker
+
+Use verbose mode to diagnose:
+```bash
+hgbuild -v make -j4
+```
+
+### Cache not working
+
+Check cache directory permissions:
+```bash
+ls -la ~/.hybridgrid/cache
+```
+
+Clear cache:
+```bash
+hgbuild cache clear
+```
 
 ## Documentation
 

@@ -55,6 +55,7 @@ It executes build tasks received from the coordinator.`,
 			token, _ := cmd.Flags().GetString("token")
 			maxParallel, _ := cmd.Flags().GetInt("max-parallel")
 			discoveryTimeout, _ := cmd.Flags().GetDuration("discovery-timeout")
+			advertiseAddr, _ := cmd.Flags().GetString("advertise-address")
 
 			// Resolve coordinator address
 			if coordinator == "" {
@@ -110,11 +111,17 @@ It executes build tasks received from the coordinator.`,
 			}
 			defer cli.Close()
 
+			// Determine worker address to advertise
+			workerAddr := advertiseAddr
+			if workerAddr == "" {
+				workerAddr = fmt.Sprintf("%s:%d", hostname, port)
+			}
+
 			// Register with coordinator
 			regReq := &pb.HandshakeRequest{
 				Capabilities:  caps,
 				AuthToken:     token,
-				WorkerAddress: fmt.Sprintf("%s:%d", hostname, port),
+				WorkerAddress: workerAddr,
 			}
 			resp, err := cli.Handshake(context.Background(), regReq)
 			if err != nil {
@@ -159,7 +166,7 @@ It executes build tasks received from the coordinator.`,
 				}
 			}()
 
-			// Start heartbeat loop
+			// Start heartbeat loop using Handshake to update registry
 			heartbeatInterval := time.Duration(resp.HeartbeatIntervalSeconds) * time.Second
 			go func() {
 				ticker := time.NewTicker(heartbeatInterval)
@@ -168,11 +175,12 @@ It executes build tasks received from the coordinator.`,
 				for {
 					select {
 					case <-ticker.C:
-						hResp, err := cli.HealthCheck(context.Background())
+						// Re-send handshake to update heartbeat in coordinator registry
+						hResp, err := cli.Handshake(context.Background(), regReq)
 						if err != nil {
 							log.Warn().Err(err).Msg("Heartbeat failed")
 						} else {
-							log.Debug().Bool("healthy", hResp.Healthy).Msg("Heartbeat sent")
+							log.Debug().Bool("accepted", hResp.Accepted).Msg("Heartbeat sent")
 						}
 					case <-sigCh:
 						return
@@ -197,6 +205,7 @@ It executes build tasks received from the coordinator.`,
 	serveCmd.Flags().Int("port", 50052, "Worker gRPC port")
 	serveCmd.Flags().Int("http-port", 9090, "Worker HTTP/metrics port")
 	serveCmd.Flags().String("coordinator", "", "Coordinator address (empty for mDNS auto-discovery)")
+	serveCmd.Flags().String("advertise-address", "", "Address to advertise to coordinator (default: hostname:port)")
 	serveCmd.Flags().String("config", "", "Path to config file")
 	serveCmd.Flags().String("token", "", "Authentication token")
 	serveCmd.Flags().Int("max-parallel", 0, "Max parallel tasks (0 = auto)")
