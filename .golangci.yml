@@ -1,0 +1,45 @@
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - gosimple
+    - ineffassign
+  disable:
+    - typecheck
+
+linters-settings:
+  errcheck:
+    exclude-functions:
+      - (io.Closer).Close
+      - (*os.File).Close
+      - (net.Conn).Close
+      - (*google.golang.org/grpc.ClientConn).Close
+
+issues:
+  exclude-rules:
+    # Exclude errcheck in test files
+    - path: _test\.go
+      linters:
+        - errcheck
+    # Exclude cmd.Help() calls
+    - linters:
+        - errcheck
+      text: "Error return value of `cmd.Help` is not checked"
+    # Exclude pem.Encode in test/util code
+    - linters:
+        - errcheck  
+      text: "Error return value of `pem.Encode` is not checked"
+    # Exclude template Execute in tests
+    - linters:
+        - errcheck
+      text: "Error return value of `.*Execute` is not checked"
+    # Exclude hasher writes (always succeed for xxhash)
+    - linters:
+        - errcheck
+      text: "Error return value of `k.hasher"
