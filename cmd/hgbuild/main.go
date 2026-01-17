@@ -338,7 +338,10 @@ func detectCompiler(file string) string {
 // generateTaskID creates a unique task identifier.
 func generateTaskID() string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp-only if crypto/rand fails
+		return fmt.Sprintf("task-%d", time.Now().UnixNano())
+	}
 	return fmt.Sprintf("task-%s-%d", hex.EncodeToString(b), time.Now().UnixNano()%10000)
 }
 
