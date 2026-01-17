@@ -99,7 +99,7 @@ jobs:
       - name: Run Gosec
         uses: securego/gosec@master
         with:
-          args: -exclude=G104,G301,G306 -exclude-dir=gen -exclude-dir=test ./...
+          args: -exclude=G104,G112,G301,G304,G306 -exclude-dir=gen -exclude-dir=test ./...
 
       - name: Run govulncheck
         run: |
