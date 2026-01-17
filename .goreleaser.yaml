@@ -110,7 +110,7 @@ changelog:
 
 release:
   github:
-    owner: h3nr1-d14z
+    owner: hybrid-grid
     name: hybridgrid
   draft: false
   prerelease: auto
@@ -122,29 +122,32 @@ release:
 
     **macOS (Homebrew)**
     ```bash
-    brew install h3nr1-d14z/tap/hybridgrid
+    brew tap hybrid-grid/tap
+    brew install hybridgrid
     ```
 
     **Linux/macOS (Binary)**
     ```bash
-    curl -sSL https://github.com/h3nr1-d14z/hybridgrid/releases/latest/download/hybridgrid_{{ .Version }}_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m).tar.gz | tar xz
+    curl -sSL https://github.com/hybrid-grid/hybridgrid/releases/latest/download/hybridgrid_{{ .Version }}_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m).tar.gz | tar xz
     ```
 
     **Docker**
     ```bash
-    docker pull ghcr.io/h3nr1-d14z/hybridgrid/hg-coord:{{ .Version }}
-    docker pull ghcr.io/h3nr1-d14z/hybridgrid/hg-worker:{{ .Version }}
+    docker pull ghcr.io/hybrid-grid/hg-coord:{{ .Version }}
+    docker pull ghcr.io/hybrid-grid/hg-worker:{{ .Version }}
     ```
 
-# Homebrew tap (optional - requires separate tap repo)
-# brews:
-#   - repository:
-#       owner: h3nr1-d14z
-#       name: homebrew-tap
-#     homepage: https://github.com/h3nr1-d14z/hybridgrid
-#     description: Distributed multi-platform build system
-#     license: MIT
-#     install: |
-#       bin.install "hg-coord"
-#       bin.install "hg-worker"
-#       bin.install "hgbuild"
+brews:
+  - repository:
+      owner: hybrid-grid
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/hybrid-grid/hybridgrid
+    description: Distributed multi-platform build system
+    license: MIT
+    install: |
+      bin.install "hg-coord"
+      bin.install "hg-worker"
+      bin.install "hgbuild"
+    test: |
+      system "#{bin}/hgbuild", "version"
