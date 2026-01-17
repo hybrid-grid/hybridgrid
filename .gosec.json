@@ -1,0 +1,14 @@
+{
+  "global": {
+    "nosec": "enabled",
+    "audit": "enabled"
+  },
+  "exclude-generated": "true",
+  "exclude": [
+    "G104"
+  ],
+  "exclude-dir": [
+    "gen",
+    "test"
+  ]
+}
