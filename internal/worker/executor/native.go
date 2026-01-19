@@ -42,17 +42,27 @@ func (e *NativeExecutor) Execute(ctx context.Context, req *Request) (*Result, er
 	}
 	defer os.RemoveAll(workDir)
 
-	// Write preprocessed source to temp file
-	srcFile := filepath.Join(workDir, "source.i")
-	if err := os.WriteFile(srcFile, req.PreprocessedSource, 0644); err != nil {
-		return nil, fmt.Errorf("failed to write source: %w", err)
-	}
+	var srcFile string
+	var args []string
 
 	// Determine output file path
 	outFile := filepath.Join(workDir, "output.o")
 
-	// Build command arguments
-	args := e.buildArgs(req.Args, srcFile, outFile)
+	// Check if using raw source mode (cross-compilation) or preprocessed mode
+	if len(req.RawSource) > 0 {
+		// Mode 2: Raw source - need to set up includes and compile from scratch
+		srcFile, args, err = e.setupRawSourceMode(workDir, req, outFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to setup raw source: %w", err)
+		}
+	} else {
+		// Mode 1: Preprocessed source (legacy)
+		srcFile = filepath.Join(workDir, "source.i")
+		if err := os.WriteFile(srcFile, req.PreprocessedSource, 0644); err != nil {
+			return nil, fmt.Errorf("failed to write source: %w", err)
+		}
+		args = e.buildArgs(req.Args, srcFile, outFile)
+	}
 
 	// Create command with context for timeout
 	cmd := exec.CommandContext(ctx, req.Compiler, args...)
@@ -165,4 +175,76 @@ func isInputFile(arg string) bool {
 		return true
 	}
 	return false
+}
+
+// setupRawSourceMode sets up the working directory for raw source compilation.
+// This mode is used for cross-compilation where source is not preprocessed.
+func (e *NativeExecutor) setupRawSourceMode(workDir string, req *Request, outFile string) (string, []string, error) {
+	// Determine source filename
+	srcFilename := req.SourceFilename
+	if srcFilename == "" {
+		srcFilename = "source.c" // Default to C
+	}
+
+	// Create includes directory
+	includesDir := filepath.Join(workDir, "includes")
+	if err := os.MkdirAll(includesDir, 0755); err != nil {
+		return "", nil, fmt.Errorf("failed to create includes dir: %w", err)
+	}
+
+	// Write bundled include files
+	for path, content := range req.IncludeFiles {
+		// Create subdirectories as needed
+		fullPath := filepath.Join(includesDir, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			return "", nil, fmt.Errorf("failed to create include dir for %s: %w", path, err)
+		}
+		if err := os.WriteFile(fullPath, content, 0644); err != nil {
+			return "", nil, fmt.Errorf("failed to write include %s: %w", path, err)
+		}
+	}
+
+	// Write source file
+	srcFile := filepath.Join(workDir, srcFilename)
+	if err := os.WriteFile(srcFile, req.RawSource, 0644); err != nil {
+		return "", nil, fmt.Errorf("failed to write source: %w", err)
+	}
+
+	// Build arguments
+	args := make([]string, 0, len(req.Args)+10)
+
+	// Add compile-only flag
+	args = append(args, "-c")
+
+	// Add bundled includes directory first (highest priority)
+	if len(req.IncludeFiles) > 0 {
+		args = append(args, "-I"+includesDir)
+	}
+
+	// Add original arguments (skip -c, -o, input files, and -I paths we'll handle)
+	skipNext := false
+	for _, arg := range req.Args {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		switch {
+		case arg == "-c":
+			// Already added
+		case arg == "-o":
+			skipNext = true // Skip output file
+		case isInputFile(arg):
+			// Skip input files
+		default:
+			args = append(args, arg)
+		}
+	}
+
+	// Add source file
+	args = append(args, srcFile)
+
+	// Add output file
+	args = append(args, "-o", outFile)
+
+	return srcFile, args, nil
 }

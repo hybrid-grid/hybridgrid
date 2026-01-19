@@ -1,6 +1,6 @@
 # Hybrid-Grid Build - Feature Checklist
 
-**Last Updated:** 2026-01-17
+**Last Updated:** 2026-01-18
 
 ## Phase 1: Foundation ✅
 
@@ -41,6 +41,7 @@
 - [x] Put/Get operations
 - [x] Size tracking
 - [x] LRU eviction (evictIfNeeded)
+- [x] Cache hit reporting to coordinator (ReportCacheHit RPC)
 - [ ] Distributed cache sync
 
 ### Capability Detection
@@ -56,6 +57,8 @@
 - [x] Worker gRPC server (`hg-worker`)
 - [x] Native executor (direct gcc/clang)
 - [x] Docker executor (dockcross images)
+- [x] Cross-compilation support (raw source mode)
+- [x] OS-aware worker selection (preprocessed mode)
 - [x] Compilation timeout handling
 - [x] Concurrency limiting
 - [x] Task metrics tracking
@@ -213,13 +216,40 @@
 
 | Phase | Status | Progress |
 |-------|--------|----------|
-| Phase 1 | ✅ Complete | 34/35 tasks |
-| Phase 2 | ✅ Complete | 17/17 tasks |
+| Phase 1 | ✅ Complete | 35/36 tasks |
+| Phase 2 | ✅ Complete | 19/19 tasks |
 | Phase 3 | ✅ Complete | 32/36 tasks |
 | Phase 4 | ✅ Complete | 19/22 tasks |
 | Phase 5 | ⏳ In Progress | 15/24 tasks |
 
-**Overall:** ~117/134 tasks (~87%)
+**Overall:** ~120/137 tasks (~88%)
 **Tests:** 170+ passing (19 packages)
 **Coverage:** ~70% average (target 80%)
-**Last Update:** 2026-01-17 - Full audit completed
+**Last Update:** 2026-01-18 - v0.1.0 Release
+
+---
+
+## v0.1.0 Release Notes
+
+### What's Working
+- ✅ **C/C++ Distributed Compilation** - Production ready
+- ✅ **Cross-Compilation** - Mac/Linux/Windows workers can compile for each other
+- ✅ **mDNS Auto-Discovery** - Zero-config LAN setup
+- ✅ **Local Cache** - xxhash-based, ~10x speedup on hits
+- ✅ **Cache Dashboard Stats** - Real-time cache hit reporting
+- ✅ **P2C Scheduler** - Smart worker selection with scoring
+- ✅ **Circuit Breaker** - Per-worker fault tolerance
+- ✅ **Web Dashboard** - Real-time stats at :8080
+- ✅ **Local Fallback** - Auto compile locally when coordinator unavailable
+
+### What's NOT Working Yet
+- ❌ Flutter/Unity/Rust/Go/Node builds (C/C++ only)
+- ❌ WAN Registry (LAN only via mDNS)
+- ❌ Kubernetes/Helm deployments
+- ❌ Distributed cache sync between nodes
+
+### Tested Platforms
+- macOS ARM64 (Coordinator + Worker)
+- Raspberry Pi ARM64 (Worker)
+- Windows x86_64 via WSL (Worker)
+- Ubuntu x86_64 (Worker via Docker)

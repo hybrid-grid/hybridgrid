@@ -192,13 +192,16 @@
 
                 async fetchInitialData() {
                     try {
-                        const [statsRes, workersRes] = await Promise.all([
+                        const [statsRes, workersRes, eventsRes] = await Promise.all([
                             fetch('/api/v1/stats'),
-                            fetch('/api/v1/workers')
+                            fetch('/api/v1/workers'),
+                            fetch('/api/v1/events')
                         ]);
                         this.stats = await statsRes.json();
                         const workersData = await workersRes.json();
                         this.workers = workersData.workers || [];
+                        const eventsData = await eventsRes.json();
+                        this.events = eventsData.events || [];
                         this.lastUpdate = this.formatTime(Date.now() / 1000);
                     } catch (err) {
                         console.error('Failed to fetch initial data:', err);

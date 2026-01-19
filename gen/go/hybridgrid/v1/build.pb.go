@@ -2039,15 +2039,22 @@ type CompileRequest struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	TaskId             string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
 	SourceHash         string                 `protobuf:"bytes,2,opt,name=source_hash,json=sourceHash,proto3" json:"source_hash,omitempty"`
-	PreprocessedSource []byte                 `protobuf:"bytes,3,opt,name=preprocessed_source,json=preprocessedSource,proto3" json:"preprocessed_source,omitempty"`
+	PreprocessedSource []byte                 `protobuf:"bytes,3,opt,name=preprocessed_source,json=preprocessedSource,proto3" json:"preprocessed_source,omitempty"` // Mode 1: Already preprocessed (same-OS only)
 	CompilerArgs       []string               `protobuf:"bytes,4,rep,name=compiler_args,json=compilerArgs,proto3" json:"compiler_args,omitempty"`
 	Compiler           string                 `protobuf:"bytes,5,opt,name=compiler,proto3" json:"compiler,omitempty"`
 	CompilerVersion    string                 `protobuf:"bytes,6,opt,name=compiler_version,json=compilerVersion,proto3" json:"compiler_version,omitempty"`
 	TargetArch         Architecture           `protobuf:"varint,7,opt,name=target_arch,json=targetArch,proto3,enum=hybridgrid.v1.Architecture" json:"target_arch,omitempty"`
 	DockerImage        string                 `protobuf:"bytes,8,opt,name=docker_image,json=dockerImage,proto3" json:"docker_image,omitempty"`
 	TimeoutSeconds     int32                  `protobuf:"varint,9,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	ClientOs           string                 `protobuf:"bytes,10,opt,name=client_os,json=clientOs,proto3" json:"client_os,omitempty"`                                        // OS where preprocessing was done (linux, darwin, windows)
+	ClientArch         Architecture           `protobuf:"varint,11,opt,name=client_arch,json=clientArch,proto3,enum=hybridgrid.v1.Architecture" json:"client_arch,omitempty"` // Architecture of the client machine
+	// Cross-compilation mode (Mode 2): Send raw source + project headers
+	RawSource      []byte            `protobuf:"bytes,20,opt,name=raw_source,json=rawSource,proto3" json:"raw_source,omitempty"`                                                                                    // Raw source file (not preprocessed)
+	SourceFilename string            `protobuf:"bytes,21,opt,name=source_filename,json=sourceFilename,proto3" json:"source_filename,omitempty"`                                                                     // Original filename with extension (e.g., "main.cpp")
+	IncludeFiles   map[string][]byte `protobuf:"bytes,22,rep,name=include_files,json=includeFiles,proto3" json:"include_files,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Bundled project headers (path -> content)
+	IncludePaths   []string          `protobuf:"bytes,23,rep,name=include_paths,json=includePaths,proto3" json:"include_paths,omitempty"`                                                                           // -I paths for headers
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *CompileRequest) Reset() {
@@ -2141,6 +2148,48 @@ func (x *CompileRequest) GetTimeoutSeconds() int32 {
 		return x.TimeoutSeconds
 	}
 	return 0
+}
+
+func (x *CompileRequest) GetClientOs() string {
+	if x != nil {
+		return x.ClientOs
+	}
+	return ""
+}
+
+func (x *CompileRequest) GetClientArch() Architecture {
+	if x != nil {
+		return x.ClientArch
+	}
+	return Architecture_ARCH_UNSPECIFIED
+}
+
+func (x *CompileRequest) GetRawSource() []byte {
+	if x != nil {
+		return x.RawSource
+	}
+	return nil
+}
+
+func (x *CompileRequest) GetSourceFilename() string {
+	if x != nil {
+		return x.SourceFilename
+	}
+	return ""
+}
+
+func (x *CompileRequest) GetIncludeFiles() map[string][]byte {
+	if x != nil {
+		return x.IncludeFiles
+	}
+	return nil
+}
+
+func (x *CompileRequest) GetIncludePaths() []string {
+	if x != nil {
+		return x.IncludePaths
+	}
+	return nil
 }
 
 type CompileResponse struct {
@@ -2571,6 +2620,96 @@ func (x *WorkersForBuildResponse) GetAvailableCount() int32 {
 	return 0
 }
 
+// Request to report client-side cache hit
+type ReportCacheHitRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Hits          int32                  `protobuf:"varint,1,opt,name=hits,proto3" json:"hits,omitempty"` // Number of cache hits to report
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportCacheHitRequest) Reset() {
+	*x = ReportCacheHitRequest{}
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportCacheHitRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportCacheHitRequest) ProtoMessage() {}
+
+func (x *ReportCacheHitRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportCacheHitRequest.ProtoReflect.Descriptor instead.
+func (*ReportCacheHitRequest) Descriptor() ([]byte, []int) {
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *ReportCacheHitRequest) GetHits() int32 {
+	if x != nil {
+		return x.Hits
+	}
+	return 0
+}
+
+// Response for cache hit report
+type ReportCacheHitResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Acknowledged  bool                   `protobuf:"varint,1,opt,name=acknowledged,proto3" json:"acknowledged,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportCacheHitResponse) Reset() {
+	*x = ReportCacheHitResponse{}
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportCacheHitResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportCacheHitResponse) ProtoMessage() {}
+
+func (x *ReportCacheHitResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportCacheHitResponse.ProtoReflect.Descriptor instead.
+func (*ReportCacheHitResponse) Descriptor() ([]byte, []int) {
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *ReportCacheHitResponse) GetAcknowledged() bool {
+	if x != nil {
+		return x.Acknowledged
+	}
+	return false
+}
+
 type WorkerStatusResponse_WorkerInfo struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
 	WorkerId            string                 `protobuf:"bytes,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
@@ -2591,7 +2730,7 @@ type WorkerStatusResponse_WorkerInfo struct {
 
 func (x *WorkerStatusResponse_WorkerInfo) Reset() {
 	*x = WorkerStatusResponse_WorkerInfo{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[35]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2603,7 +2742,7 @@ func (x *WorkerStatusResponse_WorkerInfo) String() string {
 func (*WorkerStatusResponse_WorkerInfo) ProtoMessage() {}
 
 func (x *WorkerStatusResponse_WorkerInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[35]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2883,7 +3022,7 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\x10total_size_bytes\x18\x05 \x01(\x03R\x0etotalSizeBytes\x12\x1f\n" +
 	"\vconfig_json\x18\x06 \x01(\tR\n" +
 	"configJson\x12!\n" +
-	"\fdocker_image\x18\a \x01(\tR\vdockerImage\"\xf1\x02\n" +
+	"\fdocker_image\x18\a \x01(\tR\vdockerImage\"\xd0\x05\n" +
 	"\x0eCompileRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1f\n" +
 	"\vsource_hash\x18\x02 \x01(\tR\n" +
@@ -2895,7 +3034,19 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\vtarget_arch\x18\a \x01(\x0e2\x1b.hybridgrid.v1.ArchitectureR\n" +
 	"targetArch\x12!\n" +
 	"\fdocker_image\x18\b \x01(\tR\vdockerImage\x12'\n" +
-	"\x0ftimeout_seconds\x18\t \x01(\x05R\x0etimeoutSeconds\"\xc2\x02\n" +
+	"\x0ftimeout_seconds\x18\t \x01(\x05R\x0etimeoutSeconds\x12\x1b\n" +
+	"\tclient_os\x18\n" +
+	" \x01(\tR\bclientOs\x12<\n" +
+	"\vclient_arch\x18\v \x01(\x0e2\x1b.hybridgrid.v1.ArchitectureR\n" +
+	"clientArch\x12\x1d\n" +
+	"\n" +
+	"raw_source\x18\x14 \x01(\fR\trawSource\x12'\n" +
+	"\x0fsource_filename\x18\x15 \x01(\tR\x0esourceFilename\x12T\n" +
+	"\rinclude_files\x18\x16 \x03(\v2/.hybridgrid.v1.CompileRequest.IncludeFilesEntryR\fincludeFiles\x12#\n" +
+	"\rinclude_paths\x18\x17 \x03(\tR\fincludePaths\x1a?\n" +
+	"\x11IncludeFilesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\fR\x05value:\x028\x01\"\xc2\x02\n" +
 	"\x0fCompileResponse\x121\n" +
 	"\x06status\x18\x01 \x01(\x0e2\x19.hybridgrid.v1.TaskStatusR\x06status\x12\x1f\n" +
 	"\vobject_file\x18\x02 \x01(\fR\n" +
@@ -2944,7 +3095,11 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\x17WorkersForBuildResponse\x12\x1d\n" +
 	"\n" +
 	"worker_ids\x18\x01 \x03(\tR\tworkerIds\x12'\n" +
-	"\x0favailable_count\x18\x02 \x01(\x05R\x0eavailableCount*U\n" +
+	"\x0favailable_count\x18\x02 \x01(\x05R\x0eavailableCount\"+\n" +
+	"\x15ReportCacheHitRequest\x12\x12\n" +
+	"\x04hits\x18\x01 \x01(\x05R\x04hits\"<\n" +
+	"\x16ReportCacheHitResponse\x12\"\n" +
+	"\facknowledged\x18\x01 \x01(\bR\facknowledged*U\n" +
 	"\fArchitecture\x12\x14\n" +
 	"\x10ARCH_UNSPECIFIED\x10\x00\x12\x0f\n" +
 	"\vARCH_X86_64\x10\x01\x12\x0e\n" +
@@ -2977,7 +3132,7 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\x0eSTATUS_RUNNING\x10\x02\x12\x14\n" +
 	"\x10STATUS_COMPLETED\x10\x03\x12\x11\n" +
 	"\rSTATUS_FAILED\x10\x04\x12\x12\n" +
-	"\x0eSTATUS_TIMEOUT\x10\x052\xc3\x04\n" +
+	"\x0eSTATUS_TIMEOUT\x10\x052\xa2\x05\n" +
 	"\fBuildService\x12N\n" +
 	"\tHandshake\x12\x1f.hybridgrid.v1.HandshakeRequest\x1a .hybridgrid.v1.HandshakeResponse\x12B\n" +
 	"\x05Build\x12\x1b.hybridgrid.v1.BuildRequest\x1a\x1c.hybridgrid.v1.BuildResponse\x12H\n" +
@@ -2985,7 +3140,8 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\aCompile\x12\x1d.hybridgrid.v1.CompileRequest\x1a\x1e.hybridgrid.v1.CompileResponse\x12J\n" +
 	"\vHealthCheck\x12\x1c.hybridgrid.v1.HealthRequest\x1a\x1d.hybridgrid.v1.HealthResponse\x12Z\n" +
 	"\x0fGetWorkerStatus\x12\".hybridgrid.v1.WorkerStatusRequest\x1a#.hybridgrid.v1.WorkerStatusResponse\x12c\n" +
-	"\x12GetWorkersForBuild\x12%.hybridgrid.v1.WorkersForBuildRequest\x1a&.hybridgrid.v1.WorkersForBuildResponseBDZBgithub.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1;hybridgridv1b\x06proto3"
+	"\x12GetWorkersForBuild\x12%.hybridgrid.v1.WorkersForBuildRequest\x1a&.hybridgrid.v1.WorkersForBuildResponse\x12]\n" +
+	"\x0eReportCacheHit\x12$.hybridgrid.v1.ReportCacheHitRequest\x1a%.hybridgrid.v1.ReportCacheHitResponseBDZBgithub.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1;hybridgridv1b\x06proto3"
 
 var (
 	file_hybridgrid_v1_build_proto_rawDescOnce sync.Once
@@ -3000,7 +3156,7 @@ func file_hybridgrid_v1_build_proto_rawDescGZIP() []byte {
 }
 
 var file_hybridgrid_v1_build_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_hybridgrid_v1_build_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
+var file_hybridgrid_v1_build_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
 var file_hybridgrid_v1_build_proto_goTypes = []any{
 	(Architecture)(0),                       // 0: hybridgrid.v1.Architecture
 	(BuildType)(0),                          // 1: hybridgrid.v1.BuildType
@@ -3036,20 +3192,23 @@ var file_hybridgrid_v1_build_proto_goTypes = []any{
 	(*WorkerStatusResponse)(nil),            // 31: hybridgrid.v1.WorkerStatusResponse
 	(*WorkersForBuildRequest)(nil),          // 32: hybridgrid.v1.WorkersForBuildRequest
 	(*WorkersForBuildResponse)(nil),         // 33: hybridgrid.v1.WorkersForBuildResponse
-	nil,                                     // 34: hybridgrid.v1.FlutterConfig.DartDefinesEntry
-	nil,                                     // 35: hybridgrid.v1.UnityConfig.ExtraArgsEntry
-	nil,                                     // 36: hybridgrid.v1.CocosConfig.PlatformOptionsEntry
-	nil,                                     // 37: hybridgrid.v1.GoConfig.LdflagsEntry
-	nil,                                     // 38: hybridgrid.v1.NodeConfig.EnvVarsEntry
-	(*WorkerStatusResponse_WorkerInfo)(nil), // 39: hybridgrid.v1.WorkerStatusResponse.WorkerInfo
+	(*ReportCacheHitRequest)(nil),           // 34: hybridgrid.v1.ReportCacheHitRequest
+	(*ReportCacheHitResponse)(nil),          // 35: hybridgrid.v1.ReportCacheHitResponse
+	nil,                                     // 36: hybridgrid.v1.FlutterConfig.DartDefinesEntry
+	nil,                                     // 37: hybridgrid.v1.UnityConfig.ExtraArgsEntry
+	nil,                                     // 38: hybridgrid.v1.CocosConfig.PlatformOptionsEntry
+	nil,                                     // 39: hybridgrid.v1.GoConfig.LdflagsEntry
+	nil,                                     // 40: hybridgrid.v1.NodeConfig.EnvVarsEntry
+	nil,                                     // 41: hybridgrid.v1.CompileRequest.IncludeFilesEntry
+	(*WorkerStatusResponse_WorkerInfo)(nil), // 42: hybridgrid.v1.WorkerStatusResponse.WorkerInfo
 }
 var file_hybridgrid_v1_build_proto_depIdxs = []int32{
 	0,  // 0: hybridgrid.v1.CppConfig.target_arch:type_name -> hybridgrid.v1.Architecture
-	34, // 1: hybridgrid.v1.FlutterConfig.dart_defines:type_name -> hybridgrid.v1.FlutterConfig.DartDefinesEntry
-	35, // 2: hybridgrid.v1.UnityConfig.extra_args:type_name -> hybridgrid.v1.UnityConfig.ExtraArgsEntry
-	36, // 3: hybridgrid.v1.CocosConfig.platform_options:type_name -> hybridgrid.v1.CocosConfig.PlatformOptionsEntry
-	37, // 4: hybridgrid.v1.GoConfig.ldflags:type_name -> hybridgrid.v1.GoConfig.LdflagsEntry
-	38, // 5: hybridgrid.v1.NodeConfig.env_vars:type_name -> hybridgrid.v1.NodeConfig.EnvVarsEntry
+	36, // 1: hybridgrid.v1.FlutterConfig.dart_defines:type_name -> hybridgrid.v1.FlutterConfig.DartDefinesEntry
+	37, // 2: hybridgrid.v1.UnityConfig.extra_args:type_name -> hybridgrid.v1.UnityConfig.ExtraArgsEntry
+	38, // 3: hybridgrid.v1.CocosConfig.platform_options:type_name -> hybridgrid.v1.CocosConfig.PlatformOptionsEntry
+	39, // 4: hybridgrid.v1.GoConfig.ldflags:type_name -> hybridgrid.v1.GoConfig.LdflagsEntry
+	40, // 5: hybridgrid.v1.NodeConfig.env_vars:type_name -> hybridgrid.v1.NodeConfig.EnvVarsEntry
 	2,  // 6: hybridgrid.v1.FlutterCapability.platforms:type_name -> hybridgrid.v1.TargetPlatform
 	2,  // 7: hybridgrid.v1.UnityCapability.build_targets:type_name -> hybridgrid.v1.TargetPlatform
 	2,  // 8: hybridgrid.v1.CocosCapability.platforms:type_name -> hybridgrid.v1.TargetPlatform
@@ -3077,30 +3236,34 @@ var file_hybridgrid_v1_build_proto_depIdxs = []int32{
 	1,  // 30: hybridgrid.v1.BuildMetadata.build_type:type_name -> hybridgrid.v1.BuildType
 	2,  // 31: hybridgrid.v1.BuildMetadata.target_platform:type_name -> hybridgrid.v1.TargetPlatform
 	0,  // 32: hybridgrid.v1.CompileRequest.target_arch:type_name -> hybridgrid.v1.Architecture
-	3,  // 33: hybridgrid.v1.CompileResponse.status:type_name -> hybridgrid.v1.TaskStatus
-	39, // 34: hybridgrid.v1.WorkerStatusResponse.workers:type_name -> hybridgrid.v1.WorkerStatusResponse.WorkerInfo
-	1,  // 35: hybridgrid.v1.WorkersForBuildRequest.build_type:type_name -> hybridgrid.v1.BuildType
-	2,  // 36: hybridgrid.v1.WorkersForBuildRequest.target_platform:type_name -> hybridgrid.v1.TargetPlatform
-	0,  // 37: hybridgrid.v1.WorkerStatusResponse.WorkerInfo.native_arch:type_name -> hybridgrid.v1.Architecture
-	19, // 38: hybridgrid.v1.BuildService.Handshake:input_type -> hybridgrid.v1.HandshakeRequest
-	21, // 39: hybridgrid.v1.BuildService.Build:input_type -> hybridgrid.v1.BuildRequest
-	24, // 40: hybridgrid.v1.BuildService.StreamBuild:input_type -> hybridgrid.v1.BuildChunk
-	26, // 41: hybridgrid.v1.BuildService.Compile:input_type -> hybridgrid.v1.CompileRequest
-	28, // 42: hybridgrid.v1.BuildService.HealthCheck:input_type -> hybridgrid.v1.HealthRequest
-	30, // 43: hybridgrid.v1.BuildService.GetWorkerStatus:input_type -> hybridgrid.v1.WorkerStatusRequest
-	32, // 44: hybridgrid.v1.BuildService.GetWorkersForBuild:input_type -> hybridgrid.v1.WorkersForBuildRequest
-	20, // 45: hybridgrid.v1.BuildService.Handshake:output_type -> hybridgrid.v1.HandshakeResponse
-	23, // 46: hybridgrid.v1.BuildService.Build:output_type -> hybridgrid.v1.BuildResponse
-	23, // 47: hybridgrid.v1.BuildService.StreamBuild:output_type -> hybridgrid.v1.BuildResponse
-	27, // 48: hybridgrid.v1.BuildService.Compile:output_type -> hybridgrid.v1.CompileResponse
-	29, // 49: hybridgrid.v1.BuildService.HealthCheck:output_type -> hybridgrid.v1.HealthResponse
-	31, // 50: hybridgrid.v1.BuildService.GetWorkerStatus:output_type -> hybridgrid.v1.WorkerStatusResponse
-	33, // 51: hybridgrid.v1.BuildService.GetWorkersForBuild:output_type -> hybridgrid.v1.WorkersForBuildResponse
-	45, // [45:52] is the sub-list for method output_type
-	38, // [38:45] is the sub-list for method input_type
-	38, // [38:38] is the sub-list for extension type_name
-	38, // [38:38] is the sub-list for extension extendee
-	0,  // [0:38] is the sub-list for field type_name
+	0,  // 33: hybridgrid.v1.CompileRequest.client_arch:type_name -> hybridgrid.v1.Architecture
+	41, // 34: hybridgrid.v1.CompileRequest.include_files:type_name -> hybridgrid.v1.CompileRequest.IncludeFilesEntry
+	3,  // 35: hybridgrid.v1.CompileResponse.status:type_name -> hybridgrid.v1.TaskStatus
+	42, // 36: hybridgrid.v1.WorkerStatusResponse.workers:type_name -> hybridgrid.v1.WorkerStatusResponse.WorkerInfo
+	1,  // 37: hybridgrid.v1.WorkersForBuildRequest.build_type:type_name -> hybridgrid.v1.BuildType
+	2,  // 38: hybridgrid.v1.WorkersForBuildRequest.target_platform:type_name -> hybridgrid.v1.TargetPlatform
+	0,  // 39: hybridgrid.v1.WorkerStatusResponse.WorkerInfo.native_arch:type_name -> hybridgrid.v1.Architecture
+	19, // 40: hybridgrid.v1.BuildService.Handshake:input_type -> hybridgrid.v1.HandshakeRequest
+	21, // 41: hybridgrid.v1.BuildService.Build:input_type -> hybridgrid.v1.BuildRequest
+	24, // 42: hybridgrid.v1.BuildService.StreamBuild:input_type -> hybridgrid.v1.BuildChunk
+	26, // 43: hybridgrid.v1.BuildService.Compile:input_type -> hybridgrid.v1.CompileRequest
+	28, // 44: hybridgrid.v1.BuildService.HealthCheck:input_type -> hybridgrid.v1.HealthRequest
+	30, // 45: hybridgrid.v1.BuildService.GetWorkerStatus:input_type -> hybridgrid.v1.WorkerStatusRequest
+	32, // 46: hybridgrid.v1.BuildService.GetWorkersForBuild:input_type -> hybridgrid.v1.WorkersForBuildRequest
+	34, // 47: hybridgrid.v1.BuildService.ReportCacheHit:input_type -> hybridgrid.v1.ReportCacheHitRequest
+	20, // 48: hybridgrid.v1.BuildService.Handshake:output_type -> hybridgrid.v1.HandshakeResponse
+	23, // 49: hybridgrid.v1.BuildService.Build:output_type -> hybridgrid.v1.BuildResponse
+	23, // 50: hybridgrid.v1.BuildService.StreamBuild:output_type -> hybridgrid.v1.BuildResponse
+	27, // 51: hybridgrid.v1.BuildService.Compile:output_type -> hybridgrid.v1.CompileResponse
+	29, // 52: hybridgrid.v1.BuildService.HealthCheck:output_type -> hybridgrid.v1.HealthResponse
+	31, // 53: hybridgrid.v1.BuildService.GetWorkerStatus:output_type -> hybridgrid.v1.WorkerStatusResponse
+	33, // 54: hybridgrid.v1.BuildService.GetWorkersForBuild:output_type -> hybridgrid.v1.WorkersForBuildResponse
+	35, // 55: hybridgrid.v1.BuildService.ReportCacheHit:output_type -> hybridgrid.v1.ReportCacheHitResponse
+	48, // [48:56] is the sub-list for method output_type
+	40, // [40:48] is the sub-list for method input_type
+	40, // [40:40] is the sub-list for extension type_name
+	40, // [40:40] is the sub-list for extension extendee
+	0,  // [0:40] is the sub-list for field type_name
 }
 
 func init() { file_hybridgrid_v1_build_proto_init() }
@@ -3127,7 +3290,7 @@ func file_hybridgrid_v1_build_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_hybridgrid_v1_build_proto_rawDesc), len(file_hybridgrid_v1_build_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   36,
+			NumMessages:   39,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

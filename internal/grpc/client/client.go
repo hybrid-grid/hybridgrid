@@ -162,3 +162,12 @@ func (c *Client) GetWorkersForBuild(ctx context.Context, buildType pb.BuildType,
 		TargetPlatform: platform,
 	})
 }
+
+// ReportCacheHit reports client-side cache hits to the coordinator for stats tracking.
+func (c *Client) ReportCacheHit(ctx context.Context, hits int32) error {
+	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond) // Quick timeout - best effort
+	defer cancel()
+
+	_, err := c.client.ReportCacheHit(ctx, &pb.ReportCacheHitRequest{Hits: hits})
+	return err
+}

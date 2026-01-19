@@ -63,6 +63,7 @@ func New(cfg Config, provider StatsProvider) *Server {
 	// API endpoints
 	mux.HandleFunc("/api/v1/stats", s.handleStats)
 	mux.HandleFunc("/api/v1/workers", s.handleWorkers)
+	mux.HandleFunc("/api/v1/events", s.handleEvents)
 
 	// WebSocket endpoint
 	mux.HandleFunc("/ws", s.handleWebSocket)
@@ -105,6 +106,40 @@ func (s *Server) Stop() error {
 // Hub returns the WebSocket hub for broadcasting events.
 func (s *Server) Hub() *Hub {
 	return s.hub
+}
+
+// EventNotifierFunc allows wiring up task events from the coordinator.
+// To use: in main.go, create a wrapper that converts coordinator.TaskEvent to dashboard.TaskInfo.
+type EventNotifierFunc struct {
+	OnTaskStarted   func(task *TaskInfo)
+	OnTaskCompleted func(task *TaskInfo)
+}
+
+// CreateEventNotifier creates event notifier callbacks for the coordinator.
+func (s *Server) CreateEventNotifier() (onStart func(id, buildType, status, workerID string, startedAt int64), onComplete func(id, buildType, status, workerID string, startedAt, completedAt, durationMs int64, exitCode int32, errorMsg string)) {
+	onStart = func(id, buildType, status, workerID string, startedAt int64) {
+		s.hub.BroadcastTaskStarted(&TaskInfo{
+			ID:        id,
+			BuildType: buildType,
+			Status:    status,
+			WorkerID:  workerID,
+			StartedAt: startedAt,
+		})
+	}
+	onComplete = func(id, buildType, status, workerID string, startedAt, completedAt, durationMs int64, exitCode int32, errorMsg string) {
+		s.hub.BroadcastTaskCompleted(&TaskInfo{
+			ID:           id,
+			BuildType:    buildType,
+			Status:       status,
+			WorkerID:     workerID,
+			StartedAt:    startedAt,
+			CompletedAt:  completedAt,
+			DurationMs:   durationMs,
+			ExitCode:     exitCode,
+			ErrorMessage: errorMsg,
+		})
+	}
+	return
 }
 
 // broadcastLoop periodically broadcasts stats to WebSocket clients.

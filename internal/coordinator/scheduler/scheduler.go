@@ -22,7 +22,8 @@ var (
 // Scheduler selects workers for build tasks.
 type Scheduler interface {
 	// Select chooses a worker for the given build type and architecture.
-	Select(buildType pb.BuildType, arch pb.Architecture) (*registry.WorkerInfo, error)
+	// clientOS is optional - if provided, prefer workers with matching OS.
+	Select(buildType pb.BuildType, arch pb.Architecture, clientOS string) (*registry.WorkerInfo, error)
 }
 
 // SimpleScheduler implements round-robin worker selection.
@@ -39,7 +40,7 @@ func NewSimpleScheduler(reg registry.Registry) *SimpleScheduler {
 }
 
 // Select chooses the next available worker using round-robin.
-func (s *SimpleScheduler) Select(buildType pb.BuildType, arch pb.Architecture) (*registry.WorkerInfo, error) {
+func (s *SimpleScheduler) Select(buildType pb.BuildType, arch pb.Architecture, clientOS string) (*registry.WorkerInfo, error) {
 	workers := s.registry.ListByCapability(buildType, arch)
 	if len(workers) == 0 {
 		// Check if there are any workers at all
@@ -49,19 +50,39 @@ func (s *SimpleScheduler) Select(buildType pb.BuildType, arch pb.Architecture) (
 		return nil, ErrNoMatchingWorkers
 	}
 
+	// Filter by OS if specified (prefer same-OS workers for native headers)
+	if clientOS != "" {
+		workers = filterByOS(workers, clientOS)
+		if len(workers) == 0 {
+			return nil, ErrNoMatchingWorkers
+		}
+	}
+
 	// Filter out busy workers with too many tasks (simple load awareness)
 	available := make([]*registry.WorkerInfo, 0, len(workers))
 	for _, w := range workers {
-		// Allow up to 2 concurrent tasks per worker
-		if w.ActiveTasks < 2 && w.State == registry.WorkerStateIdle {
+		// Use worker's reported MaxParallel (default to 4 if not set)
+		maxParallel := w.MaxParallel
+		if maxParallel <= 0 {
+			maxParallel = 4
+		}
+		if w.ActiveTasks < maxParallel && w.State == registry.WorkerStateIdle {
 			available = append(available, w)
 		}
 	}
 
-	// If all workers are busy, use any healthy worker
+	// If all workers are at capacity, find workers with room for more tasks
 	if len(available) == 0 {
 		for _, w := range workers {
-			if w.State != registry.WorkerStateUnhealthy {
+			if w.State == registry.WorkerStateUnhealthy {
+				continue
+			}
+			maxParallel := w.MaxParallel
+			if maxParallel <= 0 {
+				maxParallel = 4
+			}
+			// Only consider workers that haven't exceeded their capacity
+			if w.ActiveTasks < maxParallel {
 				available = append(available, w)
 			}
 		}
@@ -91,13 +112,21 @@ func NewLeastLoadedScheduler(reg registry.Registry) *LeastLoadedScheduler {
 }
 
 // Select chooses the worker with the least load.
-func (s *LeastLoadedScheduler) Select(buildType pb.BuildType, arch pb.Architecture) (*registry.WorkerInfo, error) {
+func (s *LeastLoadedScheduler) Select(buildType pb.BuildType, arch pb.Architecture, clientOS string) (*registry.WorkerInfo, error) {
 	workers := s.registry.ListByCapability(buildType, arch)
 	if len(workers) == 0 {
 		if s.registry.Count() == 0 {
 			return nil, ErrNoWorkers
 		}
 		return nil, ErrNoMatchingWorkers
+	}
+
+	// Filter by OS if specified
+	if clientOS != "" {
+		workers = filterByOS(workers, clientOS)
+		if len(workers) == 0 {
+			return nil, ErrNoMatchingWorkers
+		}
 	}
 
 	var best *registry.WorkerInfo
@@ -163,13 +192,21 @@ func NewP2CScheduler(cfg P2CConfig) *P2CScheduler {
 }
 
 // Select implements P2C: pick 2 random workers, select the one with higher score.
-func (s *P2CScheduler) Select(buildType pb.BuildType, arch pb.Architecture) (*registry.WorkerInfo, error) {
+func (s *P2CScheduler) Select(buildType pb.BuildType, arch pb.Architecture, clientOS string) (*registry.WorkerInfo, error) {
 	workers := s.registry.ListByCapability(buildType, arch)
 	if len(workers) == 0 {
 		if s.registry.Count() == 0 {
 			return nil, ErrNoWorkers
 		}
 		return nil, ErrNoMatchingWorkers
+	}
+
+	// Filter by OS if specified (critical for avoiding cross-OS header issues)
+	if clientOS != "" {
+		workers = filterByOS(workers, clientOS)
+		if len(workers) == 0 {
+			return nil, ErrNoMatchingWorkers
+		}
 	}
 
 	// Filter out unhealthy workers and those with open circuits
@@ -181,17 +218,29 @@ func (s *P2CScheduler) Select(buildType pb.BuildType, arch pb.Architecture) (*re
 		if s.circuitChecker != nil && s.circuitChecker.IsOpen(w.ID) {
 			continue
 		}
-		// Allow up to ScoreMaxActiveTasks concurrent tasks
-		if w.ActiveTasks >= ScoreMaxActiveTasks {
+		// Use worker's reported MaxParallel (default to 4 if not set)
+		maxParallel := w.MaxParallel
+		if maxParallel <= 0 {
+			maxParallel = 4
+		}
+		if w.ActiveTasks >= maxParallel {
 			continue
 		}
 		candidates = append(candidates, w)
 	}
 
-	// If no candidates after filtering, relax criteria
+	// If no candidates after filtering, relax criteria but still respect capacity
 	if len(candidates) == 0 {
 		for _, w := range workers {
-			if w.State != registry.WorkerStateUnhealthy {
+			if w.State == registry.WorkerStateUnhealthy {
+				continue
+			}
+			maxParallel := w.MaxParallel
+			if maxParallel <= 0 {
+				maxParallel = 4
+			}
+			// Only add workers that still have capacity
+			if w.ActiveTasks < maxParallel {
 				candidates = append(candidates, w)
 			}
 		}
@@ -303,4 +352,21 @@ func cryptoRandInt(n int) int {
 		return 0
 	}
 	return int(big.Int64())
+}
+
+// filterByOS filters workers by matching operating system.
+// This is critical for C/C++ compilation where preprocessed source
+// contains OS-specific headers that won't compile on different OS.
+func filterByOS(workers []*registry.WorkerInfo, clientOS string) []*registry.WorkerInfo {
+	if clientOS == "" {
+		return workers
+	}
+
+	result := make([]*registry.WorkerInfo, 0, len(workers))
+	for _, w := range workers {
+		if w.Capabilities != nil && w.Capabilities.Os == clientOS {
+			result = append(result, w)
+		}
+	}
+	return result
 }

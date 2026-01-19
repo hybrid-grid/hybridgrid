@@ -1,8 +1,4 @@
-# Stress test setup for hybridgrid on M1 Mac Air
-# Simulates distributed compilation with resource-limited workers
-
 services:
-  # Coordinator - lightweight, just schedules tasks
   coordinator:
     build:
       context: ../..
@@ -18,13 +14,7 @@ services:
         limits:
           cpus: '0.25'
           memory: 256M
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
 
-  # Workers - resource limited to simulate slower machines
   worker-1:
     build:
       context: ../..
@@ -100,7 +90,6 @@ services:
           cpus: '0.5'
           memory: 512M
 
-  # Builder - where we run hgbuild make
   builder:
     build:
       context: ../..

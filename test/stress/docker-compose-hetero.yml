@@ -1,8 +1,4 @@
-# Stress test setup for hybridgrid on M1 Mac Air
-# Simulates distributed compilation with resource-limited workers
-
 services:
-  # Coordinator - lightweight, just schedules tasks
   coordinator:
     build:
       context: ../..
@@ -18,18 +14,13 @@ services:
         limits:
           cpus: '0.25'
           memory: 256M
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
 
-  # Workers - resource limited to simulate slower machines
+  # Lightest worker
   worker-1:
     build:
       context: ../..
       dockerfile: test/stress/Dockerfile.base
-    command: hg-worker serve --coordinator=coordinator:9000 --port=50051 --advertise-address=worker-1:50051 --max-parallel=2
+    command: hg-worker serve --coordinator=coordinator:9000 --port=50051 --advertise-address=worker-1:50051 --max-parallel=1
     networks:
       - hgnet
     depends_on:
@@ -40,6 +31,7 @@ services:
           cpus: '0.5'
           memory: 512M
 
+  # Light worker
   worker-2:
     build:
       context: ../..
@@ -52,9 +44,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 512M
+          cpus: '0.6'
+          memory: 614M
 
+  # Medium worker
   worker-3:
     build:
       context: ../..
@@ -67,9 +60,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 512M
+          cpus: '0.8'
+          memory: 820M
 
+  # Medium-heavy worker
   worker-4:
     build:
       context: ../..
@@ -82,14 +76,15 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 512M
+          cpus: '1.0'
+          memory: 1024M
 
+  # Heavy worker
   worker-5:
     build:
       context: ../..
       dockerfile: test/stress/Dockerfile.base
-    command: hg-worker serve --coordinator=coordinator:9000 --port=50051 --advertise-address=worker-5:50051 --max-parallel=2
+    command: hg-worker serve --coordinator=coordinator:9000 --port=50051 --advertise-address=worker-5:50051 --max-parallel=3
     networks:
       - hgnet
     depends_on:
@@ -97,10 +92,9 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 512M
+          cpus: '1.1'
+          memory: 1126M
 
-  # Builder - where we run hgbuild make
   builder:
     build:
       context: ../..

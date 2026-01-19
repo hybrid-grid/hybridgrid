@@ -22,9 +22,15 @@ type Request struct {
 	TaskID             string
 	Compiler           string
 	Args               []string
-	PreprocessedSource []byte
+	PreprocessedSource []byte // Mode 1: Already preprocessed source
 	TargetArch         pb.Architecture
 	Timeout            time.Duration
+
+	// Cross-compilation mode (Mode 2)
+	RawSource      []byte            // Raw source file (not preprocessed)
+	SourceFilename string            // Original filename with extension (e.g., "main.cpp")
+	IncludeFiles   map[string][]byte // Bundled project headers (path -> content)
+	IncludePaths   []string          // -I paths for headers
 }
 
 // Executor defines the interface for compilation executors.

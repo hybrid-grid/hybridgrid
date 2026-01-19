@@ -4,6 +4,39 @@ A distributed multi-platform build system for C/C++, Flutter, Unity, and more.
 
 Hybrid-Grid distributes compilation tasks across multiple machines on your LAN (via mDNS auto-discovery) or WAN, dramatically reducing build times for large projects.
 
+## v0.1.0 Release Status
+
+### ✅ Working Features
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **C/C++ Distributed Compilation** | ✅ Production Ready | Cross-compilation across Mac/Linux/Windows |
+| **mDNS Auto-Discovery** | ✅ Working | Zero-config LAN discovery |
+| **Local Cache** | ✅ Working | ~10x speedup on cache hits |
+| **Cache Hit Dashboard** | ✅ Working | Real-time stats reporting |
+| **`hgbuild make`** | ✅ Working | Wraps make with distributed CC |
+| **`hgbuild cc/c++`** | ✅ Working | Drop-in gcc/g++ replacement |
+| **Local Fallback** | ✅ Working | Auto-fallback when coordinator unavailable |
+| **Web Dashboard** | ✅ Working | Real-time worker/task/cache stats |
+| **P2C Scheduler** | ✅ Working | Smart worker selection with scoring |
+| **Circuit Breaker** | ✅ Working | Per-worker fault tolerance |
+| **Docker Cross-Compile** | ✅ Working | dockcross integration |
+
+### ⏳ Not Yet Implemented
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Flutter builds | ❌ Not Started | Planned for v0.2.0 |
+| Unity builds | ❌ Not Started | Planned for v0.2.0 |
+| Rust/Go/Node builds | ❌ Not Started | Planned for v0.3.0 |
+| WAN Registry | ❌ Not Started | Currently LAN-only |
+| Kubernetes/Helm | ❌ Not Started | Docker Compose available |
+| TLS/mTLS | ⚠️ Config Only | Code exists but not tested in prod |
+
+### Tested Configurations
+- **macOS** (ARM64) → Coordinator + Worker ✅
+- **Raspberry Pi** (ARM64) → Worker ✅
+- **Windows WSL** (x86_64) → Worker ✅
+- **100-file stress test** → 17s distributed, 3s cached ✅
+
 ## Features
 
 - **Distributed Compilation** - Spread builds across multiple workers

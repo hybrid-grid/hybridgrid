@@ -37,6 +37,26 @@ func DefaultConfig() Config {
 	}
 }
 
+// TaskEvent represents a task event for the dashboard.
+type TaskEvent struct {
+	ID           string
+	BuildType    string
+	Status       string
+	WorkerID     string
+	StartedAt    int64
+	CompletedAt  int64
+	DurationMs   int64
+	ExitCode     int32
+	FromCache    bool
+	ErrorMessage string
+}
+
+// EventNotifier is called when task events occur.
+type EventNotifier interface {
+	NotifyTaskStarted(event *TaskEvent)
+	NotifyTaskCompleted(event *TaskEvent)
+}
+
 // Server implements the coordinator gRPC server.
 type Server struct {
 	pb.UnimplementedBuildServiceServer
@@ -46,6 +66,7 @@ type Server struct {
 	registry       registry.Registry
 	scheduler      scheduler.Scheduler
 	circuitManager *resilience.CircuitManager
+	eventNotifier  EventNotifier
 
 	activeTasks  int64
 	queuedTasks  int64
@@ -99,6 +120,11 @@ func (s *Server) Registry() registry.Registry {
 	return s.registry
 }
 
+// SetEventNotifier sets the event notifier for task events.
+func (s *Server) SetEventNotifier(notifier EventNotifier) {
+	s.eventNotifier = notifier
+}
+
 // Handshake handles worker registration.
 func (s *Server) Handshake(ctx context.Context, req *pb.HandshakeRequest) (*pb.HandshakeResponse, error) {
 	if req.Capabilities == nil {
@@ -126,11 +152,18 @@ func (s *Server) Handshake(ctx context.Context, req *pb.HandshakeRequest) (*pb.H
 		workerAddr = fmt.Sprintf("%s:50052", req.Capabilities.Hostname)
 	}
 
+	// Get max parallel from capabilities (default to 4 if not set)
+	maxParallel := req.Capabilities.MaxParallelTasks
+	if maxParallel <= 0 {
+		maxParallel = 4
+	}
+
 	// Register worker
 	worker := &registry.WorkerInfo{
 		ID:           workerID,
 		Address:      workerAddr,
 		Capabilities: req.Capabilities,
+		MaxParallel:  maxParallel,
 	}
 
 	if err := s.registry.Add(worker); err != nil {
@@ -150,6 +183,7 @@ func (s *Server) Handshake(ctx context.Context, req *pb.HandshakeRequest) (*pb.H
 		Str("worker_id", workerID).
 		Str("hostname", req.Capabilities.Hostname).
 		Int32("cpu_cores", req.Capabilities.CpuCores).
+		Int32("max_parallel", maxParallel).
 		Str("arch", req.Capabilities.NativeArch.String()).
 		Strs("cpp_compilers", compilers).
 		Bool("docker", req.Capabilities.DockerAvailable).
@@ -171,13 +205,29 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 		return nil, status.Error(codes.InvalidArgument, "task_id required")
 	}
 
+	// Track cache miss (client checked cache first, this is a miss)
+	atomic.AddInt64(&s.cacheMisses, 1)
+
 	atomic.AddInt64(&s.queuedTasks, 1)
 	defer atomic.AddInt64(&s.queuedTasks, -1)
 
+	// Determine if we need OS filtering
+	// Raw source mode (cross-compilation) doesn't need OS filtering
+	// Preprocessed mode requires same-OS workers
+	clientOSFilter := ""
+	if len(req.RawSource) == 0 && len(req.PreprocessedSource) > 0 {
+		// Preprocessed mode: filter by OS
+		clientOSFilter = req.ClientOs
+	}
+
 	// Select worker
-	worker, err := s.scheduler.Select(pb.BuildType_BUILD_TYPE_CPP, req.TargetArch)
+	worker, err := s.scheduler.Select(pb.BuildType_BUILD_TYPE_CPP, req.TargetArch, clientOSFilter)
 	if err != nil {
-		log.Error().Err(err).Str("task_id", req.TaskId).Msg("No worker available")
+		log.Error().Err(err).
+			Str("task_id", req.TaskId).
+			Str("client_os", req.ClientOs).
+			Bool("cross_compile", len(req.RawSource) > 0).
+			Msg("No worker available")
 		return &pb.CompileResponse{
 			Status:   pb.TaskStatus_STATUS_FAILED,
 			ExitCode: 1,
@@ -195,12 +245,24 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	}()
 
 	queueTime := time.Since(start)
+	taskStartTime := time.Now()
 
 	log.Debug().
 		Str("task_id", req.TaskId).
 		Str("worker_id", worker.ID).
 		Dur("queue_time", queueTime).
 		Msg("Forwarding compile request")
+
+	// Notify task started
+	if s.eventNotifier != nil {
+		s.eventNotifier.NotifyTaskStarted(&TaskEvent{
+			ID:        req.TaskId,
+			BuildType: "cpp",
+			Status:    "running",
+			WorkerID:  worker.ID,
+			StartedAt: taskStartTime.Unix(),
+		})
+	}
 
 	// Forward to worker
 	resp, err := s.forwardCompile(ctx, worker, req)
@@ -213,10 +275,40 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	}
 	s.registry.DecrementTasks(worker.ID, success, compileTime)
 
+	taskCompletedTime := time.Now()
+
 	if success {
 		atomic.AddInt64(&s.successTasks, 1)
 	} else {
 		atomic.AddInt64(&s.failedTasks, 1)
+	}
+
+	// Notify task completed
+	if s.eventNotifier != nil {
+		event := &TaskEvent{
+			ID:          req.TaskId,
+			BuildType:   "cpp",
+			WorkerID:    worker.ID,
+			StartedAt:   taskStartTime.Unix(),
+			CompletedAt: taskCompletedTime.Unix(),
+			DurationMs:  taskCompletedTime.Sub(taskStartTime).Milliseconds(),
+		}
+		if success {
+			event.Status = "completed"
+			if resp != nil {
+				event.ExitCode = resp.ExitCode
+			}
+		} else {
+			event.Status = "failed"
+			event.ExitCode = 1
+			if err != nil {
+				event.ErrorMessage = err.Error()
+			} else if resp != nil {
+				event.ExitCode = resp.ExitCode
+				event.ErrorMessage = resp.Stderr
+			}
+		}
+		s.eventNotifier.NotifyTaskCompleted(event)
 	}
 
 	if err != nil {
@@ -367,4 +459,12 @@ func (s *Server) GetWorkersForBuild(ctx context.Context, req *pb.WorkersForBuild
 		WorkerIds:      ids,
 		AvailableCount: int32(len(ids)),
 	}, nil
+}
+
+// ReportCacheHit handles cache hit reports from clients.
+func (s *Server) ReportCacheHit(ctx context.Context, req *pb.ReportCacheHitRequest) (*pb.ReportCacheHitResponse, error) {
+	if req.Hits > 0 {
+		atomic.AddInt64(&s.cacheHits, int64(req.Hits))
+	}
+	return &pb.ReportCacheHitResponse{Acknowledged: true}, nil
 }

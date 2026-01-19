@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/rs/zerolog/log"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 )
@@ -88,9 +90,14 @@ func (e *DockerExecutor) Execute(ctx context.Context, req *Request) (*Result, er
 	}
 
 	// Select image based on target architecture
-	image := e.selectImage(req.TargetArch)
-	if image == "" {
+	img := e.selectImage(req.TargetArch)
+	if img == "" {
 		return nil, fmt.Errorf("no Docker image available for architecture: %v", req.TargetArch)
+	}
+
+	// Ensure image is available (auto-pull if not)
+	if err := e.ensureImage(ctx, img); err != nil {
+		return nil, fmt.Errorf("failed to ensure Docker image: %w", err)
 	}
 
 	// Build compilation command
@@ -99,7 +106,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, req *Request) (*Result, er
 
 	// Create container config with security settings
 	containerConfig := &container.Config{
-		Image:      image,
+		Image:      img,
 		Cmd:        []string{"/bin/sh", "-c", compileCmd},
 		WorkingDir: "/work",
 		Tty:        false,
@@ -271,4 +278,71 @@ func (e *DockerExecutor) getLogs(ctx context.Context, containerID string) (strin
 // Close closes the Docker client connection.
 func (e *DockerExecutor) Close() error {
 	return e.client.Close()
+}
+
+// ensureImage checks if the image exists locally and pulls it if not.
+// Also checks for updates if the image is older than 24 hours.
+func (e *DockerExecutor) ensureImage(ctx context.Context, imageName string) error {
+	// Add :latest tag if no tag specified
+	if !strings.Contains(imageName, ":") {
+		imageName += ":latest"
+	}
+
+	// Check if image exists locally
+	images, err := e.client.ImageList(ctx, image.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list images: %w", err)
+	}
+
+	imageExists := false
+	for _, img := range images {
+		for _, tag := range img.RepoTags {
+			if tag == imageName {
+				imageExists = true
+				break
+			}
+		}
+		if imageExists {
+			break
+		}
+	}
+
+	// Pull image if not exists
+	if !imageExists {
+		log.Info().Str("image", imageName).Msg("Pulling Docker image (first time)")
+		if err := e.pullImage(ctx, imageName); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// pullImage pulls a Docker image from the registry.
+func (e *DockerExecutor) pullImage(ctx context.Context, imageName string) error {
+	// Use a longer timeout for pulling images
+	pullCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
+	reader, err := e.client.ImagePull(pullCtx, imageName, image.PullOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to pull image %s: %w", imageName, err)
+	}
+	defer reader.Close()
+
+	// Read and discard the output (shows pull progress)
+	// Log progress periodically
+	buf := make([]byte, 1024)
+	for {
+		_, err := reader.Read(buf)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("error reading pull response: %w", err)
+		}
+	}
+
+	log.Info().Str("image", imageName).Msg("Docker image pulled successfully")
+	return nil
 }

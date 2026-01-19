@@ -47,22 +47,27 @@ type Client struct {
 
 // Hub manages WebSocket client connections.
 type Hub struct {
-	clients    map[*Client]bool
-	broadcast  chan []byte
-	register   chan *Client
-	unregister chan *Client
-	done       chan struct{}
-	mu         sync.RWMutex
+	clients      map[*Client]bool
+	broadcast    chan []byte
+	register     chan *Client
+	unregister   chan *Client
+	done         chan struct{}
+	mu           sync.RWMutex
+	recentEvents [][]byte // Store recent events for new clients
+	eventsMu     sync.RWMutex
+	maxEvents    int
 }
 
 // NewHub creates a new WebSocket hub.
 func NewHub() *Hub {
 	return &Hub{
-		clients:    make(map[*Client]bool),
-		broadcast:  make(chan []byte, 256),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-		done:       make(chan struct{}),
+		clients:      make(map[*Client]bool),
+		broadcast:    make(chan []byte, 256),
+		register:     make(chan *Client),
+		unregister:   make(chan *Client),
+		done:         make(chan struct{}),
+		recentEvents: make([][]byte, 0, 100),
+		maxEvents:    100, // Keep last 100 events
 	}
 }
 
@@ -75,6 +80,17 @@ func (h *Hub) Run() {
 			h.clients[client] = true
 			h.mu.Unlock()
 			log.Debug().Int("clients", len(h.clients)).Msg("WebSocket client connected")
+
+			// Send recent events to new client
+			h.eventsMu.RLock()
+			for _, event := range h.recentEvents {
+				select {
+				case client.send <- event:
+				default:
+					// Skip if client buffer full
+				}
+			}
+			h.eventsMu.RUnlock()
 
 		case client := <-h.unregister:
 			h.mu.Lock()
@@ -116,6 +132,18 @@ func (h *Hub) ClientCount() int {
 	return len(h.clients)
 }
 
+// GetRecentEvents returns recent events as parsed JSON.
+func (h *Hub) GetRecentEvents() []json.RawMessage {
+	h.eventsMu.RLock()
+	defer h.eventsMu.RUnlock()
+
+	events := make([]json.RawMessage, len(h.recentEvents))
+	for i, data := range h.recentEvents {
+		events[i] = json.RawMessage(data)
+	}
+	return events
+}
+
 // Broadcast sends a message to all connected clients.
 func (h *Hub) Broadcast(msg *Message) {
 	msg.Timestamp = time.Now().Unix()
@@ -123,6 +151,17 @@ func (h *Hub) Broadcast(msg *Message) {
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to marshal WebSocket message")
 		return
+	}
+
+	// Store task events for new clients (not stats updates)
+	if msg.Type == MessageTypeTaskStarted || msg.Type == MessageTypeTaskComplete {
+		h.eventsMu.Lock()
+		h.recentEvents = append(h.recentEvents, data)
+		// Keep only last maxEvents
+		if len(h.recentEvents) > h.maxEvents {
+			h.recentEvents = h.recentEvents[len(h.recentEvents)-h.maxEvents:]
+		}
+		h.eventsMu.Unlock()
 	}
 
 	select {

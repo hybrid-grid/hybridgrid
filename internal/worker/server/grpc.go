@@ -52,6 +52,8 @@ type Server struct {
 // New creates a new worker gRPC server.
 func New(cfg Config) *Server {
 	caps := capability.Detect()
+	// Set max parallel tasks from config
+	caps.MaxParallelTasks = int32(cfg.MaxConcurrent)
 
 	return &Server{
 		config:       cfg,
@@ -133,6 +135,11 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 		PreprocessedSource: req.PreprocessedSource,
 		TargetArch:         req.TargetArch,
 		Timeout:            timeout,
+		// Cross-compilation mode fields
+		RawSource:      req.RawSource,
+		SourceFilename: req.SourceFilename,
+		IncludeFiles:   req.IncludeFiles,
+		IncludePaths:   req.IncludePaths,
 	}
 
 	// Execute compilation

@@ -40,6 +40,7 @@ type WorkerInfo struct {
 	DiscoverySource string // "mdns", "wan", "manual"
 	LastHeartbeat   time.Time
 	RegisteredAt    time.Time
+	MaxParallel     int32 // Max concurrent tasks this worker can handle
 
 	// Metrics
 	ActiveTasks     int32
@@ -112,13 +113,22 @@ func NewInMemoryRegistry(ttl time.Duration) *InMemoryRegistry {
 	return r
 }
 
-// Add registers a new worker.
+// Add registers a new worker or updates an existing one.
 func (r *InMemoryRegistry) Add(worker *WorkerInfo) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, exists := r.workers[worker.ID]; exists {
-		return fmt.Errorf("worker %s already registered", worker.ID)
+	if existing, exists := r.workers[worker.ID]; exists {
+		// Update existing worker's capabilities and heartbeat
+		existing.Capabilities = worker.Capabilities
+		existing.Address = worker.Address
+		existing.MaxParallel = worker.MaxParallel
+		existing.LastHeartbeat = time.Now()
+		// Reset unhealthy state when worker heartbeats
+		if existing.State == WorkerStateUnhealthy {
+			existing.State = WorkerStateIdle
+		}
+		return nil
 	}
 
 	worker.RegisteredAt = time.Now()
@@ -198,14 +208,28 @@ func (r *InMemoryRegistry) matchesCapability(caps *pb.WorkerCapabilities, buildT
 
 	// Check architecture
 	if arch != pb.Architecture_ARCH_UNSPECIFIED {
-		if caps.NativeArch != arch && !caps.DockerAvailable {
+		archMatch := caps.NativeArch == arch
+		canCrossCompile := caps.DockerAvailable || (caps.Cpp != nil && caps.Cpp.CrossCompile)
+
+		if !archMatch && !canCrossCompile {
 			log.Debug().
 				Str("worker", caps.WorkerId).
 				Str("native_arch", caps.NativeArch.String()).
 				Str("requested_arch", arch.String()).
 				Bool("docker_available", caps.DockerAvailable).
+				Bool("cross_compile", caps.Cpp != nil && caps.Cpp.CrossCompile).
 				Msg("matchesCapability: architecture mismatch")
 			return false
+		}
+
+		if !archMatch && canCrossCompile {
+			log.Debug().
+				Str("worker", caps.WorkerId).
+				Str("native_arch", caps.NativeArch.String()).
+				Str("requested_arch", arch.String()).
+				Bool("docker", caps.DockerAvailable).
+				Bool("cross_compile", caps.Cpp != nil && caps.Cpp.CrossCompile).
+				Msg("matchesCapability: cross-compilation available")
 		}
 	}
 

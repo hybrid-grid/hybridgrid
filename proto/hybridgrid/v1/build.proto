@@ -272,13 +272,21 @@ message BuildMetadata {
 message CompileRequest {
   string task_id = 1;
   string source_hash = 2;
-  bytes preprocessed_source = 3;
+  bytes preprocessed_source = 3;    // Mode 1: Already preprocessed (same-OS only)
   repeated string compiler_args = 4;
   string compiler = 5;
   string compiler_version = 6;
   Architecture target_arch = 7;
   string docker_image = 8;
   int32 timeout_seconds = 9;
+  string client_os = 10;            // OS where preprocessing was done (linux, darwin, windows)
+  Architecture client_arch = 11;    // Architecture of the client machine
+
+  // Cross-compilation mode (Mode 2): Send raw source + project headers
+  bytes raw_source = 20;            // Raw source file (not preprocessed)
+  string source_filename = 21;      // Original filename with extension (e.g., "main.cpp")
+  map<string, bytes> include_files = 22;  // Bundled project headers (path -> content)
+  repeated string include_paths = 23;     // -I paths for headers
 }
 
 message CompileResponse {
@@ -366,4 +374,17 @@ service BuildService {
 
   // Query workers by capability
   rpc GetWorkersForBuild(WorkersForBuildRequest) returns (WorkersForBuildResponse);
+
+  // Report client-side cache hit (for dashboard stats)
+  rpc ReportCacheHit(ReportCacheHitRequest) returns (ReportCacheHitResponse);
+}
+
+// Request to report client-side cache hit
+message ReportCacheHitRequest {
+  int32 hits = 1;  // Number of cache hits to report
+}
+
+// Response for cache hit report
+message ReportCacheHitResponse {
+  bool acknowledged = 1;
 }

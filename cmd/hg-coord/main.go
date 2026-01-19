@@ -79,6 +79,10 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			dashCfg.Port = httpPort
 			dashSrv := dashboard.New(dashCfg, srv.NewStatsProvider())
 
+			// Wire up event notifications from coordinator to dashboard
+			onStart, onComplete := dashSrv.CreateEventNotifier()
+			srv.SetEventNotifier(&eventNotifierWrapper{onStart: onStart, onComplete: onComplete})
+
 			go func() {
 				if err := dashSrv.Start(); err != nil {
 					errCh <- fmt.Errorf("dashboard server: %w", err)
@@ -134,5 +138,23 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+// eventNotifierWrapper adapts dashboard callbacks to coordinator's EventNotifier interface.
+type eventNotifierWrapper struct {
+	onStart    func(id, buildType, status, workerID string, startedAt int64)
+	onComplete func(id, buildType, status, workerID string, startedAt, completedAt, durationMs int64, exitCode int32, errorMsg string)
+}
+
+func (w *eventNotifierWrapper) NotifyTaskStarted(event *coordserver.TaskEvent) {
+	if w.onStart != nil {
+		w.onStart(event.ID, event.BuildType, event.Status, event.WorkerID, event.StartedAt)
+	}
+}
+
+func (w *eventNotifierWrapper) NotifyTaskCompleted(event *coordserver.TaskEvent) {
+	if w.onComplete != nil {
+		w.onComplete(event.ID, event.BuildType, event.Status, event.WorkerID, event.StartedAt, event.CompletedAt, event.DurationMs, event.ExitCode, event.ErrorMessage)
 	}
 }

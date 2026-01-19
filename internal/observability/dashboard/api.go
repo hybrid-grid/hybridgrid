@@ -95,3 +95,20 @@ func (s *Server) handleWorkers(w http.ResponseWriter, r *http.Request) {
 		"timestamp": time.Now().Unix(),
 	})
 }
+
+// handleEvents returns recent events.
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	events := s.hub.GetRecentEvents()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"events":    events,
+		"count":     len(events),
+		"timestamp": time.Now().Unix(),
+	})
+}

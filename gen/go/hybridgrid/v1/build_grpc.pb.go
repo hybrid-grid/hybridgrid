@@ -26,6 +26,7 @@ const (
 	BuildService_HealthCheck_FullMethodName        = "/hybridgrid.v1.BuildService/HealthCheck"
 	BuildService_GetWorkerStatus_FullMethodName    = "/hybridgrid.v1.BuildService/GetWorkerStatus"
 	BuildService_GetWorkersForBuild_FullMethodName = "/hybridgrid.v1.BuildService/GetWorkersForBuild"
+	BuildService_ReportCacheHit_FullMethodName     = "/hybridgrid.v1.BuildService/ReportCacheHit"
 )
 
 // BuildServiceClient is the client API for BuildService service.
@@ -46,6 +47,8 @@ type BuildServiceClient interface {
 	GetWorkerStatus(ctx context.Context, in *WorkerStatusRequest, opts ...grpc.CallOption) (*WorkerStatusResponse, error)
 	// Query workers by capability
 	GetWorkersForBuild(ctx context.Context, in *WorkersForBuildRequest, opts ...grpc.CallOption) (*WorkersForBuildResponse, error)
+	// Report client-side cache hit (for dashboard stats)
+	ReportCacheHit(ctx context.Context, in *ReportCacheHitRequest, opts ...grpc.CallOption) (*ReportCacheHitResponse, error)
 }
 
 type buildServiceClient struct {
@@ -129,6 +132,16 @@ func (c *buildServiceClient) GetWorkersForBuild(ctx context.Context, in *Workers
 	return out, nil
 }
 
+func (c *buildServiceClient) ReportCacheHit(ctx context.Context, in *ReportCacheHitRequest, opts ...grpc.CallOption) (*ReportCacheHitResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportCacheHitResponse)
+	err := c.cc.Invoke(ctx, BuildService_ReportCacheHit_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // BuildServiceServer is the server API for BuildService service.
 // All implementations must embed UnimplementedBuildServiceServer
 // for forward compatibility.
@@ -147,6 +160,8 @@ type BuildServiceServer interface {
 	GetWorkerStatus(context.Context, *WorkerStatusRequest) (*WorkerStatusResponse, error)
 	// Query workers by capability
 	GetWorkersForBuild(context.Context, *WorkersForBuildRequest) (*WorkersForBuildResponse, error)
+	// Report client-side cache hit (for dashboard stats)
+	ReportCacheHit(context.Context, *ReportCacheHitRequest) (*ReportCacheHitResponse, error)
 	mustEmbedUnimplementedBuildServiceServer()
 }
 
@@ -177,6 +192,9 @@ func (UnimplementedBuildServiceServer) GetWorkerStatus(context.Context, *WorkerS
 }
 func (UnimplementedBuildServiceServer) GetWorkersForBuild(context.Context, *WorkersForBuildRequest) (*WorkersForBuildResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetWorkersForBuild not implemented")
+}
+func (UnimplementedBuildServiceServer) ReportCacheHit(context.Context, *ReportCacheHitRequest) (*ReportCacheHitResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportCacheHit not implemented")
 }
 func (UnimplementedBuildServiceServer) mustEmbedUnimplementedBuildServiceServer() {}
 func (UnimplementedBuildServiceServer) testEmbeddedByValue()                      {}
@@ -314,6 +332,24 @@ func _BuildService_GetWorkersForBuild_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _BuildService_ReportCacheHit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportCacheHitRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BuildServiceServer).ReportCacheHit(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BuildService_ReportCacheHit_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BuildServiceServer).ReportCacheHit(ctx, req.(*ReportCacheHitRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // BuildService_ServiceDesc is the grpc.ServiceDesc for BuildService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -344,6 +380,10 @@ var BuildService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetWorkersForBuild",
 			Handler:    _BuildService_GetWorkersForBuild_Handler,
+		},
+		{
+			MethodName: "ReportCacheHit",
+			Handler:    _BuildService_ReportCacheHit_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

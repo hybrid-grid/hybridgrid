@@ -31,7 +31,7 @@ func TestSimpleScheduler_NoWorkers(t *testing.T) {
 
 	s := NewSimpleScheduler(reg)
 
-	_, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64)
+	_, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
 	if err != ErrNoWorkers {
 		t.Errorf("Expected ErrNoWorkers, got %v", err)
 	}
@@ -56,7 +56,7 @@ func TestSimpleScheduler_NoMatchingWorkers(t *testing.T) {
 	s := NewSimpleScheduler(reg)
 
 	// Ask for C++ worker
-	_, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64)
+	_, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
 	if err != ErrNoMatchingWorkers {
 		t.Errorf("Expected ErrNoMatchingWorkers, got %v", err)
 	}
@@ -70,7 +70,7 @@ func TestSimpleScheduler_SelectSingle(t *testing.T) {
 
 	s := NewSimpleScheduler(reg)
 
-	worker, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64)
+	worker, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
 	if err != nil {
 		t.Fatalf("Select failed: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestSimpleScheduler_RoundRobin(t *testing.T) {
 	counts := make(map[string]int)
 
 	for i := 0; i < 30; i++ {
-		worker, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64)
+		worker, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
 		if err != nil {
 			t.Fatalf("Select failed: %v", err)
 		}
@@ -124,7 +124,7 @@ func TestSimpleScheduler_SkipsUnhealthy(t *testing.T) {
 
 	// All selections should be worker-2
 	for i := 0; i < 10; i++ {
-		worker, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64)
+		worker, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
 		if err != nil {
 			t.Fatalf("Select failed: %v", err)
 		}
@@ -149,7 +149,7 @@ func TestLeastLoadedScheduler_SelectsLeastLoaded(t *testing.T) {
 
 	s := NewLeastLoadedScheduler(reg)
 
-	worker, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64)
+	worker, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
 	if err != nil {
 		t.Fatalf("Select failed: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestLeastLoadedScheduler_SkipsUnhealthy(t *testing.T) {
 
 	s := NewLeastLoadedScheduler(reg)
 
-	worker, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64)
+	worker, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
 	if err != nil {
 		t.Fatalf("Select failed: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestP2CScheduler_NoWorkers(t *testing.T) {
 
 	s := NewP2CScheduler(P2CConfig{Registry: reg})
 
-	_, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64)
+	_, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
 	if err != ErrNoWorkers {
 		t.Errorf("Expected ErrNoWorkers, got %v", err)
 	}
@@ -224,7 +224,7 @@ func TestP2CScheduler_SingleWorker(t *testing.T) {
 
 	s := NewP2CScheduler(P2CConfig{Registry: reg})
 
-	worker, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64)
+	worker, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
 	if err != nil {
 		t.Fatalf("Select failed: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestP2CScheduler_PrefersBetterWorker(t *testing.T) {
 	// Run multiple selections - worker-2 should be preferred
 	counts := make(map[string]int)
 	for i := 0; i < 100; i++ {
-		worker, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64)
+		worker, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
 		if err != nil {
 			t.Fatalf("Select failed: %v", err)
 		}
@@ -279,7 +279,7 @@ func TestP2CScheduler_SkipsOpenCircuit(t *testing.T) {
 
 	// All selections should be worker-2
 	for i := 0; i < 10; i++ {
-		worker, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64)
+		worker, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
 		if err != nil {
 			t.Fatalf("Select failed: %v", err)
 		}
@@ -300,7 +300,7 @@ func TestP2CScheduler_SkipsOverloadedWorkers(t *testing.T) {
 
 	// Worker-1 is at max tasks, should prefer worker-2
 	for i := 0; i < 10; i++ {
-		worker, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64)
+		worker, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
 		if err != nil {
 			t.Fatalf("Select failed: %v", err)
 		}

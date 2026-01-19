@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -114,7 +116,14 @@ It executes build tasks received from the coordinator.`,
 			// Determine worker address to advertise
 			workerAddr := advertiseAddr
 			if workerAddr == "" {
-				workerAddr = fmt.Sprintf("%s:%d", hostname, port)
+				// Auto-detect outbound IP by checking which interface routes to coordinator
+				if ip := getOutboundIP(coordinator); ip != "" {
+					workerAddr = fmt.Sprintf("%s:%d", ip, port)
+					log.Info().Str("detected_ip", ip).Msg("Auto-detected outbound IP for advertisement")
+				} else {
+					workerAddr = fmt.Sprintf("%s:%d", hostname, port)
+					log.Warn().Str("fallback", workerAddr).Msg("Could not detect IP, using hostname")
+				}
 			}
 
 			// Register with coordinator
@@ -217,4 +226,24 @@ It executes build tasks received from the coordinator.`,
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// getOutboundIP returns the preferred outbound IP for reaching the target address.
+// This finds which local IP would be used to connect to the coordinator.
+func getOutboundIP(target string) string {
+	// Extract host from target (remove port if present)
+	host := target
+	if idx := strings.LastIndex(target, ":"); idx != -1 {
+		host = target[:idx]
+	}
+
+	// Try to dial UDP (doesn't actually connect, just determines route)
+	conn, err := net.Dial("udp", host+":80")
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP.String()
 }

@@ -65,7 +65,7 @@ Environment:
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file (default: ~/.hybridgrid/config.yaml)")
 	rootCmd.PersistentFlags().StringVarP(&coordinator, "coordinator", "C", "", "coordinator address (auto-discover if empty)")
 	rootCmd.PersistentFlags().BoolVar(&insecure, "insecure", true, "use insecure connection")
-	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 10*time.Second, "connection timeout")
+	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 2*time.Minute, "connection timeout")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 
 	// Commands
@@ -473,18 +473,16 @@ func newCacheCmd() *cobra.Command {
 		Use:   "stats",
 		Short: "Show cache statistics",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, _ := config.Load(cfgFile)
-			if cfg == nil {
-				cfg = config.DefaultConfig()
-			}
+			// Use the same cache directory as build service
+			buildCfg := build.DefaultConfig()
 
-			store, err := cache.NewStore(cfg.Cache.Dir, cfg.Cache.MaxSize, cfg.Cache.TTLHours)
+			store, err := cache.NewStore(buildCfg.CacheDir, buildCfg.CacheMaxSize, buildCfg.CacheTTLHours)
 			if err != nil {
 				return fmt.Errorf("failed to open cache: %w", err)
 			}
 
 			stats := store.Stats()
-			fmt.Printf("Cache Directory: %s\n", cfg.Cache.Dir)
+			fmt.Printf("Cache Directory: %s\n", buildCfg.CacheDir)
 			fmt.Printf("Entries:         %d\n", stats.Entries)
 			fmt.Printf("Size:            %.2f MB / %.0f MB\n",
 				float64(stats.TotalSize)/(1024*1024), float64(stats.MaxSize)/(1024*1024))
@@ -498,12 +496,10 @@ func newCacheCmd() *cobra.Command {
 		Use:   "clear",
 		Short: "Clear the cache",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, _ := config.Load(cfgFile)
-			if cfg == nil {
-				cfg = config.DefaultConfig()
-			}
+			// Use the same cache directory as build service
+			buildCfg := build.DefaultConfig()
 
-			store, err := cache.NewStore(cfg.Cache.Dir, cfg.Cache.MaxSize, cfg.Cache.TTLHours)
+			store, err := cache.NewStore(buildCfg.CacheDir, buildCfg.CacheMaxSize, buildCfg.CacheTTLHours)
 			if err != nil {
 				return fmt.Errorf("failed to open cache: %w", err)
 			}
@@ -626,6 +622,11 @@ func filterHgbuildFlags(args []string) []string {
 
 // runCompiler handles distributed compilation for cc/c++ commands.
 func runCompiler(defaultCompiler, envVar string, args []string) error {
+	// Check HG_VERBOSE environment variable
+	if os.Getenv("HG_VERBOSE") == "1" {
+		verbose = true
+	}
+
 	// Filter out hgbuild-specific flags from compiler args
 	compilerArgs := filterHgbuildFlags(args)
 
@@ -856,12 +857,15 @@ func wrapBuildCommand(command string, args []string) error {
 		return fmt.Errorf("failed to find hgbuild executable: %w", err)
 	}
 
+	ccValue := self + " cc"
+	cxxValue := self + " c++"
+
 	// Build environment
 	env := os.Environ()
 
-	// Set CC and CXX to use hgbuild
-	env = setEnv(env, "CC", self+" cc")
-	env = setEnv(env, "CXX", self+" c++")
+	// Set CC and CXX environment variables (for build systems that respect them)
+	env = setEnv(env, "CC", ccValue)
+	env = setEnv(env, "CXX", cxxValue)
 
 	// Pass through coordinator address if specified
 	if coordinator != "" {
@@ -873,14 +877,21 @@ func wrapBuildCommand(command string, args []string) error {
 		env = setEnv(env, "HG_VERBOSE", "1")
 	}
 
+	// For make, also pass CC/CXX as command-line arguments
+	// This overrides Makefile assignments (which take precedence over env vars)
+	finalArgs := args
+	if command == "make" {
+		finalArgs = append([]string{"CC=" + ccValue, "CXX=" + cxxValue}, args...)
+	}
+
 	if verbose {
-		fmt.Fprintf(os.Stderr, "[wrap] CC=%s cc\n", self)
-		fmt.Fprintf(os.Stderr, "[wrap] CXX=%s c++\n", self)
-		fmt.Fprintf(os.Stderr, "[wrap] Running: %s %s\n", command, strings.Join(args, " "))
+		fmt.Fprintf(os.Stderr, "[wrap] CC=%s\n", ccValue)
+		fmt.Fprintf(os.Stderr, "[wrap] CXX=%s\n", cxxValue)
+		fmt.Fprintf(os.Stderr, "[wrap] Running: %s %s\n", command, strings.Join(finalArgs, " "))
 	}
 
 	// Execute wrapped command
-	cmd := exec.Command(command, args...)
+	cmd := exec.Command(command, finalArgs...)
 	cmd.Env = env
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
