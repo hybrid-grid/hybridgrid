@@ -1,6 +1,6 @@
 module github.com/h3nr1-d14z/hybridgrid
 
-go 1.22.0
+go 1.23.0
 
 require (
 	github.com/cenkalti/backoff/v4 v4.3.0

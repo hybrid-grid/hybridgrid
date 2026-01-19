@@ -7,7 +7,8 @@ project_name: hybridgrid
 
 before:
   hooks:
-    - go mod tidy
+    # Skip go mod tidy - dependencies already committed and some require Go 1.24+
+    # - go mod tidy
     - go generate ./...
 
 builds:
