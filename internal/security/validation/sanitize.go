@@ -246,10 +246,20 @@ func isWindowsReservedName(name string) bool {
 }
 
 // hasWindowsInvalidChars checks if the path contains characters invalid on Windows.
+// Note: Colons are allowed as part of drive letters (e.g., "C:\") but not elsewhere.
 func hasWindowsInvalidChars(path string) bool {
-	for _, c := range WindowsInvalidChars {
-		if strings.ContainsRune(path, rune(c)) {
-			return true
+	for i, r := range path {
+		// Allow colon only at position 1 (drive letter, e.g., "C:")
+		if r == ':' {
+			if i != 1 {
+				return true
+			}
+			continue
+		}
+		for _, c := range WindowsInvalidChars {
+			if r == rune(c) {
+				return true
+			}
 		}
 	}
 	return false

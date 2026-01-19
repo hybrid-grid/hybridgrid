@@ -387,11 +387,14 @@ func TestWindowsPathValidation(t *testing.T) {
 		{"reserved name COM1", "COM1", false},
 		{"invalid char <", "foo<bar", false},
 		{"invalid char >", "foo>bar", false},
-		{"invalid char :", "foo:bar", false},
+		{"invalid char : in filename", "foo:bar", false},
 		{"invalid char |", "foo|bar", false},
 		{"invalid char ?", "foo?bar", false},
 		{"invalid char *", "foo*bar", false},
 		{"valid with numbers", "abc123", true},
+		{"valid drive letter C:", "C:\\folder\\file.txt", true},
+		{"valid drive letter D:", "D:\\test", true},
+		{"invalid colon after drive", "C:\\foo:bar", false},
 	}
 
 	for _, tt := range tests {
