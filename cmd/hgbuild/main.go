@@ -21,9 +21,9 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/build"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/output"
 	"github.com/h3nr1-d14z/hybridgrid/internal/compiler"
-	"github.com/h3nr1-d14z/hybridgrid/internal/graph"
 	"github.com/h3nr1-d14z/hybridgrid/internal/config"
 	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
+	"github.com/h3nr1-d14z/hybridgrid/internal/graph"
 	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/client"
 )
 

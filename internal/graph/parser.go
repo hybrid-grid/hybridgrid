@@ -45,10 +45,10 @@ func (p *Parser) validatePath(path string) error {
 	// Check file extension - only allow known build file types
 	base := filepath.Base(absPath)
 	validExtensions := map[string]bool{
-		"Makefile":               true,
-		"makefile":               true,
-		"GNUmakefile":            true,
-		"compile_commands.json":  true,
+		"Makefile":              true,
+		"makefile":              true,
+		"GNUmakefile":           true,
+		"compile_commands.json": true,
 	}
 	validSuffixes := []string{".mk", ".make"}
 
@@ -224,11 +224,11 @@ func (p *Parser) ParseCompileCommands(path string) (*Graph, error) {
 
 // CompileCommand represents an entry in compile_commands.json.
 type CompileCommand struct {
-	Directory string `json:"directory"`
-	Command   string `json:"command"`
-	File      string `json:"file"`
+	Directory string   `json:"directory"`
+	Command   string   `json:"command"`
+	File      string   `json:"file"`
 	Arguments []string `json:"arguments"`
-	Output    string `json:"output"`
+	Output    string   `json:"output"`
 }
 
 // processCompileCommand processes a compile command and extracts dependencies.
