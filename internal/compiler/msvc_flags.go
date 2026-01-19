@@ -220,9 +220,7 @@ func TranslateToMSVC(args []string) []string {
 			if translated, ok := GCCToMSVCFlags[arg]; ok {
 				if translated != "" {
 					// Some translations have multiple flags
-					for _, f := range strings.Fields(translated) {
-						result = append(result, f)
-					}
+					result = append(result, strings.Fields(translated)...)
 				}
 			}
 			i++
@@ -252,9 +250,7 @@ func TranslateToMSVC(args []string) []string {
 		if strings.HasPrefix(arg, "-O") {
 			if translated, ok := GCCToMSVCFlags[arg]; ok {
 				if translated != "" {
-					for _, f := range strings.Fields(translated) {
-						result = append(result, f)
-					}
+					result = append(result, strings.Fields(translated)...)
 				}
 			}
 			i++
@@ -275,9 +271,7 @@ func TranslateToMSVC(args []string) []string {
 		// Check direct mapping
 		if translated, ok := GCCToMSVCFlags[arg]; ok {
 			if translated != "" {
-				for _, f := range strings.Fields(translated) {
-					result = append(result, f)
-				}
+				result = append(result, strings.Fields(translated)...)
 			}
 			i++
 			continue

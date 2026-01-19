@@ -8,16 +8,22 @@ func IsWindowsService() bool {
 }
 
 // runAsService is a no-op on non-Windows platforms.
+//
+//nolint:unused
 func runAsService(grpcPort, httpPort int, token string, noMdns bool) error {
 	return nil
 }
 
 // installService is a no-op on non-Windows platforms.
+//
+//nolint:unused
 func installService(exePath string) error {
 	return nil
 }
 
 // uninstallService is a no-op on non-Windows platforms.
+//
+//nolint:unused
 func uninstallService() error {
 	return nil
 }

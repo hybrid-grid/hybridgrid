@@ -22,21 +22,6 @@ var windowsReservedNames = []string{
 // windowsInvalidChars are characters that cannot be used in Windows filenames.
 var windowsInvalidChars = []byte{'<', '>', ':', '"', '|', '?', '*'}
 
-// isWindowsReservedName checks if the given name is a Windows reserved device name.
-func isWindowsReservedName(name string) bool {
-	base := strings.ToUpper(name)
-	// Strip extension if present
-	if idx := strings.LastIndex(base, "."); idx != -1 {
-		base = base[:idx]
-	}
-	for _, reserved := range windowsReservedNames {
-		if base == reserved {
-			return true
-		}
-	}
-	return false
-}
-
 // hasWindowsInvalidChars checks if the string contains characters invalid on Windows.
 func hasWindowsInvalidChars(s string) bool {
 	for _, c := range windowsInvalidChars {

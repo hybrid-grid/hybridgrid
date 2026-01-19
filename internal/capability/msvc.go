@@ -79,10 +79,7 @@ func detectMSVCFromEnv() *MSVCInfo {
 	}
 
 	// Get Windows SDK version
-	info.WindowsSDK = os.Getenv("WindowsSDKVersion")
-	if strings.HasSuffix(info.WindowsSDK, "\\") {
-		info.WindowsSDK = strings.TrimSuffix(info.WindowsSDK, "\\")
-	}
+	info.WindowsSDK = strings.TrimSuffix(os.Getenv("WindowsSDKVersion"), "\\")
 
 	// Find cl.exe
 	info.ClExePath = findClExe(info.VCToolsPath)
