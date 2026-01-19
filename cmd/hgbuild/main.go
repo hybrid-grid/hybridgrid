@@ -514,15 +514,6 @@ func newCacheCmd() *cobra.Command {
 	return cmd
 }
 
-// Helper functions
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max-3] + "..."
-}
-
 // =============================================================================
 // Graph Command
 // =============================================================================

@@ -43,7 +43,7 @@ func NewProgress(cfg ProgressConfig) *ProgressBar {
 		progressbar.OptionShowIts(),
 		progressbar.OptionSetItsString("files"),
 		progressbar.OptionOnCompletion(func() {
-			io.WriteString(writer, "\n")
+			_, _ = io.WriteString(writer, "\n")
 		}),
 		progressbar.OptionSetTheme(progressbar.Theme{
 			Saucer:        "█",
@@ -103,7 +103,7 @@ func CompileProgress(total int, description string) *ProgressBar {
 		progressbar.OptionSetPredictTime(true),
 		progressbar.OptionShowElapsedTimeOnFinish(),
 		progressbar.OptionOnCompletion(func() {
-			io.WriteString(os.Stderr, "\n")
+			_, _ = io.WriteString(os.Stderr, "\n")
 		}),
 		progressbar.OptionSetTheme(progressbar.Theme{
 			Saucer:        Success("█"),
@@ -140,7 +140,7 @@ func DownloadProgress(totalBytes int64, description string) *ProgressBar {
 		progressbar.OptionShowCount(),
 		progressbar.OptionSetPredictTime(true),
 		progressbar.OptionOnCompletion(func() {
-			io.WriteString(os.Stderr, "\n")
+			_, _ = io.WriteString(os.Stderr, "\n")
 		}),
 		progressbar.OptionSetTheme(progressbar.Theme{
 			Saucer:        Info("█"),
