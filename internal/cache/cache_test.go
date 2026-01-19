@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -587,7 +588,10 @@ func TestCompilationKey_DifferentInputs(t *testing.T) {
 }
 
 func TestNewStore_CreateDirError(t *testing.T) {
-	// Try to create store in a path that can't be created
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping invalid path test on Windows (path validation differs)")
+	}
+	// Try to create store in a path that can't be created (Unix-specific)
 	_, err := NewStore("/dev/null/impossible", 10, 24)
 	if err == nil {
 		t.Error("Expected error when creating store in invalid path")

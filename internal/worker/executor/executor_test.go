@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -257,6 +258,9 @@ func TestIsInputFile(t *testing.T) {
 }
 
 func TestDockerExecutor_Integration(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping Docker test on Windows (read-only root fs not supported)")
+	}
 	// Skip if Docker not available
 	dockerExec, err := NewDockerExecutor()
 	if err != nil {
@@ -319,6 +323,9 @@ int main() { return add(1, 2); }`)
 }
 
 func TestDockerExecutor_CompileError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping Docker test on Windows (read-only root fs not supported)")
+	}
 	dockerExec, err := NewDockerExecutor()
 	if err != nil {
 		t.Skipf("Docker not available: %v", err)

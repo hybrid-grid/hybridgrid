@@ -1,6 +1,7 @@
 package validation
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 
@@ -248,6 +249,9 @@ func TestSanitizeCompilerArgs_RemovesDangerousFlags(t *testing.T) {
 }
 
 func TestSanitizeCompilerArgs_RemovesPathTraversal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping Unix path test on Windows")
+	}
 	args := []string{"-O2", "-I../../../etc/passwd", "-I/usr/include"}
 	sanitized, removed := SanitizeCompilerArgs(args)
 
@@ -260,6 +264,9 @@ func TestSanitizeCompilerArgs_RemovesPathTraversal(t *testing.T) {
 }
 
 func TestSanitizePath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping Unix path test on Windows")
+	}
 	tests := []struct {
 		name     string
 		basePath string
