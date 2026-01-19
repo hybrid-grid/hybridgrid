@@ -316,7 +316,7 @@ func TestPreprocessor_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	_, err = p.Preprocess(ctx, args, srcFile)
+	_, _ = p.Preprocess(ctx, args, srcFile)
 	// Should either fail due to cancellation or succeed quickly
 	// This test mainly ensures no panic
 }

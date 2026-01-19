@@ -76,7 +76,7 @@ func TestCircuitManager_Execute_Failure(t *testing.T) {
 	}
 
 	// Second failure should trip the breaker (50% failure with 2 requests)
-	_, err = m.Execute("worker-1", func() (interface{}, error) {
+	_, _ = m.Execute("worker-1", func() (interface{}, error) {
 		return nil, testErr
 	})
 

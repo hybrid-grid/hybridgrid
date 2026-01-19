@@ -51,7 +51,8 @@ func (e *NativeExecutor) Execute(ctx context.Context, req *Request) (*Result, er
 	// Check if using raw source mode (cross-compilation) or preprocessed mode
 	if len(req.RawSource) > 0 {
 		// Mode 2: Raw source - need to set up includes and compile from scratch
-		srcFile, args, err = e.setupRawSourceMode(workDir, req, outFile)
+		// srcFile is embedded in args, so we discard it
+		_, args, err = e.setupRawSourceMode(workDir, req, outFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to setup raw source: %w", err)
 		}

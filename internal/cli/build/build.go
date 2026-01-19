@@ -266,71 +266,6 @@ func (s *Service) Build(ctx context.Context, req *Request) (*Result, error) {
 	return result, nil
 }
 
-// compileRemote sends compilation to a remote worker with retry logic.
-func (s *Service) compileRemote(ctx context.Context, req *Request, preprocessed []byte) (*remoteResult, error) {
-	compileReq := &pb.CompileRequest{
-		TaskId:             req.TaskID,
-		Compiler:           req.Args.Compiler,
-		CompilerArgs:       s.buildRemoteArgs(req.Args),
-		PreprocessedSource: preprocessed,
-		TargetArch:         req.TargetArch,
-		TimeoutSeconds:     int32(req.Timeout.Seconds()),
-		ClientOs:           getClientOS(),
-		ClientArch:         getClientArch(),
-	}
-
-	var lastErr error
-	delay := s.retryDelay
-	maxRetries := s.maxRetries
-	if maxRetries <= 0 {
-		maxRetries = 1
-	}
-
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		if attempt > 0 {
-			if s.verbose {
-				log.Debug().
-					Int("attempt", attempt+1).
-					Int("max_retries", maxRetries).
-					Dur("delay", delay).
-					Str("task_id", req.TaskID).
-					Msg("Retrying remote compilation")
-			}
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(delay):
-			}
-			delay *= 2 // Exponential backoff
-			if delay > 5*time.Second {
-				delay = 5 * time.Second // Cap at 5 seconds
-			}
-		}
-
-		resp, err := s.client.Compile(ctx, compileReq)
-		if err != nil {
-			lastErr = err
-			// Check if error is retryable (network errors, timeouts)
-			if isRetryableError(err) {
-				continue
-			}
-			// Non-retryable error, return immediately
-			return nil, err
-		}
-
-		return &remoteResult{
-			ObjectFile:      resp.ObjectFile,
-			ExitCode:        int(resp.ExitCode),
-			Stdout:          resp.Stdout,
-			Stderr:          resp.Stderr,
-			CompilationTime: time.Duration(resp.CompilationTimeMs) * time.Millisecond,
-			WorkerID:        resp.WorkerId,
-		}, nil
-	}
-
-	return nil, fmt.Errorf("remote compilation failed after %d attempts: %w", maxRetries, lastErr)
-}
-
 // isRetryableError checks if an error is transient and worth retrying.
 func isRetryableError(err error) bool {
 	if err == nil {
@@ -502,9 +437,7 @@ func (s *Service) buildRemoteArgsForRaw(args *compiler.ParsedArgs) []string {
 	remoteArgs = append(remoteArgs, "-c")
 
 	// Keep all flags including -I and -D (needed for raw source compilation)
-	for _, flag := range args.Flags {
-		remoteArgs = append(remoteArgs, flag)
-	}
+	remoteArgs = append(remoteArgs, args.Flags...)
 
 	// Add standard if specified
 	if args.Standard != "" {
