@@ -104,6 +104,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-push
     permissions:
+      contents: read
+      packages: read
       security-events: write
 
     strategy:
@@ -111,6 +113,13 @@ jobs:
         target: [hg-coord, hg-worker]
 
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Run Trivy vulnerability scan
         uses: aquasecurity/trivy-action@master
         with:
