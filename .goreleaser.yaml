@@ -137,17 +137,18 @@ release:
     docker pull ghcr.io/hybrid-grid/hg-worker:{{ .Version }}
     ```
 
-brews:
-  - repository:
-      owner: hybrid-grid
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    homepage: https://github.com/hybrid-grid/hybridgrid
-    description: Distributed multi-platform build system
-    license: MIT
-    install: |
-      bin.install "hg-coord"
-      bin.install "hg-worker"
-      bin.install "hgbuild"
-    test: |
-      system "#{bin}/hgbuild", "version"
+# Homebrew tap disabled until HOMEBREW_TAP_TOKEN secret is configured
+# brews:
+#   - repository:
+#       owner: hybrid-grid
+#       name: homebrew-tap
+#       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+#     homepage: https://github.com/hybrid-grid/hybridgrid
+#     description: Distributed multi-platform build system
+#     license: MIT
+#     install: |
+#       bin.install "hg-coord"
+#       bin.install "hg-worker"
+#       bin.install "hgbuild"
+#     test: |
+#       system "#{bin}/hgbuild", "version"
