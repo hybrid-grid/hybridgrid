@@ -2,8 +2,19 @@ package validation
 
 import (
 	"path/filepath"
+	"runtime"
 	"strings"
 )
+
+// WindowsReservedNames are device names that cannot be used as filenames on Windows.
+var WindowsReservedNames = []string{
+	"CON", "PRN", "AUX", "NUL",
+	"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+	"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+}
+
+// WindowsInvalidChars are characters that cannot be used in Windows filenames.
+var WindowsInvalidChars = []byte{'<', '>', ':', '"', '|', '?', '*'}
 
 // DangerousFlags are compiler flags that should be blocked.
 var DangerousFlags = []string{
@@ -96,10 +107,17 @@ func SanitizePath(basePath, path string) string {
 		return ""
 	}
 
+	// On Windows, validate for reserved names and invalid characters
+	if runtime.GOOS == "windows" {
+		if errMsg := ValidatePathForWindows(cleaned); errMsg != "" {
+			return ""
+		}
+	}
+
 	// Handle absolute paths
 	if filepath.IsAbs(cleaned) {
 		// If path is already absolute, verify it's within basePath
-		if basePath != "" && !strings.HasPrefix(cleaned, basePath) {
+		if basePath != "" && !pathStartsWithBase(cleaned, basePath) {
 			return ""
 		}
 		return cleaned
@@ -109,7 +127,7 @@ func SanitizePath(basePath, path string) string {
 	if basePath != "" {
 		abs := filepath.Join(basePath, cleaned)
 		abs = filepath.Clean(abs)
-		if !strings.HasPrefix(abs, basePath) {
+		if !pathStartsWithBase(abs, basePath) {
 			return ""
 		}
 		return abs
@@ -191,8 +209,12 @@ func hasShellMetaChars(s string) bool {
 }
 
 func containsPathTraversal(path string) bool {
-	// Check for .. segments
-	parts := strings.Split(path, string(filepath.Separator))
+	// Normalize path separators for cross-platform support
+	// Convert backslashes to forward slashes before checking
+	normalizedPath := filepath.ToSlash(path)
+
+	// Check for .. segments using both separators
+	parts := strings.Split(normalizedPath, "/")
 	for _, part := range parts {
 		if part == ".." {
 			return true
@@ -205,4 +227,70 @@ func containsPathTraversal(path string) bool {
 	}
 
 	return false
+}
+
+// isWindowsReservedName checks if the given name is a Windows reserved device name.
+func isWindowsReservedName(name string) bool {
+	// Strip extension if present (CON.txt is still reserved)
+	base := strings.ToUpper(name)
+	if idx := strings.LastIndex(base, "."); idx != -1 {
+		base = base[:idx]
+	}
+
+	for _, reserved := range WindowsReservedNames {
+		if base == reserved {
+			return true
+		}
+	}
+	return false
+}
+
+// hasWindowsInvalidChars checks if the path contains characters invalid on Windows.
+func hasWindowsInvalidChars(path string) bool {
+	for _, c := range WindowsInvalidChars {
+		if strings.ContainsRune(path, rune(c)) {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidatePathForWindows checks if a path is valid on Windows.
+// Returns an error message if invalid, empty string if valid.
+func ValidatePathForWindows(path string) string {
+	if path == "" {
+		return ""
+	}
+
+	// Check for invalid characters
+	if hasWindowsInvalidChars(path) {
+		return "path contains invalid Windows characters"
+	}
+
+	// Check each component for reserved names
+	normalizedPath := filepath.ToSlash(path)
+	parts := strings.Split(normalizedPath, "/")
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		if isWindowsReservedName(part) {
+			return "path contains Windows reserved name: " + part
+		}
+	}
+
+	return ""
+}
+
+// pathStartsWithBase checks if fullPath starts with basePath, using case-insensitive
+// comparison on Windows.
+func pathStartsWithBase(fullPath, basePath string) bool {
+	fullPath = filepath.Clean(fullPath)
+	basePath = filepath.Clean(basePath)
+
+	if runtime.GOOS == "windows" {
+		// Windows paths are case-insensitive
+		return strings.HasPrefix(strings.ToLower(fullPath), strings.ToLower(basePath))
+	}
+	return strings.HasPrefix(fullPath, basePath)
 }

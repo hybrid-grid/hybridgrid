@@ -104,9 +104,13 @@ message NodeConfig {
 // ============================================================
 
 message CppCapability {
-  repeated string compilers = 1;    // [gcc, clang]
+  repeated string compilers = 1;    // [gcc, clang, cl.exe]
   bool cross_compile = 2;
   repeated string docker_images = 3;
+  // MSVC-specific fields (Windows only)
+  string msvc_version = 4;          // e.g., "2022", "2019"
+  repeated string msvc_architectures = 5;  // e.g., ["x64", "x86", "arm64"]
+  bool has_windows_sdk = 6;         // Whether Windows SDK is available
 }
 
 message FlutterCapability {

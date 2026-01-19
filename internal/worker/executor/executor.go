@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
@@ -49,6 +50,7 @@ type Executor interface {
 type Manager struct {
 	native     Executor
 	docker     Executor
+	msvc       Executor
 	nativeArch pb.Architecture
 }
 
@@ -64,6 +66,12 @@ func NewManager(nativeArch pb.Architecture, dockerAvailable bool) *Manager {
 		if err == nil {
 			m.docker = docker
 		}
+	}
+
+	// Try to initialize MSVC executor on Windows
+	msvc, err := NewMSVCExecutor()
+	if err == nil {
+		m.msvc = msvc
 	}
 
 	return m
@@ -83,6 +91,30 @@ func (m *Manager) Select(targetArch pb.Architecture) Executor {
 
 	// Fall back to native (might fail, but let it try)
 	return m.native
+}
+
+// SelectForCompiler chooses the appropriate executor based on compiler and target architecture.
+func (m *Manager) SelectForCompiler(compiler string, targetArch pb.Architecture) Executor {
+	// If compiler is MSVC (cl.exe), use MSVC executor
+	if m.msvc != nil && isMSVCCompiler(compiler) {
+		if m.msvc.CanExecute(targetArch, m.nativeArch) {
+			return m.msvc
+		}
+	}
+
+	// Otherwise use standard selection
+	return m.Select(targetArch)
+}
+
+// GetMSVC returns the MSVC executor if available.
+func (m *Manager) GetMSVC() Executor {
+	return m.msvc
+}
+
+// isMSVCCompiler checks if the compiler is MSVC.
+func isMSVCCompiler(compiler string) bool {
+	lower := strings.ToLower(compiler)
+	return strings.Contains(lower, "cl.exe") || lower == "cl"
 }
 
 // Execute runs a compilation using the appropriate executor.

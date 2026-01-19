@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -127,11 +129,15 @@ func (e *DockerExecutor) Execute(ctx context.Context, req *Request) (*Result, er
 			NanoCPUs:   1000000000,        // 1 CPU
 			PidsLimit:  func() *int64 { v := int64(100); return &v }(),
 		},
-		NetworkMode:    "none",
-		CapDrop:        []string{"ALL"},
-		SecurityOpt:    []string{"no-new-privileges"},
-		ReadonlyRootfs: true,
-		// Allow writing to /work (mounted volume)
+		NetworkMode: "none",
+	}
+
+	// Apply Linux-specific security features
+	// These are not available on Windows Docker (even with WSL2 backend)
+	if runtime.GOOS != "windows" {
+		hostConfig.CapDrop = []string{"ALL"}
+		hostConfig.SecurityOpt = []string{"no-new-privileges"}
+		hostConfig.ReadonlyRootfs = true
 	}
 
 	// Create container
@@ -316,6 +322,24 @@ func (e *DockerExecutor) ensureImage(ctx context.Context, imageName string) erro
 	}
 
 	return nil
+}
+
+// IsWSL2DockerAvailable checks if Docker is running with WSL2 backend on Windows.
+// Returns true if Docker is available and using Linux containers via WSL2.
+func IsWSL2DockerAvailable() bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+
+	// Check if Docker is running with Linux containers (WSL2 backend)
+	cmd := exec.Command("docker", "info", "--format", "{{.OSType}}")
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+
+	// If OSType is "linux", Docker is using WSL2 backend
+	return strings.TrimSpace(string(output)) == "linux"
 }
 
 // pullImage pulls a Docker image from the registry.

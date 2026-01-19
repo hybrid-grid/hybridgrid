@@ -736,12 +736,15 @@ func (x *NodeConfig) GetEnvVars() map[string]string {
 }
 
 type CppCapability struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Compilers     []string               `protobuf:"bytes,1,rep,name=compilers,proto3" json:"compilers,omitempty"` // [gcc, clang]
-	CrossCompile  bool                   `protobuf:"varint,2,opt,name=cross_compile,json=crossCompile,proto3" json:"cross_compile,omitempty"`
-	DockerImages  []string               `protobuf:"bytes,3,rep,name=docker_images,json=dockerImages,proto3" json:"docker_images,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Compilers         []string               `protobuf:"bytes,1,rep,name=compilers,proto3" json:"compilers,omitempty"` // [gcc, clang, cl.exe]
+	CrossCompile      bool                   `protobuf:"varint,2,opt,name=cross_compile,json=crossCompile,proto3" json:"cross_compile,omitempty"`
+	DockerImages      []string               `protobuf:"bytes,3,rep,name=docker_images,json=dockerImages,proto3" json:"docker_images,omitempty"`
+	MsvcVersion       string                 `protobuf:"bytes,4,opt,name=msvc_version,json=msvcVersion,proto3" json:"msvc_version,omitempty"`           // e.g., "2022", "2019"
+	MsvcArchitectures []string               `protobuf:"bytes,5,rep,name=msvc_architectures,json=msvcArchitectures,proto3" json:"msvc_architectures,omitempty"` // e.g., ["x64", "x86", "arm64"]
+	HasWindowsSdk     bool                   `protobuf:"varint,6,opt,name=has_windows_sdk,json=hasWindowsSdk,proto3" json:"has_windows_sdk,omitempty"`   // Whether Windows SDK is available
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *CppCapability) Reset() {
@@ -793,6 +796,27 @@ func (x *CppCapability) GetDockerImages() []string {
 		return x.DockerImages
 	}
 	return nil
+}
+
+func (x *CppCapability) GetMsvcVersion() string {
+	if x != nil {
+		return x.MsvcVersion
+	}
+	return ""
+}
+
+func (x *CppCapability) GetMsvcArchitectures() []string {
+	if x != nil {
+		return x.MsvcArchitectures
+	}
+	return nil
+}
+
+func (x *CppCapability) GetHasWindowsSdk() bool {
+	if x != nil {
+		return x.HasWindowsSdk
+	}
+	return false
 }
 
 type FlutterCapability struct {

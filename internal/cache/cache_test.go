@@ -588,13 +588,54 @@ func TestCompilationKey_DifferentInputs(t *testing.T) {
 }
 
 func TestNewStore_CreateDirError(t *testing.T) {
+	var invalidPath string
+
 	if runtime.GOOS == "windows" {
-		t.Skip("skipping invalid path test on Windows (path validation differs)")
+		// Windows: try to create in a system path that will fail
+		invalidPath = "\\\\?\\NUL\\impossible"
+	} else {
+		// Unix: try to create under /dev/null which isn't a directory
+		invalidPath = "/dev/null/impossible"
 	}
-	// Try to create store in a path that can't be created (Unix-specific)
-	_, err := NewStore("/dev/null/impossible", 10, 24)
+
+	_, err := NewStore(invalidPath, 10, 24)
 	if err == nil {
 		t.Error("Expected error when creating store in invalid path")
+	}
+}
+
+func TestCacheKeyValidation_Windows(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir, 10, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Test that reserved names are handled
+	// Note: On non-Windows, these keys will work. On Windows, they should fail.
+	reservedKeys := []string{"CON", "PRN", "AUX", "NUL", "COM1", "LPT1"}
+
+	for _, key := range reservedKeys {
+		err := store.PutBytes(key, []byte("test"))
+		if runtime.GOOS == "windows" {
+			if err == nil {
+				t.Errorf("Expected error for reserved name %q on Windows", key)
+			}
+		}
+		// On Unix, no validation needed - these are valid names
+	}
+
+	// Test invalid characters on Windows
+	invalidCharKeys := []string{"foo<bar", "foo>bar", "foo|bar", "foo?bar", "foo*bar"}
+
+	for _, key := range invalidCharKeys {
+		err := store.PutBytes(key, []byte("test"))
+		if runtime.GOOS == "windows" {
+			if err == nil {
+				t.Errorf("Expected error for key with invalid chars %q on Windows", key)
+			}
+		}
+		// On Unix, no validation needed - these might be valid depending on filesystem
 	}
 }
 

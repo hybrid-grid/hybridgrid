@@ -6,9 +6,70 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
+
+// windowsReservedNames are device names that cannot be used as filenames on Windows.
+var windowsReservedNames = []string{
+	"CON", "PRN", "AUX", "NUL",
+	"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+	"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+}
+
+// windowsInvalidChars are characters that cannot be used in Windows filenames.
+var windowsInvalidChars = []byte{'<', '>', ':', '"', '|', '?', '*'}
+
+// isWindowsReservedName checks if the given name is a Windows reserved device name.
+func isWindowsReservedName(name string) bool {
+	base := strings.ToUpper(name)
+	// Strip extension if present
+	if idx := strings.LastIndex(base, "."); idx != -1 {
+		base = base[:idx]
+	}
+	for _, reserved := range windowsReservedNames {
+		if base == reserved {
+			return true
+		}
+	}
+	return false
+}
+
+// hasWindowsInvalidChars checks if the string contains characters invalid on Windows.
+func hasWindowsInvalidChars(s string) bool {
+	for _, c := range windowsInvalidChars {
+		if strings.ContainsRune(s, rune(c)) {
+			return true
+		}
+	}
+	return false
+}
+
+// validateCacheKey validates a cache key is valid for the current OS.
+func validateCacheKey(key string) error {
+	if key == "" {
+		return fmt.Errorf("cache key cannot be empty")
+	}
+
+	if runtime.GOOS == "windows" {
+		// Check for invalid characters
+		if hasWindowsInvalidChars(key) {
+			return fmt.Errorf("cache key contains invalid Windows characters")
+		}
+
+		// Check if key starts with a reserved name (e.g., "CON", "PRN.txt")
+		keyUpper := strings.ToUpper(key)
+		for _, reserved := range windowsReservedNames {
+			if keyUpper == reserved || strings.HasPrefix(keyUpper, reserved+".") || strings.HasPrefix(keyUpper, reserved+"/") {
+				return fmt.Errorf("cache key contains Windows reserved name: %s", reserved)
+			}
+		}
+	}
+
+	return nil
+}
 
 // Entry represents a cached item's metadata.
 type Entry struct {
@@ -86,6 +147,11 @@ func (s *Store) Get(key string) (io.ReadCloser, bool) {
 
 // Put stores an item in the cache.
 func (s *Store) Put(key string, r io.Reader) error {
+	// Validate cache key for platform compatibility
+	if err := validateCacheKey(key); err != nil {
+		return fmt.Errorf("invalid cache key: %w", err)
+	}
+
 	path := s.keyPath(key)
 
 	// Create parent directories
@@ -139,6 +205,11 @@ func (s *Store) Put(key string, r io.Reader) error {
 
 // PutBytes stores bytes in the cache.
 func (s *Store) PutBytes(key string, data []byte) error {
+	// Validate cache key for platform compatibility
+	if err := validateCacheKey(key); err != nil {
+		return fmt.Errorf("invalid cache key: %w", err)
+	}
+
 	path := s.keyPath(key)
 
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

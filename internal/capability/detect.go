@@ -181,23 +181,51 @@ func detectCpp() *pb.CppCapability {
 		}
 	}
 
-	// Check for cross-compile toolchains
-	crossCompilers := []string{
-		// Linux cross-compilers
-		"aarch64-linux-gnu-gcc",
-		"arm-linux-gnueabihf-gcc",
-		"x86_64-linux-gnu-gcc",
-		"x86_64-w64-mingw32-gcc",
-		// Windows cross-compilers (MSYS2/MinGW)
-		"aarch64-w64-mingw32-gcc",
-		// macOS cross-compilers (via Homebrew)
-		"aarch64-unknown-linux-gnu-gcc",
-		"x86_64-unknown-linux-gnu-gcc",
+	// On Windows, detect MSVC
+	if runtime.GOOS == "windows" {
+		msvc := DetectMSVC()
+		if msvc != nil && msvc.Available {
+			cap.Compilers = append(cap.Compilers, "cl.exe")
+			// Set MSVC-specific fields
+			cap.MsvcVersion = msvc.Version
+			cap.MsvcArchitectures = msvc.Architectures
+			if msvc.WindowsSDK != "" {
+				cap.HasWindowsSdk = true
+			}
+		}
+
+		// Check for MinGW compilers on Windows
+		mingwCompilers := []string{
+			"x86_64-w64-mingw32-gcc",
+			"i686-w64-mingw32-gcc",
+		}
+		for _, c := range mingwCompilers {
+			if _, err := exec.LookPath(c); err == nil {
+				cap.Compilers = append(cap.Compilers, c)
+				cap.CrossCompile = true
+			}
+		}
 	}
-	for _, c := range crossCompilers {
-		if _, err := exec.LookPath(c); err == nil {
-			cap.CrossCompile = true
-			break
+
+	// Check for cross-compile toolchains (Linux/macOS)
+	if runtime.GOOS != "windows" {
+		crossCompilers := []string{
+			// Linux cross-compilers
+			"aarch64-linux-gnu-gcc",
+			"arm-linux-gnueabihf-gcc",
+			"x86_64-linux-gnu-gcc",
+			"x86_64-w64-mingw32-gcc",
+			// Windows cross-compilers (MSYS2/MinGW)
+			"aarch64-w64-mingw32-gcc",
+			// macOS cross-compilers (via Homebrew)
+			"aarch64-unknown-linux-gnu-gcc",
+			"x86_64-unknown-linux-gnu-gcc",
+		}
+		for _, c := range crossCompilers {
+			if _, err := exec.LookPath(c); err == nil {
+				cap.CrossCompile = true
+				break
+			}
 		}
 	}
 

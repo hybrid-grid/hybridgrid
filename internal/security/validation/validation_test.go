@@ -249,60 +249,119 @@ func TestSanitizeCompilerArgs_RemovesDangerousFlags(t *testing.T) {
 }
 
 func TestSanitizeCompilerArgs_RemovesPathTraversal(t *testing.T) {
+	var args []string
+	var expectedSanitized, expectedRemoved int
+
 	if runtime.GOOS == "windows" {
-		t.Skip("skipping Unix path test on Windows")
+		// Windows-style path traversal
+		args = []string{"-O2", "-I..\\..\\..\\Windows\\System32", "-IC:\\include"}
+		expectedSanitized = 2
+		expectedRemoved = 1
+	} else {
+		// Unix-style path traversal
+		args = []string{"-O2", "-I../../../etc/passwd", "-I/usr/include"}
+		expectedSanitized = 2
+		expectedRemoved = 1
 	}
-	args := []string{"-O2", "-I../../../etc/passwd", "-I/usr/include"}
+
 	sanitized, removed := SanitizeCompilerArgs(args)
 
-	if len(removed) != 1 {
-		t.Errorf("Expected 1 removed arg, got %d: %v", len(removed), removed)
+	if len(removed) != expectedRemoved {
+		t.Errorf("Expected %d removed arg, got %d: %v", expectedRemoved, len(removed), removed)
 	}
-	if len(sanitized) != 2 {
-		t.Errorf("Expected 2 sanitized args, got %d: %v", len(sanitized), sanitized)
+	if len(sanitized) != expectedSanitized {
+		t.Errorf("Expected %d sanitized args, got %d: %v", expectedSanitized, len(sanitized), sanitized)
 	}
 }
 
 func TestSanitizePath(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("skipping Unix path test on Windows")
-	}
-	tests := []struct {
+	type testCase struct {
 		name     string
 		basePath string
 		path     string
 		want     string
-	}{
-		{
-			name:     "valid relative path",
-			basePath: "/workspace",
-			path:     "src/main.c",
-			want:     "/workspace/src/main.c",
-		},
-		{
-			name:     "blocks path traversal",
-			basePath: "/workspace",
-			path:     "../../../etc/passwd",
-			want:     "",
-		},
-		{
-			name:     "blocks absolute escape",
-			basePath: "/workspace",
-			path:     "/etc/passwd",
-			want:     "",
-		},
-		{
-			name:     "allows subpath of base",
-			basePath: "/workspace",
-			path:     "/workspace/src/main.c",
-			want:     "/workspace/src/main.c",
-		},
-		{
-			name:     "empty path",
-			basePath: "/workspace",
-			path:     "",
-			want:     "",
-		},
+	}
+
+	var tests []testCase
+
+	if runtime.GOOS == "windows" {
+		tests = []testCase{
+			{
+				name:     "valid relative path",
+				basePath: "C:\\workspace",
+				path:     "src\\main.c",
+				want:     "C:\\workspace\\src\\main.c",
+			},
+			{
+				name:     "blocks path traversal",
+				basePath: "C:\\workspace",
+				path:     "..\\..\\..\\Windows\\System32",
+				want:     "",
+			},
+			{
+				name:     "blocks absolute escape",
+				basePath: "C:\\workspace",
+				path:     "C:\\Windows\\System32",
+				want:     "",
+			},
+			{
+				name:     "allows subpath of base",
+				basePath: "C:\\workspace",
+				path:     "C:\\workspace\\src\\main.c",
+				want:     "C:\\workspace\\src\\main.c",
+			},
+			{
+				name:     "blocks reserved names",
+				basePath: "C:\\workspace",
+				path:     "CON",
+				want:     "",
+			},
+			{
+				name:     "blocks reserved names with extension",
+				basePath: "C:\\workspace",
+				path:     "NUL.txt",
+				want:     "",
+			},
+			{
+				name:     "empty path",
+				basePath: "C:\\workspace",
+				path:     "",
+				want:     "",
+			},
+		}
+	} else {
+		tests = []testCase{
+			{
+				name:     "valid relative path",
+				basePath: "/workspace",
+				path:     "src/main.c",
+				want:     "/workspace/src/main.c",
+			},
+			{
+				name:     "blocks path traversal",
+				basePath: "/workspace",
+				path:     "../../../etc/passwd",
+				want:     "",
+			},
+			{
+				name:     "blocks absolute escape",
+				basePath: "/workspace",
+				path:     "/etc/passwd",
+				want:     "",
+			},
+			{
+				name:     "allows subpath of base",
+				basePath: "/workspace",
+				path:     "/workspace/src/main.c",
+				want:     "/workspace/src/main.c",
+			},
+			{
+				name:     "empty path",
+				basePath: "/workspace",
+				path:     "",
+				want:     "",
+			},
+		}
 	}
 
 	for _, tt := range tests {
@@ -310,6 +369,37 @@ func TestSanitizePath(t *testing.T) {
 			got := SanitizePath(tt.basePath, tt.path)
 			if got != tt.want {
 				t.Errorf("SanitizePath(%q, %q) = %q, want %q", tt.basePath, tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWindowsPathValidation(t *testing.T) {
+	tests := []struct {
+		name  string
+		path  string
+		valid bool
+	}{
+		{"valid path", "foo/bar.txt", true},
+		{"reserved name CON", "CON", false},
+		{"reserved name PRN", "PRN", false},
+		{"reserved name with ext", "NUL.txt", false},
+		{"reserved name COM1", "COM1", false},
+		{"invalid char <", "foo<bar", false},
+		{"invalid char >", "foo>bar", false},
+		{"invalid char :", "foo:bar", false},
+		{"invalid char |", "foo|bar", false},
+		{"invalid char ?", "foo?bar", false},
+		{"invalid char *", "foo*bar", false},
+		{"valid with numbers", "abc123", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errMsg := ValidatePathForWindows(tt.path)
+			isValid := errMsg == ""
+			if isValid != tt.valid {
+				t.Errorf("ValidatePathForWindows(%q) = %q, want valid=%v", tt.path, errMsg, tt.valid)
 			}
 		})
 	}
