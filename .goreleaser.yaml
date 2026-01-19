@@ -7,9 +7,9 @@ project_name: hybridgrid
 
 before:
   hooks:
-    # Skip go mod tidy - dependencies already committed and some require Go 1.24+
+    # Skip go mod tidy and go generate - dependencies already committed and some require Go 1.24+
     # - go mod tidy
-    - go generate ./...
+    # - go generate ./...
 
 builds:
   # hg-coord: Coordinator server
