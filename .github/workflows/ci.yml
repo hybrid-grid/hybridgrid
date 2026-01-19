@@ -17,8 +17,11 @@ jobs:
   # Build and Test
   # ============================================
   build:
-    name: Build & Test
-    runs-on: ubuntu-latest
+    name: Build & Test (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -38,10 +41,16 @@ jobs:
           go build -v ./cmd/hg-worker
           go build -v ./cmd/hgbuild
 
-      - name: Run tests with race detector
+      - name: Run tests with race detector (Linux)
+        if: runner.os == 'Linux'
         run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
+      - name: Run tests (Windows)
+        if: runner.os == 'Windows'
+        run: go test -v ./...
+
       - name: Upload coverage
+        if: runner.os == 'Linux'
         uses: codecov/codecov-action@v4
         with:
           file: ./coverage.out
