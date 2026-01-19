@@ -34,10 +34,15 @@ func TestAdd(t *testing.T) {
 		t.Errorf("Expected count 1, got %d", r.Count())
 	}
 
-	// Try to add duplicate
+	// Adding same worker again should succeed (update/heartbeat behavior)
 	err = r.Add(worker)
-	if err == nil {
-		t.Error("Expected error for duplicate worker")
+	if err != nil {
+		t.Errorf("Re-adding worker should succeed (heartbeat): %v", err)
+	}
+
+	// Count should still be 1 (update, not duplicate)
+	if r.Count() != 1 {
+		t.Errorf("Expected count 1 after re-add, got %d", r.Count())
 	}
 }
 

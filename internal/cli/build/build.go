@@ -49,7 +49,7 @@ func DefaultConfig() Config {
 	return Config{
 		CacheDir:        filepath.Join(home, ".hybridgrid", "cache"),
 		CacheMaxSize:    10 * 1024 * 1024 * 1024, // 10GB
-		CacheTTLHours:   168,                      // 1 week
+		CacheTTLHours:   168,                     // 1 week
 		CoordinatorAddr: "localhost:9000",
 		Insecure:        true,
 		Timeout:         5 * time.Minute,

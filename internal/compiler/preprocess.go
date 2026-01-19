@@ -157,10 +157,10 @@ func isPreprocessingFlag(flag string) bool {
 
 	// Exact matches
 	exactFlags := map[string]bool{
-		"-nostdinc":   true,
-		"-nostdinc++": true,
-		"-trigraphs":  true,
-		"-ansi":       true,
+		"-nostdinc":    true,
+		"-nostdinc++":  true,
+		"-trigraphs":   true,
+		"-ansi":        true,
 		"-traditional": true,
 	}
 

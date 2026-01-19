@@ -539,8 +539,8 @@ func truncate(s string, max int) string {
 
 func newCCCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:                "cc [flags] [files...]",
-		Short:              "C compiler wrapper (drop-in gcc replacement)",
+		Use:   "cc [flags] [files...]",
+		Short: "C compiler wrapper (drop-in gcc replacement)",
 		Long: `Distributed C compiler wrapper. Use as a drop-in replacement for gcc.
 
 Examples:
@@ -557,8 +557,8 @@ Examples:
 
 func newCXXCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:                "c++ [flags] [files...]",
-		Short:              "C++ compiler wrapper (drop-in g++ replacement)",
+		Use:   "c++ [flags] [files...]",
+		Short: "C++ compiler wrapper (drop-in g++ replacement)",
 		Long: `Distributed C++ compiler wrapper. Use as a drop-in replacement for g++.
 
 Examples:
@@ -795,8 +795,8 @@ func getCoordinatorAddress() string {
 
 func newMakeCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:                "make [make-args...]",
-		Short:              "Run make with distributed compilation",
+		Use:   "make [make-args...]",
+		Short: "Run make with distributed compilation",
 		Long: `Wrap make with distributed compilation by setting CC/CXX automatically.
 
 Examples:
@@ -813,8 +813,8 @@ Examples:
 
 func newNinjaCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:                "ninja [ninja-args...]",
-		Short:              "Run ninja with distributed compilation",
+		Use:   "ninja [ninja-args...]",
+		Short: "Run ninja with distributed compilation",
 		Long: `Wrap ninja with distributed compilation by setting CC/CXX automatically.
 
 Examples:
@@ -830,8 +830,8 @@ Examples:
 
 func newWrapCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:                "wrap <command> [args...]",
-		Short:              "Wrap any build command with distributed compilation",
+		Use:   "wrap <command> [args...]",
+		Short: "Wrap any build command with distributed compilation",
 		Long: `Wrap any build command with distributed compilation.
 Sets CC and CXX to use hgbuild for distributed compilation.
 
