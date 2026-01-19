@@ -199,7 +199,7 @@ func (e *MSVCExecutor) buildArgs(originalArgs []string, srcFile, outFile string)
 
 	// Build final args
 	result := make([]string, 0, len(filtered)+4)
-	result = append(result, "/c")      // Compile only
+	result = append(result, "/c") // Compile only
 	result = append(result, filtered...)
 	result = append(result, srcFile)
 	result = append(result, "/Fo"+outFile)

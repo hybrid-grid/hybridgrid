@@ -27,12 +27,12 @@ const (
 
 // coordService implements the Windows service interface.
 type coordService struct {
-	grpcPort  int
-	httpPort  int
-	token     string
-	noMdns    bool
-	stopChan  chan struct{}
-	elog      debug.Log
+	grpcPort int
+	httpPort int
+	token    string
+	noMdns   bool
+	stopChan chan struct{}
+	elog     debug.Log
 }
 
 // Execute is the main service loop required by the Windows Service Control Manager.

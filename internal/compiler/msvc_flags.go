@@ -46,8 +46,8 @@ var GCCToMSVCFlags = map[string]string{
 	"-std=c99":   "", // Limited support
 	"-std=c11":   "/std:c11",
 	"-std=c17":   "/std:c17",
-	"-std=c++98": "", // MSVC defaults
-	"-std=c++03": "", // MSVC defaults
+	"-std=c++98": "",           // MSVC defaults
+	"-std=c++03": "",           // MSVC defaults
 	"-std=c++11": "/std:c++14", // MSVC 14 minimum
 	"-std=c++14": "/std:c++14",
 	"-std=c++17": "/std:c++17",
@@ -77,10 +77,10 @@ var GCCToMSVCFlags = map[string]string{
 	"-fno-rtti": "/GR-",
 
 	// Position independent code (Windows doesn't need it)
-	"-fPIC":  "",
-	"-fPIE":  "",
-	"-fpic":  "",
-	"-fpie":  "",
+	"-fPIC":    "",
+	"-fPIE":    "",
+	"-fpic":    "",
+	"-fpie":    "",
 	"-fno-pic": "",
 
 	// Inline functions
@@ -95,16 +95,16 @@ var GCCToMSVCFlags = map[string]string{
 	"-fno-stack-protector":     "/GS-",
 
 	// Common flags to ignore (no MSVC equivalent needed)
-	"-pipe":             "",
-	"-pthread":          "",
-	"-fdiagnostics-color": "",
-	"-fcolor-diagnostics": "",
-	"-fvisibility=hidden": "",
+	"-pipe":                "",
+	"-pthread":             "",
+	"-fdiagnostics-color":  "",
+	"-fcolor-diagnostics":  "",
+	"-fvisibility=hidden":  "",
 	"-fvisibility=default": "",
 
 	// Architecture (handled specially)
-	"-m32": "",
-	"-m64": "",
+	"-m32":          "",
+	"-m64":          "",
 	"-march=native": "",
 }
 
