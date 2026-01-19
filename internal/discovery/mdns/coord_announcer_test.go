@@ -180,5 +180,8 @@ func TestCoordAnnouncer_RestartAfterStop(t *testing.T) {
 	err = announcer.Start()
 	require.NoError(t, err)
 
+	// Wait for goroutines to settle before stopping (avoid race with zeroconf internals)
+	time.Sleep(100 * time.Millisecond)
+
 	announcer.Stop()
 }
