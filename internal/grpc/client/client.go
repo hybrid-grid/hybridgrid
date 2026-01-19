@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
+	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 )
 
 const (
@@ -19,10 +20,11 @@ const (
 
 // Config holds the gRPC client configuration.
 type Config struct {
-	Address   string
-	AuthToken string
-	Timeout   time.Duration
-	Insecure  bool
+	Address       string
+	AuthToken     string
+	Timeout       time.Duration
+	Insecure      bool
+	EnableTracing bool
 }
 
 // Client wraps the BuildService gRPC client.
@@ -41,6 +43,11 @@ func New(cfg Config) (*Client, error) {
 	opts := []grpc.DialOption{}
 	if cfg.Insecure {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
+
+	// Add tracing interceptors if enabled
+	if cfg.EnableTracing {
+		opts = append(opts, tracing.DialOptions()...)
 	}
 
 	conn, err := grpc.NewClient(cfg.Address, opts...)

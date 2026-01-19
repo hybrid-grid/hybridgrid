@@ -5,7 +5,11 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
+	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 )
 
 // Result represents the outcome of a compilation execution.
@@ -120,5 +124,40 @@ func isMSVCCompiler(compiler string) bool {
 // Execute runs a compilation using the appropriate executor.
 func (m *Manager) Execute(ctx context.Context, req *Request) (*Result, error) {
 	executor := m.Select(req.TargetArch)
-	return executor.Execute(ctx, req)
+
+	// Start tracing span
+	ctx, span := tracing.StartSpan(ctx, "compile",
+		trace.WithAttributes(
+			tracing.AttrTaskID.String(req.TaskID),
+			tracing.AttrCompiler.String(req.Compiler),
+			tracing.AttrSourceFile.String(req.SourceFilename),
+			tracing.AttrTargetArch.String(req.TargetArch.String()),
+			attribute.String("executor", executor.Name()),
+		),
+	)
+	defer span.End()
+
+	// Execute compilation
+	startTime := time.Now()
+	result, err := executor.Execute(ctx, req)
+	duration := time.Since(startTime)
+
+	// Record result attributes
+	if result != nil {
+		span.SetAttributes(
+			tracing.AttrExitCode.Int(int(result.ExitCode)),
+			tracing.AttrDurationMs.Int64(duration.Milliseconds()),
+			tracing.AttrObjectSize.Int(len(result.ObjectCode)),
+		)
+
+		if !result.Success {
+			span.RecordError(err)
+		}
+	}
+
+	if err != nil {
+		span.RecordError(err)
+	}
+
+	return result, err
 }

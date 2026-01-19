@@ -324,6 +324,8 @@ hgbuild cache clear
 
 ## Documentation
 
+- [Getting Started Guide](docs/getting-started.md) - Quick start in 5 minutes
+- [Architecture Diagrams](docs/architecture-diagrams.md) - Visual system diagrams
 - [Installation Guide](docs/installation.md)
 - [Configuration Reference](docs/configuration.md)
 - [Architecture Overview](docs/architecture.md)

@@ -19,7 +19,9 @@ import (
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cache"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/build"
+	"github.com/h3nr1-d14z/hybridgrid/internal/cli/output"
 	"github.com/h3nr1-d14z/hybridgrid/internal/compiler"
+	"github.com/h3nr1-d14z/hybridgrid/internal/graph"
 	"github.com/h3nr1-d14z/hybridgrid/internal/config"
 	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
 	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/client"
@@ -76,6 +78,7 @@ Environment:
 		newBuildCmd(),
 		newConfigCmd(),
 		newCacheCmd(),
+		newGraphCmd(),
 		// Compiler wrappers
 		newCCCmd(),
 		newCXXCmd(),
@@ -106,6 +109,8 @@ func newStatusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "Show coordinator and worker status",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			output.AutoDetectColors()
+
 			c, err := client.New(client.Config{
 				Address:  coordinator,
 				Insecure: insecure,
@@ -124,10 +129,13 @@ func newStatusCmd() *cobra.Command {
 				return fmt.Errorf("health check failed: %w", err)
 			}
 
-			fmt.Printf("Coordinator: %s\n", coordinator)
-			fmt.Printf("Status:      %s\n", statusEmoji(resp.Healthy))
-			fmt.Printf("Active:      %d tasks\n", resp.ActiveTasks)
-			fmt.Printf("Queued:      %d tasks\n", resp.QueuedTasks)
+			// Use the new colored output
+			output.PrintStatus(output.StatusInfo{
+				Address:     coordinator,
+				Healthy:     resp.Healthy,
+				ActiveTasks: int(resp.ActiveTasks),
+				QueuedTasks: int(resp.QueuedTasks),
+			})
 
 			return nil
 		},
@@ -141,6 +149,8 @@ func newWorkersCmd() *cobra.Command {
 		Use:   "workers",
 		Short: "List available workers",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			output.AutoDetectColors()
+
 			c, err := client.New(client.Config{
 				Address:  coordinator,
 				Insecure: insecure,
@@ -159,43 +169,24 @@ func newWorkersCmd() *cobra.Command {
 				return fmt.Errorf("failed to get workers: %w", err)
 			}
 
-			if len(resp.Workers) == 0 {
-				fmt.Println("No workers connected")
-				return nil
+			// Convert to output.WorkerInfo
+			workers := make([]output.WorkerInfo, len(resp.Workers))
+			for i, w := range resp.Workers {
+				workers[i] = output.WorkerInfo{
+					ID:           w.WorkerId,
+					Arch:         w.NativeArch.String(),
+					Cores:        int(w.CpuCores),
+					MemoryGB:     float64(w.MemoryBytes) / (1024 * 1024 * 1024),
+					ActiveTasks:  int(w.ActiveTasks),
+					CircuitState: w.CircuitState,
+				}
 			}
 
-			fmt.Printf("Workers: %d total, %d healthy\n\n", resp.TotalWorkers, resp.HealthyWorkers)
-
+			// Use colored table output
 			if verbose {
-				fmt.Printf("%-20s %-10s %-8s %-8s %-10s %-8s\n",
-					"ID", "ARCH", "CORES", "MEM(GB)", "TASKS", "STATUS")
-				fmt.Println("-------------------- ---------- -------- -------- ---------- --------")
+				output.PrintWorkersTable(workers, int(resp.TotalWorkers), int(resp.HealthyWorkers))
 			} else {
-				fmt.Printf("%-20s %-10s %-8s %-8s\n", "ID", "ARCH", "CORES", "STATUS")
-				fmt.Println("-------------------- ---------- -------- --------")
-			}
-
-			for _, w := range resp.Workers {
-				status := "healthy"
-				if w.CircuitState != "" && w.CircuitState != "CLOSED" {
-					status = w.CircuitState
-				}
-
-				if verbose {
-					fmt.Printf("%-20s %-10s %-8d %-8.1f %-10d %-8s\n",
-						truncate(w.WorkerId, 20),
-						w.NativeArch.String(),
-						w.CpuCores,
-						float64(w.MemoryBytes)/(1024*1024*1024),
-						w.ActiveTasks,
-						status)
-				} else {
-					fmt.Printf("%-20s %-10s %-8d %-8s\n",
-						truncate(w.WorkerId, 20),
-						w.NativeArch.String(),
-						w.CpuCores,
-						status)
-				}
+				output.PrintWorkersTableCompact(workers, int(resp.TotalWorkers), int(resp.HealthyWorkers))
 			}
 
 			return nil
@@ -473,6 +464,8 @@ func newCacheCmd() *cobra.Command {
 		Use:   "stats",
 		Short: "Show cache statistics",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			output.AutoDetectColors()
+
 			// Use the same cache directory as build service
 			buildCfg := build.DefaultConfig()
 
@@ -482,11 +475,15 @@ func newCacheCmd() *cobra.Command {
 			}
 
 			stats := store.Stats()
-			fmt.Printf("Cache Directory: %s\n", buildCfg.CacheDir)
-			fmt.Printf("Entries:         %d\n", stats.Entries)
-			fmt.Printf("Size:            %.2f MB / %.0f MB\n",
-				float64(stats.TotalSize)/(1024*1024), float64(stats.MaxSize)/(1024*1024))
-			fmt.Printf("Total Hits:      %d\n", stats.TotalHits)
+
+			// Use colored output
+			output.PrintCacheStats(output.CacheStats{
+				Directory: buildCfg.CacheDir,
+				Entries:   stats.Entries,
+				TotalSize: stats.TotalSize,
+				MaxSize:   stats.MaxSize,
+				TotalHits: stats.TotalHits,
+			})
 
 			return nil
 		},
@@ -519,18 +516,118 @@ func newCacheCmd() *cobra.Command {
 
 // Helper functions
 
-func statusEmoji(healthy bool) string {
-	if healthy {
-		return "healthy ✓"
-	}
-	return "unhealthy ✗"
-}
-
 func truncate(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
 	return s[:max-3] + "..."
+}
+
+// =============================================================================
+// Graph Command
+// =============================================================================
+
+func newGraphCmd() *cobra.Command {
+	var (
+		inputFile  string
+		outputFile string
+		format     string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "graph",
+		Short: "Generate build dependency graph visualization",
+		Long: `Parse build files and generate dependency graph visualizations.
+
+Supports:
+  - Makefile      Standard GNU Make files
+  - compile_commands.json  CMake/Clang compilation database
+
+Output formats:
+  - html   Interactive D3.js visualization (default)
+  - dot    Graphviz DOT format
+  - json   Raw JSON data
+
+Examples:
+  hgbuild graph --input Makefile --output graph.html
+  hgbuild graph --input compile_commands.json --format dot > deps.dot
+  hgbuild graph -i build/compile_commands.json -o deps.html`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if inputFile == "" {
+				// Try to auto-detect
+				if _, err := os.Stat("Makefile"); err == nil {
+					inputFile = "Makefile"
+				} else if _, err := os.Stat("compile_commands.json"); err == nil {
+					inputFile = "compile_commands.json"
+				} else {
+					return fmt.Errorf("no input file specified and no Makefile or compile_commands.json found")
+				}
+			}
+
+			// Parse the build file
+			parser := graph.NewParser()
+			g, err := parser.ParseAuto(inputFile)
+			if err != nil {
+				return fmt.Errorf("failed to parse %s: %w", inputFile, err)
+			}
+
+			if g.NodeCount() == 0 {
+				fmt.Println("Warning: no dependencies found in build file")
+			}
+
+			fmt.Printf("Parsed %d nodes and %d edges\n", g.NodeCount(), g.EdgeCount())
+
+			// Determine output format
+			if format == "" {
+				format = "html"
+			}
+
+			// Generate output
+			switch format {
+			case "html":
+				if outputFile == "" {
+					outputFile = "build-graph.html"
+				}
+				if err := graph.RenderHTML(g, outputFile); err != nil {
+					return fmt.Errorf("failed to render HTML: %w", err)
+				}
+				fmt.Printf("Generated: %s\n", outputFile)
+
+			case "dot":
+				if outputFile == "" {
+					// Print to stdout
+					fmt.Print(g.ToDOT())
+				} else {
+					if err := graph.RenderDOT(g, outputFile); err != nil {
+						return fmt.Errorf("failed to render DOT: %w", err)
+					}
+					fmt.Printf("Generated: %s\n", outputFile)
+				}
+
+			case "json":
+				if outputFile == "" {
+					data, _ := g.ToJSON()
+					fmt.Println(string(data))
+				} else {
+					if err := graph.RenderJSON(g, outputFile); err != nil {
+						return fmt.Errorf("failed to render JSON: %w", err)
+					}
+					fmt.Printf("Generated: %s\n", outputFile)
+				}
+
+			default:
+				return fmt.Errorf("unknown format: %s (supported: html, dot, json)", format)
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&inputFile, "input", "i", "", "input file (Makefile or compile_commands.json)")
+	cmd.Flags().StringVarP(&outputFile, "output", "o", "", "output file (default: stdout for dot/json, build-graph.html for html)")
+	cmd.Flags().StringVarP(&format, "format", "f", "html", "output format (html, dot, json)")
+
+	return cmd
 }
 
 // =============================================================================

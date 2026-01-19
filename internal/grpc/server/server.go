@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
+	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 )
 
 // Config holds the gRPC server configuration.
@@ -19,6 +20,7 @@ type Config struct {
 	Port          int
 	AuthToken     string
 	MaxConcurrent int
+	EnableTracing bool
 }
 
 // Server implements the BuildService gRPC server.
@@ -47,7 +49,13 @@ func (s *Server) Start() error {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
 
-	s.server = grpc.NewServer()
+	// Build server options
+	var opts []grpc.ServerOption
+	if s.config.EnableTracing {
+		opts = append(opts, tracing.ServerOptions()...)
+	}
+
+	s.server = grpc.NewServer(opts...)
 	pb.RegisterBuildServiceServer(s.server, s)
 
 	return s.server.Serve(lis)
