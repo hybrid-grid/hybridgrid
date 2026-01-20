@@ -181,6 +181,13 @@ const htmlTemplate = `<!DOCTYPE html>
     <script>
         const graphData = {{.GraphJSON}};
 
+        // HTML escape function to prevent XSS
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
         // Convert graph data
         const nodes = Object.values(graphData.nodes).map(n => ({
             id: n.id,
@@ -293,9 +300,9 @@ const htmlTemplate = `<!DOCTYPE html>
         node.on('mouseover', (event, d) => {
             tooltip.style('display', 'block')
                 .html(` + "`" + `
-                    <strong>${d.file}</strong><br>
-                    Type: ${d.type}<br>
-                    ${d.compiler ? 'Compiler: ' + d.compiler : ''}
+                    <strong>${escapeHtml(d.file)}</strong><br>
+                    Type: ${escapeHtml(d.type)}<br>
+                    ${d.compiler ? 'Compiler: ' + escapeHtml(d.compiler) : ''}
                 ` + "`" + `)
                 .style('left', (event.pageX + 10) + 'px')
                 .style('top', (event.pageY + 10) + 'px');

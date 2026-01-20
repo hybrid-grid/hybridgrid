@@ -101,29 +101,42 @@ func (p *Parser) ParseMakefile(path string) (*Graph, error) {
 	defer file.Close()
 
 	p.graph = New()
-	scanner := bufio.NewScanner(file)
+
+	// Read all lines and handle line continuations
+	lines, err := p.readLinesWithContinuation(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read Makefile: %w", err)
+	}
 
 	// Regular expressions for Makefile parsing
 	ruleRe := regexp.MustCompile(`^([^:=\s]+)\s*:\s*(.*)$`)
+	patternRuleRe := regexp.MustCompile(`^(%[^:=\s]*)\s*:\s*(%[^:=\s]*)?\s*(.*)$`)
 	compileRe := regexp.MustCompile(`\$\(CC\)|\$\(CXX\)|gcc|g\+\+|clang|clang\+\+`)
 
 	var currentTarget string
 	var currentDeps []string
 	var inRecipe bool
 	var recipeCommands []string
+	var isPatternRule bool
+	var patternStem string
 
-	for scanner.Scan() {
-		line := scanner.Text()
+	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
 		// Skip empty lines and comments
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			if inRecipe && currentTarget != "" {
-				p.processRule(currentTarget, currentDeps, recipeCommands)
+				if isPatternRule {
+					p.processPatternRule(currentTarget, patternStem, currentDeps, recipeCommands)
+				} else {
+					p.processRule(currentTarget, currentDeps, recipeCommands)
+				}
 				currentTarget = ""
 				currentDeps = nil
 				recipeCommands = nil
 				inRecipe = false
+				isPatternRule = false
+				patternStem = ""
 			}
 			continue
 		}
@@ -137,14 +150,38 @@ func (p *Parser) ParseMakefile(path string) (*Graph, error) {
 
 		// If we were in a recipe and now we're not, process the rule
 		if inRecipe && currentTarget != "" {
-			p.processRule(currentTarget, currentDeps, recipeCommands)
+			if isPatternRule {
+				p.processPatternRule(currentTarget, patternStem, currentDeps, recipeCommands)
+			} else {
+				p.processRule(currentTarget, currentDeps, recipeCommands)
+			}
 			currentTarget = ""
 			currentDeps = nil
 			recipeCommands = nil
 			inRecipe = false
+			isPatternRule = false
+			patternStem = ""
 		}
 
-		// Check for rule definition
+		// Check for pattern rule (e.g., %.o: %.c)
+		if matches := patternRuleRe.FindStringSubmatch(trimmed); matches != nil && strings.Contains(matches[1], "%") {
+			target := matches[1]
+			stem := matches[2]
+			deps := strings.Fields(matches[3])
+
+			// Skip variable assignments
+			if strings.Contains(target, "=") {
+				continue
+			}
+
+			currentTarget = target
+			patternStem = stem
+			currentDeps = deps
+			isPatternRule = true
+			continue
+		}
+
+		// Check for regular rule definition
 		if matches := ruleRe.FindStringSubmatch(trimmed); matches != nil {
 			target := matches[1]
 			deps := strings.Fields(matches[2])
@@ -158,16 +195,58 @@ func (p *Parser) ParseMakefile(path string) (*Graph, error) {
 			if compileRe.MatchString(strings.Join(deps, " ")) || len(deps) > 0 {
 				currentTarget = target
 				currentDeps = deps
+				isPatternRule = false
 			}
 		}
 	}
 
 	// Process last rule if any
 	if currentTarget != "" {
-		p.processRule(currentTarget, currentDeps, recipeCommands)
+		if isPatternRule {
+			p.processPatternRule(currentTarget, patternStem, currentDeps, recipeCommands)
+		} else {
+			p.processRule(currentTarget, currentDeps, recipeCommands)
+		}
 	}
 
-	return p.graph, scanner.Err()
+	return p.graph, nil
+}
+
+// readLinesWithContinuation reads lines from a file, handling backslash line continuations.
+func (p *Parser) readLinesWithContinuation(file *os.File) ([]string, error) {
+	var lines []string
+	var currentLine strings.Builder
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Check if line ends with backslash (continuation)
+		if strings.HasSuffix(strings.TrimRight(line, " \t"), "\\") {
+			// Remove trailing backslash and whitespace, add to current line
+			trimmed := strings.TrimRight(line, " \t")
+			trimmed = strings.TrimSuffix(trimmed, "\\")
+			currentLine.WriteString(trimmed)
+			currentLine.WriteString(" ") // Add space for readability
+			continue
+		}
+
+		// No continuation, finalize line
+		if currentLine.Len() > 0 {
+			currentLine.WriteString(line)
+			lines = append(lines, currentLine.String())
+			currentLine.Reset()
+		} else {
+			lines = append(lines, line)
+		}
+	}
+
+	// Handle any remaining content
+	if currentLine.Len() > 0 {
+		lines = append(lines, currentLine.String())
+	}
+
+	return lines, scanner.Err()
 }
 
 // processRule processes a Makefile rule and adds nodes/edges to the graph.
@@ -195,6 +274,65 @@ func (p *Parser) processRule(target string, deps []string, commands []string) {
 		edgeType := inferEdgeType(depType, targetType)
 		p.graph.AddEdge(dep, target, edgeType)
 	}
+}
+
+// processPatternRule processes a pattern rule (e.g., %.o: %.c) and adds a template node.
+// Pattern rules define generic transformations that apply to multiple files.
+func (p *Parser) processPatternRule(target, stem string, deps []string, commands []string) {
+	// For pattern rules, we create a "template" node that represents the transformation
+	// The actual instantiation would happen when concrete files are discovered
+
+	// Infer the target type from the pattern extension
+	targetType := inferPatternNodeType(target)
+
+	// Create a template node for the pattern rule
+	p.graph.AddNode(&Node{
+		ID:   target,
+		File: target,
+		Type: targetType,
+	})
+
+	// Process the stem dependency (e.g., %.c in %.o: %.c)
+	if stem != "" {
+		stemType := inferPatternNodeType(stem)
+		p.graph.AddNode(&Node{
+			ID:   stem,
+			File: stem,
+			Type: stemType,
+		})
+
+		edgeType := inferEdgeType(stemType, targetType)
+		p.graph.AddEdge(stem, target, edgeType)
+	}
+
+	// Process other dependencies
+	for _, dep := range deps {
+		// Skip variables and special targets
+		if strings.HasPrefix(dep, "$") || strings.HasPrefix(dep, ".") {
+			continue
+		}
+
+		depType := inferNodeType(dep)
+		if strings.Contains(dep, "%") {
+			depType = inferPatternNodeType(dep)
+		}
+
+		p.graph.AddNode(&Node{
+			ID:   dep,
+			File: dep,
+			Type: depType,
+		})
+
+		edgeType := inferEdgeType(depType, targetType)
+		p.graph.AddEdge(dep, target, edgeType)
+	}
+}
+
+// inferPatternNodeType infers the node type from a pattern rule target (e.g., %.o).
+func inferPatternNodeType(pattern string) NodeType {
+	// Remove the % and infer from the extension
+	cleaned := strings.Replace(pattern, "%", "file", 1)
+	return inferNodeType(cleaned)
 }
 
 // ParseCompileCommands parses a compile_commands.json file.
