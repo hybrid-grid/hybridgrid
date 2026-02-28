@@ -47,3 +47,7 @@ temp/
 # Build artifacts
 dist/
 /build/
+
+
+#Ignore vscode AI rules
+.github/instructions/codacy.instructions.md

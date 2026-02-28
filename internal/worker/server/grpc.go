@@ -8,12 +8,15 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	otelcodes "go.opentelemetry.io/otel/codes"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 	"github.com/h3nr1-d14z/hybridgrid/internal/capability"
+	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
+	hgtls "github.com/h3nr1-d14z/hybridgrid/internal/security/tls"
 	"github.com/h3nr1-d14z/hybridgrid/internal/worker/executor"
 )
 
@@ -22,6 +25,8 @@ type Config struct {
 	Port           int
 	MaxConcurrent  int
 	DefaultTimeout time.Duration
+	TLS            hgtls.Config
+	Tracing        tracing.Config
 }
 
 // DefaultConfig returns sensible defaults.
@@ -74,17 +79,43 @@ func (s *Server) Start() error {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
 
-	s.server = grpc.NewServer()
+	var opts []grpc.ServerOption
+
+	// Add TLS credentials if configured
+	if s.config.TLS.Enabled {
+		creds, err := hgtls.ServerCredentials(s.config.TLS)
+		if err != nil {
+			return fmt.Errorf("failed to load TLS credentials: %w", err)
+		}
+		if creds != nil {
+			opts = append(opts, grpc.Creds(creds))
+			log.Info().
+				Bool("mtls", s.config.TLS.RequireClientCert).
+				Str("min_version", s.config.TLS.MinVersionName()).
+				Msg("TLS enabled for worker gRPC server")
+		}
+	}
+
+	// Add tracing interceptors if enabled
+	if s.config.Tracing.Enable {
+		opts = append(opts, tracing.ServerOptions()...)
+		log.Info().Msg("OpenTelemetry tracing enabled for worker gRPC server")
+	}
+
+	s.server = grpc.NewServer(opts...)
 	pb.RegisterBuildServiceServer(s.server, s)
 
 	log.Info().Int("port", s.config.Port).Msg("Worker gRPC server starting")
 	return s.server.Serve(lis)
 }
 
-// Stop gracefully stops the server.
+// Stop gracefully stops the server and releases resources.
 func (s *Server) Stop() {
 	if s.server != nil {
 		s.server.GracefulStop()
+	}
+	if s.executor != nil {
+		s.executor.Close()
 	}
 }
 
@@ -97,7 +128,14 @@ func (s *Server) Handshake(ctx context.Context, req *pb.HandshakeRequest) (*pb.H
 func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.CompileResponse, error) {
 	start := time.Now()
 
+	// Start tracing span for compilation
+	ctx, span := tracing.StartSpan(ctx, "worker.Compile",
+		tracing.WithCompileAttributes(req.TaskId, req.Compiler, req.TargetArch.String(), len(req.PreprocessedSource)+len(req.RawSource)),
+	)
+	defer span.End()
+
 	if req.TaskId == "" {
+		span.SetStatus(otelcodes.Error, "task_id required")
 		return nil, status.Error(codes.InvalidArgument, "task_id required")
 	}
 
@@ -106,6 +144,7 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	defer atomic.AddInt64(&s.activeTasks, -1)
 
 	if active > int64(s.config.MaxConcurrent) {
+		span.SetStatus(otelcodes.Error, "too many concurrent tasks")
 		return nil, status.Error(codes.ResourceExhausted, "too many concurrent tasks")
 	}
 
@@ -140,12 +179,17 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 		SourceFilename: req.SourceFilename,
 		IncludeFiles:   req.IncludeFiles,
 		IncludePaths:   req.IncludePaths,
+		// Client info for OS-aware executor selection
+		ClientOs: req.ClientOs,
 	}
 
-	// Execute compilation
+	// Execute compilation with tracing
+	tracing.AddEvent(ctx, "executor.start")
 	result, err := s.executor.Execute(execCtx, execReq)
 	if err != nil {
 		atomic.AddInt64(&s.failedTasks, 1)
+		span.SetStatus(otelcodes.Error, err.Error())
+		tracing.RecordError(ctx, err)
 		log.Error().Err(err).Str("task_id", req.TaskId).Msg("Compilation execution error")
 		return &pb.CompileResponse{
 			Status:   pb.TaskStatus_STATUS_FAILED,
@@ -156,6 +200,12 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 
 	compilationTime := time.Since(start)
 	atomic.AddInt64(&s.totalTimeMs, compilationTime.Milliseconds())
+
+	span.SetAttributes(
+		tracing.AttrCompileMs.Int64(compilationTime.Milliseconds()),
+		tracing.AttrExitCode.Int(int(result.ExitCode)),
+		tracing.AttrObjectSize.Int(len(result.ObjectCode)),
+	)
 
 	resp := &pb.CompileResponse{
 		ObjectFile:        result.ObjectCode,
@@ -168,6 +218,7 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	if result.Success {
 		resp.Status = pb.TaskStatus_STATUS_COMPLETED
 		atomic.AddInt64(&s.successTasks, 1)
+		span.SetStatus(otelcodes.Ok, "compilation succeeded")
 		log.Debug().
 			Str("task_id", req.TaskId).
 			Dur("duration", compilationTime).
@@ -176,6 +227,7 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	} else {
 		resp.Status = pb.TaskStatus_STATUS_FAILED
 		atomic.AddInt64(&s.failedTasks, 1)
+		span.SetStatus(otelcodes.Error, "compilation failed")
 		log.Debug().
 			Str("task_id", req.TaskId).
 			Dur("duration", compilationTime).

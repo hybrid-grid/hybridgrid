@@ -11,6 +11,7 @@ import (
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
+	hgtls "github.com/h3nr1-d14z/hybridgrid/internal/security/tls"
 )
 
 const (
@@ -25,6 +26,7 @@ type Config struct {
 	Timeout       time.Duration
 	Insecure      bool
 	EnableTracing bool
+	TLS           hgtls.Config
 }
 
 // Client wraps the BuildService gRPC client.
@@ -41,7 +43,17 @@ func New(cfg Config) (*Client, error) {
 	}
 
 	opts := []grpc.DialOption{}
-	if cfg.Insecure {
+
+	// Configure transport credentials: TLS takes priority over Insecure
+	if cfg.TLS.Enabled {
+		creds, err := hgtls.ClientCredentials(cfg.TLS)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load TLS credentials: %w", err)
+		}
+		if creds != nil {
+			opts = append(opts, grpc.WithTransportCredentials(creds))
+		}
+	} else if cfg.Insecure {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 

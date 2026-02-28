@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"time"
 
@@ -36,6 +37,9 @@ type Request struct {
 	SourceFilename string            // Original filename with extension (e.g., "main.cpp")
 	IncludeFiles   map[string][]byte // Bundled project headers (path -> content)
 	IncludePaths   []string          // -I paths for headers
+
+	// Client info for OS-aware executor selection
+	ClientOs string // OS where the build was initiated (e.g., "linux", "darwin", "windows")
 }
 
 // Executor defines the interface for compilation executors.
@@ -97,6 +101,22 @@ func (m *Manager) Select(targetArch pb.Architecture) Executor {
 	return m.native
 }
 
+// SelectForRequest chooses the executor considering client OS.
+// If the client OS differs from this worker's OS and raw source is provided,
+// use Docker to compile in a matching environment.
+func (m *Manager) SelectForRequest(req *Request) Executor {
+	// If client OS is set and differs from this worker's OS,
+	// raw source needs Docker for cross-OS compilation
+	if req.ClientOs != "" && req.ClientOs != runtime.GOOS && len(req.RawSource) > 0 {
+		if m.docker != nil && m.docker.CanExecute(req.TargetArch, m.nativeArch) {
+			return m.docker
+		}
+	}
+
+	// Otherwise use standard arch-based selection
+	return m.Select(req.TargetArch)
+}
+
 // SelectForCompiler chooses the appropriate executor based on compiler and target architecture.
 func (m *Manager) SelectForCompiler(compiler string, targetArch pb.Architecture) Executor {
 	// If compiler is MSVC (cl.exe), use MSVC executor
@@ -108,6 +128,14 @@ func (m *Manager) SelectForCompiler(compiler string, targetArch pb.Architecture)
 
 	// Otherwise use standard selection
 	return m.Select(targetArch)
+}
+
+// Close releases resources held by managed executors.
+func (m *Manager) Close() error {
+	if d, ok := m.docker.(*DockerExecutor); ok && d != nil {
+		return d.Close()
+	}
+	return nil
 }
 
 // GetMSVC returns the MSVC executor if available.
@@ -123,7 +151,7 @@ func isMSVCCompiler(compiler string) bool {
 
 // Execute runs a compilation using the appropriate executor.
 func (m *Manager) Execute(ctx context.Context, req *Request) (*Result, error) {
-	executor := m.Select(req.TargetArch)
+	executor := m.SelectForRequest(req)
 
 	// Start tracing span
 	ctx, span := tracing.StartSpan(ctx, "compile",

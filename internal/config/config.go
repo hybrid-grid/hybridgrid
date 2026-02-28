@@ -26,6 +26,30 @@ type Config struct {
 
 	// Logging settings
 	Log LogConfig `mapstructure:"log"`
+
+	// TLS settings
+	TLS TLSConfig `mapstructure:"tls"`
+
+	// Tracing settings
+	Tracing TracingConfig `mapstructure:"tracing"`
+}
+
+// TLSConfig holds TLS/mTLS settings.
+type TLSConfig struct {
+	Enabled           bool   `mapstructure:"enabled"`
+	CertFile          string `mapstructure:"cert_file"`
+	KeyFile           string `mapstructure:"key_file"`
+	ClientCA          string `mapstructure:"client_ca"`
+	RequireClientCert bool   `mapstructure:"require_client_cert"`
+	InsecureSkipVerify bool  `mapstructure:"insecure_skip_verify"`
+}
+
+// TracingConfig holds OpenTelemetry tracing settings.
+type TracingConfig struct {
+	Enable     bool    `mapstructure:"enable"`
+	Endpoint   string  `mapstructure:"endpoint"`
+	SampleRate float64 `mapstructure:"sample_rate"`
+	Insecure   bool    `mapstructure:"insecure"`
 }
 
 // CoordinatorConfig holds coordinator-specific settings.
@@ -205,6 +229,22 @@ log:
   level: info           # debug, info, warn, error
   format: console       # console, json
   # file: /var/log/hybridgrid.log
+
+# TLS / mTLS configuration (optional)
+tls:
+  enabled: false
+  # cert_file: /etc/hybridgrid/tls/server.crt
+  # key_file: /etc/hybridgrid/tls/server.key
+  # client_ca: /etc/hybridgrid/tls/ca.crt        # CA for verifying client certs (mTLS)
+  # require_client_cert: false                     # Enable mTLS
+  # insecure_skip_verify: false                    # Skip server cert verification (testing only)
+
+# OpenTelemetry tracing (optional)
+tracing:
+  enable: false
+  endpoint: "localhost:4317"    # OTLP gRPC endpoint
+  sample_rate: 0.1              # 0.0 to 1.0 (10% default)
+  insecure: true                # Disable TLS for OTLP connection
 `
 	return os.WriteFile(path, []byte(example), 0644)
 }

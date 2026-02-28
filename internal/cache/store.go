@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 // windowsReservedNames are device names that cannot be used as filenames on Windows.
@@ -251,7 +253,9 @@ func (s *Store) Delete(key string) error {
 	s.mu.Unlock()
 
 	path := s.keyPath(key)
-	os.Remove(path)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		log.Warn().Err(err).Str("key", key).Msg("Failed to remove cache file")
+	}
 	return s.saveIndex()
 }
 
@@ -266,7 +270,9 @@ func (s *Store) Clear() error {
 	entries, _ := os.ReadDir(s.dir)
 	for _, e := range entries {
 		if e.Name() != "index.json" {
-			os.RemoveAll(filepath.Join(s.dir, e.Name()))
+			if err := os.RemoveAll(filepath.Join(s.dir, e.Name())); err != nil {
+				log.Warn().Err(err).Str("name", e.Name()).Msg("Failed to remove cache entry during clear")
+			}
 		}
 	}
 
@@ -341,7 +347,9 @@ func (s *Store) evictIfNeeded() {
 		}
 		delete(s.entries, kv.key)
 		s.totalSize -= kv.entry.Size
-		os.Remove(s.keyPath(kv.key))
+		if err := os.Remove(s.keyPath(kv.key)); err != nil && !os.IsNotExist(err) {
+			log.Warn().Err(err).Str("key", kv.key).Msg("Failed to remove evicted cache file")
+		}
 	}
 }
 

@@ -207,3 +207,21 @@ var (
 	AttrSourceSize  = attribute.Key("hybridgrid.source_size")
 	AttrObjectSize  = attribute.Key("hybridgrid.object_size")
 )
+
+// WithCompileAttributes returns a SpanStartOption that sets common compile attributes.
+func WithCompileAttributes(taskID, compiler, targetArch string, sourceSize int) trace.SpanStartOption {
+	return trace.WithAttributes(
+		AttrTaskID.String(taskID),
+		AttrCompiler.String(compiler),
+		AttrTargetArch.String(targetArch),
+		AttrSourceSize.Int(sourceSize),
+	)
+}
+
+// WithScheduleAttributes returns a SpanStartOption that sets scheduling attributes.
+func WithScheduleAttributes(taskID, workerID string) trace.SpanStartOption {
+	return trace.WithAttributes(
+		AttrTaskID.String(taskID),
+		AttrWorkerID.String(workerID),
+	)
+}

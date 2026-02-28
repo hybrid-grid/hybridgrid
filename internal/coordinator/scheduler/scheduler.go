@@ -355,8 +355,9 @@ func cryptoRandInt(n int) int {
 }
 
 // filterByOS filters workers by matching operating system.
-// This is critical for C/C++ compilation where preprocessed source
-// contains OS-specific headers that won't compile on different OS.
+// Workers with matching OS can compile natively.
+// Workers with Docker can compile preprocessed source from any OS
+// by running inside a compatible Docker container (e.g., dockcross).
 func filterByOS(workers []*registry.WorkerInfo, clientOS string) []*registry.WorkerInfo {
 	if clientOS == "" {
 		return workers
@@ -364,7 +365,16 @@ func filterByOS(workers []*registry.WorkerInfo, clientOS string) []*registry.Wor
 
 	result := make([]*registry.WorkerInfo, 0, len(workers))
 	for _, w := range workers {
-		if w.Capabilities != nil && w.Capabilities.Os == clientOS {
+		if w.Capabilities == nil {
+			continue
+		}
+		// Same OS: can compile natively
+		if w.Capabilities.Os == clientOS {
+			result = append(result, w)
+			continue
+		}
+		// Different OS but has Docker: can compile via Docker container
+		if w.Capabilities.DockerAvailable {
 			result = append(result, w)
 		}
 	}

@@ -22,10 +22,27 @@ import (
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 )
 
+// DockerResourceLimits holds configurable resource limits for Docker containers.
+type DockerResourceLimits struct {
+	MemoryBytes int64 // Container memory limit (default 512MB)
+	NanoCPUs    int64 // CPU limit in nano-CPUs (default 1e9 = 1 CPU)
+	PidsLimit   int64 // Max number of PIDs (default 100)
+}
+
+// DefaultDockerResourceLimits returns the default resource limits.
+func DefaultDockerResourceLimits() DockerResourceLimits {
+	return DockerResourceLimits{
+		MemoryBytes: 512 * 1024 * 1024,
+		NanoCPUs:    1_000_000_000,
+		PidsLimit:   100,
+	}
+}
+
 // DockerExecutor executes compilation inside Docker containers.
 type DockerExecutor struct {
-	client *client.Client
-	images map[pb.Architecture]string
+	client   *client.Client
+	images   map[pb.Architecture]string
+	limits   DockerResourceLimits
 }
 
 // Default dockcross images for cross-compilation.
@@ -35,8 +52,13 @@ var defaultImages = map[pb.Architecture]string{
 	pb.Architecture_ARCH_ARMV7:  "dockcross/linux-armv7",
 }
 
-// NewDockerExecutor creates a new Docker executor.
+// NewDockerExecutor creates a new Docker executor with default resource limits.
 func NewDockerExecutor() (*DockerExecutor, error) {
+	return NewDockerExecutorWithLimits(DefaultDockerResourceLimits())
+}
+
+// NewDockerExecutorWithLimits creates a new Docker executor with custom resource limits.
+func NewDockerExecutorWithLimits(limits DockerResourceLimits) (*DockerExecutor, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Docker client: %w", err)
@@ -55,6 +77,7 @@ func NewDockerExecutor() (*DockerExecutor, error) {
 	return &DockerExecutor{
 		client: cli,
 		images: defaultImages,
+		limits: limits,
 	}, nil
 }
 
@@ -85,10 +108,33 @@ func (e *DockerExecutor) Execute(ctx context.Context, req *Request) (*Result, er
 	}
 	defer os.RemoveAll(workDir)
 
-	// Write preprocessed source to temp file
-	srcFile := "source.i"
-	if err := os.WriteFile(filepath.Join(workDir, srcFile), req.PreprocessedSource, 0644); err != nil {
-		return nil, fmt.Errorf("failed to write source: %w", err)
+	// Determine source file and write it
+	var srcFile string
+	if len(req.RawSource) > 0 {
+		// Raw source mode: write source with original filename
+		srcFile = req.SourceFilename
+		if srcFile == "" {
+			srcFile = "source.c"
+		}
+		if err := os.WriteFile(filepath.Join(workDir, srcFile), req.RawSource, 0644); err != nil {
+			return nil, fmt.Errorf("failed to write source: %w", err)
+		}
+		// Write bundled include files
+		for path, content := range req.IncludeFiles {
+			fullPath := filepath.Join(workDir, path)
+			if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+				return nil, fmt.Errorf("failed to create include dir: %w", err)
+			}
+			if err := os.WriteFile(fullPath, content, 0644); err != nil {
+				return nil, fmt.Errorf("failed to write include file %s: %w", path, err)
+			}
+		}
+	} else {
+		// Preprocessed source mode
+		srcFile = "source.i"
+		if err := os.WriteFile(filepath.Join(workDir, srcFile), req.PreprocessedSource, 0644); err != nil {
+			return nil, fmt.Errorf("failed to write source: %w", err)
+		}
 	}
 
 	// Select image based on target architecture
@@ -104,7 +150,12 @@ func (e *DockerExecutor) Execute(ctx context.Context, req *Request) (*Result, er
 
 	// Build compilation command
 	outFile := "output.o"
-	compileCmd := e.buildCommand(req.Compiler, req.Args, srcFile, outFile)
+	var compileCmd string
+	if len(req.RawSource) > 0 {
+		compileCmd = e.buildRawCommand(req.Compiler, req.Args, srcFile, outFile, req.IncludePaths)
+	} else {
+		compileCmd = e.buildCommand(req.Compiler, req.Args, srcFile, outFile)
+	}
 
 	// Create container config with security settings
 	containerConfig := &container.Config{
@@ -124,10 +175,10 @@ func (e *DockerExecutor) Execute(ctx context.Context, req *Request) (*Result, er
 			},
 		},
 		Resources: container.Resources{
-			Memory:     512 * 1024 * 1024, // 512MB
-			MemorySwap: 512 * 1024 * 1024, // No swap
-			NanoCPUs:   1000000000,        // 1 CPU
-			PidsLimit:  func() *int64 { v := int64(100); return &v }(),
+			Memory:     e.limits.MemoryBytes,
+			MemorySwap: e.limits.MemoryBytes, // No swap
+			NanoCPUs:   e.limits.NanoCPUs,
+			PidsLimit:  func() *int64 { v := e.limits.PidsLimit; return &v }(),
 		},
 		NetworkMode: "none",
 	}
@@ -256,6 +307,45 @@ func (e *DockerExecutor) buildCommand(compiler string, args []string, srcFile, o
 	// Add input and output
 	cmdParts = append(cmdParts, srcFile, "-o", outFile)
 
+	return strings.Join(cmdParts, " ")
+}
+
+// buildRawCommand constructs the shell command for raw source compilation in Docker.
+func (e *DockerExecutor) buildRawCommand(compiler string, args []string, srcFile, outFile string, includePaths []string) string {
+	var cmdParts []string
+
+	cmdParts = append(cmdParts, compiler)
+	cmdParts = append(cmdParts, "-c")
+
+	// Add include paths pointing to /work
+	for _, p := range includePaths {
+		cmdParts = append(cmdParts, "-I/work/"+p)
+	}
+
+	// Add other args, filtering out input/output/include paths
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "-o" {
+			i++
+			continue
+		}
+		if arg == "-c" {
+			continue
+		}
+		if arg == "-I" {
+			i++ // skip -I <path>
+			continue
+		}
+		if strings.HasPrefix(arg, "-I") {
+			continue // skip -Ipath
+		}
+		if isInputFile(arg) {
+			continue
+		}
+		cmdParts = append(cmdParts, arg)
+	}
+
+	cmdParts = append(cmdParts, srcFile, "-o", outFile)
 	return strings.Join(cmdParts, " ")
 }
 

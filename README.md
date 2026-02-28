@@ -4,37 +4,40 @@ A distributed multi-platform build system for C/C++, Flutter, Unity, and more.
 
 Hybrid-Grid distributes compilation tasks across multiple machines on your LAN (via mDNS auto-discovery) or WAN, dramatically reducing build times for large projects.
 
-## v0.1.0 Release Status
+## v0.2.1 Release Status
 
-### ✅ Working Features
+### ✅ Production Ready Features
 | Feature | Status | Notes |
 |---------|--------|-------|
 | **C/C++ Distributed Compilation** | ✅ Production Ready | Cross-compilation across Mac/Linux/Windows |
+| **MSVC Flag Translation** | ✅ Working | GCC/Clang to MSVC flag mapping |
 | **mDNS Auto-Discovery** | ✅ Working | Zero-config LAN discovery |
 | **Local Cache** | ✅ Working | ~10x speedup on cache hits |
-| **Cache Hit Dashboard** | ✅ Working | Real-time stats reporting |
-| **`hgbuild make`** | ✅ Working | Wraps make with distributed CC |
-| **`hgbuild cc/c++`** | ✅ Working | Drop-in gcc/g++ replacement |
-| **Local Fallback** | ✅ Working | Auto-fallback when coordinator unavailable |
 | **Web Dashboard** | ✅ Working | Real-time worker/task/cache stats |
+| **`hgbuild make/ninja`** | ✅ Working | Wraps build tools with distributed CC |
+| **`hgbuild cc/c++`** | ✅ Working | Drop-in gcc/g++ replacement |
+| **`hgbuild graph`** | ✅ Working | Build dependency visualization |
+| **Local Fallback** | ✅ Working | Auto-fallback when coordinator unavailable |
 | **P2C Scheduler** | ✅ Working | Smart worker selection with scoring |
 | **Circuit Breaker** | ✅ Working | Per-worker fault tolerance |
 | **Docker Cross-Compile** | ✅ Working | dockcross integration |
+| **Colored CLI Output** | ✅ Working | Progress bars and status tags |
 
-### ⏳ Not Yet Implemented
+### ⏳ Planned Features
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Flutter builds | ❌ Not Started | Planned for v0.2.0 |
-| Unity builds | ❌ Not Started | Planned for v0.2.0 |
-| Rust/Go/Node builds | ❌ Not Started | Planned for v0.3.0 |
-| WAN Registry | ❌ Not Started | Currently LAN-only |
-| Kubernetes/Helm | ❌ Not Started | Docker Compose available |
-| TLS/mTLS | ⚠️ Config Only | Code exists but not tested in prod |
+| Flutter builds | ❌ Planned | v0.3.0 |
+| Unity builds | ❌ Planned | v0.3.0 |
+| Rust/Go/Node builds | ❌ Planned | v0.4.0 |
+| OpenTelemetry Tracing | ⏳ In Progress | Distributed trace support |
+| WAN Registry | ❌ Planned | Currently LAN-only |
+| TLS/mTLS | ⚠️ Config Only | Code exists, not tested in prod |
 
 ### Tested Configurations
-- **macOS** (ARM64) → Coordinator + Worker ✅
+- **macOS** (ARM64/x86_64) → Coordinator + Worker ✅
+- **Linux** (ARM64/x86_64) → Coordinator + Worker ✅
+- **Windows** (x86_64/ARM64) → Worker ✅
 - **Raspberry Pi** (ARM64) → Worker ✅
-- **Windows WSL** (x86_64) → Worker ✅
 - **100-file stress test** → 17s distributed, 3s cached ✅
 
 ## Features
@@ -324,13 +327,12 @@ hgbuild cache clear
 
 ## Documentation
 
-- [Getting Started Guide](docs/getting-started.md) - Quick start in 5 minutes
-- [Architecture Diagrams](docs/architecture-diagrams.md) - Visual system diagrams
-- [Installation Guide](docs/installation.md)
-- [Configuration Reference](docs/configuration.md)
-- [Architecture Overview](docs/architecture.md)
-- [API Documentation](docs/api.md)
-- [Troubleshooting](docs/troubleshooting.md)
+- **[Quick Start Guide](docs/quick-start.md)** - Get running in 5 minutes
+- **[Feature Guide](docs/feature-guide.md)** - Comprehensive feature documentation with testing
+- [System Architecture](docs/system-architecture.md) - Design and components
+- [Configuration Reference](docs/configuration.md) - All config options
+- [API Documentation](docs/api.md) - gRPC and REST APIs
+- [Troubleshooting](docs/troubleshooting.md) - Common issues and solutions
 
 ## Monitoring
 

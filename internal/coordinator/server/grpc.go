@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog/log"
+	otelcodes "go.opentelemetry.io/otel/codes"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -18,7 +20,54 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/registry"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/resilience"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/scheduler"
+	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
+	hgtls "github.com/h3nr1-d14z/hybridgrid/internal/security/tls"
 )
+
+// connPool caches gRPC client connections to workers by address.
+type connPool struct {
+	mu       sync.Mutex
+	conns    map[string]*grpc.ClientConn
+	dialOpts []grpc.DialOption
+}
+
+func newConnPool(dialOpts []grpc.DialOption) *connPool {
+	return &connPool{
+		conns:    make(map[string]*grpc.ClientConn),
+		dialOpts: dialOpts,
+	}
+}
+
+// get returns an existing connection or creates a new one.
+func (p *connPool) get(ctx context.Context, addr string) (*grpc.ClientConn, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if conn, ok := p.conns[addr]; ok {
+		return conn, nil
+	}
+
+	opts := make([]grpc.DialOption, len(p.dialOpts))
+	copy(opts, p.dialOpts)
+	opts = append(opts, grpc.WithBlock())
+
+	conn, err := grpc.DialContext(ctx, addr, opts...)
+	if err != nil {
+		return nil, err
+	}
+	p.conns[addr] = conn
+	return conn, nil
+}
+
+// closeAll closes all pooled connections.
+func (p *connPool) closeAll() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for addr, conn := range p.conns {
+		conn.Close()
+		delete(p.conns, addr)
+	}
+}
 
 // Config holds the coordinator gRPC server configuration.
 type Config struct {
@@ -26,6 +75,8 @@ type Config struct {
 	AuthToken      string
 	HeartbeatTTL   time.Duration
 	RequestTimeout time.Duration
+	TLS            hgtls.Config
+	Tracing        tracing.Config
 }
 
 // DefaultConfig returns sensible defaults.
@@ -67,6 +118,7 @@ type Server struct {
 	scheduler      scheduler.Scheduler
 	circuitManager *resilience.CircuitManager
 	eventNotifier  EventNotifier
+	workerConns    *connPool
 
 	activeTasks  int64
 	queuedTasks  int64
@@ -83,11 +135,28 @@ func New(cfg Config) *Server {
 	sched := scheduler.NewLeastLoadedScheduler(reg)
 	circuitMgr := resilience.NewCircuitManager(resilience.DefaultCircuitConfig())
 
+	// Build dial options for worker connections
+	var dialOpts []grpc.DialOption
+	if cfg.TLS.Enabled {
+		creds, err := hgtls.ClientCredentials(cfg.TLS)
+		if err == nil && creds != nil {
+			dialOpts = append(dialOpts, grpc.WithTransportCredentials(creds))
+		} else {
+			dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		}
+	} else {
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
+	if cfg.Tracing.Enable {
+		dialOpts = append(dialOpts, tracing.DialOptions()...)
+	}
+
 	return &Server{
 		config:         cfg,
 		registry:       reg,
 		scheduler:      sched,
 		circuitManager: circuitMgr,
+		workerConns:    newConnPool(dialOpts),
 	}
 }
 
@@ -98,17 +167,43 @@ func (s *Server) Start() error {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
 
-	s.server = grpc.NewServer()
+	var opts []grpc.ServerOption
+
+	// Add TLS credentials if configured
+	if s.config.TLS.Enabled {
+		creds, err := hgtls.ServerCredentials(s.config.TLS)
+		if err != nil {
+			return fmt.Errorf("failed to load TLS credentials: %w", err)
+		}
+		if creds != nil {
+			opts = append(opts, grpc.Creds(creds))
+			log.Info().
+				Bool("mtls", s.config.TLS.RequireClientCert).
+				Str("min_version", s.config.TLS.MinVersionName()).
+				Msg("TLS enabled for coordinator gRPC server")
+		}
+	}
+
+	// Add tracing interceptors if enabled
+	if s.config.Tracing.Enable {
+		opts = append(opts, tracing.ServerOptions()...)
+		log.Info().Msg("OpenTelemetry tracing enabled for coordinator gRPC server")
+	}
+
+	s.server = grpc.NewServer(opts...)
 	pb.RegisterBuildServiceServer(s.server, s)
 
 	log.Info().Int("port", s.config.Port).Msg("Coordinator gRPC server starting")
 	return s.server.Serve(lis)
 }
 
-// Stop gracefully stops the server.
+// Stop gracefully stops the server and releases resources.
 func (s *Server) Stop() {
 	if s.server != nil {
 		s.server.GracefulStop()
+	}
+	if s.workerConns != nil {
+		s.workerConns.closeAll()
 	}
 	if reg, ok := s.registry.(*registry.InMemoryRegistry); ok {
 		reg.Stop()
@@ -201,7 +296,14 @@ func (s *Server) Handshake(ctx context.Context, req *pb.HandshakeRequest) (*pb.H
 func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.CompileResponse, error) {
 	start := time.Now()
 
+	// Start tracing span for the coordinator compile flow
+	ctx, span := tracing.StartSpan(ctx, "coordinator.Compile",
+		tracing.WithCompileAttributes(req.TaskId, req.Compiler, req.TargetArch.String(), len(req.PreprocessedSource)+len(req.RawSource)),
+	)
+	defer span.End()
+
 	if req.TaskId == "" {
+		span.SetStatus(otelcodes.Error, "task_id required")
 		return nil, status.Error(codes.InvalidArgument, "task_id required")
 	}
 
@@ -211,18 +313,21 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	atomic.AddInt64(&s.queuedTasks, 1)
 	defer atomic.AddInt64(&s.queuedTasks, -1)
 
-	// Determine if we need OS filtering
-	// Raw source mode (cross-compilation) doesn't need OS filtering
-	// Preprocessed mode requires same-OS workers
+	// Determine OS filtering strategy:
+	// - Raw source mode: no OS filter needed, workers with Docker can cross-compile
+	//   using dockcross images. Workers with matching OS use native compiler.
+	// - Preprocessed mode: must match OS since headers are already expanded.
 	clientOSFilter := ""
 	if len(req.RawSource) == 0 && len(req.PreprocessedSource) > 0 {
-		// Preprocessed mode: filter by OS
 		clientOSFilter = req.ClientOs
 	}
 
-	// Select worker
+	// Select worker with tracing
+	tracing.AddEvent(ctx, "scheduler.select.start")
 	worker, err := s.scheduler.Select(pb.BuildType_BUILD_TYPE_CPP, req.TargetArch, clientOSFilter)
 	if err != nil {
+		span.SetStatus(otelcodes.Error, "no worker available")
+		tracing.RecordError(ctx, err)
 		log.Error().Err(err).
 			Str("task_id", req.TaskId).
 			Str("client_os", req.ClientOs).
@@ -234,6 +339,8 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 			Stderr:   fmt.Sprintf("no worker available: %v", err),
 		}, nil
 	}
+	tracing.AddEvent(ctx, "scheduler.select.done")
+	span.SetAttributes(tracing.AttrWorkerID.String(worker.ID))
 
 	// Track task
 	s.registry.IncrementTasks(worker.ID)
@@ -246,6 +353,7 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 
 	queueTime := time.Since(start)
 	taskStartTime := time.Now()
+	span.SetAttributes(tracing.AttrQueueTimeMs.Int64(queueTime.Milliseconds()))
 
 	log.Debug().
 		Str("task_id", req.TaskId).
@@ -265,7 +373,9 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	}
 
 	// Forward to worker
+	tracing.AddEvent(ctx, "forward.start")
 	resp, err := s.forwardCompile(ctx, worker, req)
+	tracing.AddEvent(ctx, "forward.done")
 
 	// Track completion
 	success := err == nil && resp != nil && resp.Status == pb.TaskStatus_STATUS_COMPLETED
@@ -276,11 +386,15 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	s.registry.DecrementTasks(worker.ID, success, compileTime)
 
 	taskCompletedTime := time.Now()
+	totalDuration := taskCompletedTime.Sub(start)
+	span.SetAttributes(tracing.AttrDurationMs.Int64(totalDuration.Milliseconds()))
 
 	if success {
 		atomic.AddInt64(&s.successTasks, 1)
+		span.SetStatus(otelcodes.Ok, "compilation succeeded")
 	} else {
 		atomic.AddInt64(&s.failedTasks, 1)
+		span.SetStatus(otelcodes.Error, "compilation failed")
 	}
 
 	// Notify task completed
@@ -312,6 +426,7 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	}
 
 	if err != nil {
+		tracing.RecordError(ctx, err)
 		log.Error().Err(err).Str("task_id", req.TaskId).Msg("Worker compilation failed")
 		return &pb.CompileResponse{
 			Status:   pb.TaskStatus_STATUS_FAILED,
@@ -328,15 +443,11 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 
 // forwardCompile forwards the compile request to a worker.
 func (s *Server) forwardCompile(ctx context.Context, worker *registry.WorkerInfo, req *pb.CompileRequest) (*pb.CompileResponse, error) {
-	// Create connection to worker
-	conn, err := grpc.DialContext(ctx, worker.Address,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
-	)
+	// Get pooled connection to worker (reuses existing connections)
+	conn, err := s.workerConns.get(ctx, worker.Address)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to worker: %w", err)
 	}
-	defer conn.Close()
 
 	client := pb.NewBuildServiceClient(conn)
 

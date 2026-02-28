@@ -177,9 +177,20 @@ func (s *Service) Build(ctx context.Context, req *Request) (*Result, error) {
 		}
 	}
 
-	// Step 3: Try remote compilation (with raw source for cross-compilation)
+	// Step 3: Try remote compilation
+	// Preprocess locally first to resolve all #include directives.
+	// This produces a self-contained .i file that any worker can compile,
+	// even workers on different OS (via Docker).
 	if s.client != nil {
-		compileResult, err := s.compileRemoteRaw(ctx, req, rawSource, includeFiles)
+		prepResult, prepErr := s.preprocessor.Preprocess(ctx, req.Args, req.SourceFile)
+		var compileResult *remoteResult
+		if prepErr == nil {
+			compileResult, err = s.compileRemotePreprocessed(ctx, req, prepResult.PreprocessedSource)
+		} else {
+			// Preprocessing failed, try raw source mode as fallback
+			log.Warn().Err(prepErr).Msg("Preprocessing failed, trying raw source mode")
+			compileResult, err = s.compileRemoteRaw(ctx, req, rawSource, includeFiles)
+		}
 		if err == nil && compileResult.ExitCode == 0 {
 			result.ObjectFile = compileResult.ObjectFile
 			result.ExitCode = compileResult.ExitCode
@@ -361,6 +372,70 @@ func getClientArch() pb.Architecture {
 	default:
 		return pb.Architecture_ARCH_UNSPECIFIED
 	}
+}
+
+// compileRemotePreprocessed sends preprocessed source to a remote worker.
+// Preprocessed source is self-contained (all #includes resolved), so any worker
+// can compile it, even on a different OS via Docker.
+func (s *Service) compileRemotePreprocessed(ctx context.Context, req *Request, preprocessed []byte) (*remoteResult, error) {
+	compileReq := &pb.CompileRequest{
+		TaskId:             req.TaskID,
+		Compiler:           req.Args.Compiler,
+		CompilerArgs:       s.buildRemoteArgs(req.Args),
+		PreprocessedSource: preprocessed,
+		SourceFilename:     filepath.Base(req.SourceFile),
+		TargetArch:         req.TargetArch,
+		TimeoutSeconds:     int32(req.Timeout.Seconds()),
+		ClientOs:           getClientOS(),
+		ClientArch:         getClientArch(),
+	}
+
+	var lastErr error
+	delay := s.retryDelay
+	maxRetries := s.maxRetries
+	if maxRetries <= 0 {
+		maxRetries = 1
+	}
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			if s.verbose {
+				log.Debug().
+					Int("attempt", attempt+1).
+					Str("task_id", req.TaskID).
+					Msg("Retrying remote compilation")
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+			delay *= 2
+			if delay > 5*time.Second {
+				delay = 5 * time.Second
+			}
+		}
+
+		resp, err := s.client.Compile(ctx, compileReq)
+		if err != nil {
+			lastErr = err
+			if isRetryableError(err) {
+				continue
+			}
+			return nil, err
+		}
+
+		return &remoteResult{
+			ObjectFile:      resp.ObjectFile,
+			ExitCode:        int(resp.ExitCode),
+			Stdout:          resp.Stdout,
+			Stderr:          resp.Stderr,
+			CompilationTime: time.Duration(resp.CompilationTimeMs) * time.Millisecond,
+			WorkerID:        resp.WorkerId,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("remote compilation failed after %d attempts: %w", maxRetries, lastErr)
 }
 
 // compileRemoteRaw sends raw source to a remote worker for cross-compilation.
