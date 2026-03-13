@@ -3,6 +3,7 @@ package build
 import (
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -566,7 +567,13 @@ func (s *Service) collectIncludeFiles(args *compiler.ParsedArgs) (map[string][]b
 
 				ext := filepath.Ext(path)
 				if ext == ".h" || ext == ".hpp" || ext == ".hxx" || ext == ".hh" {
-					content, err := root.ReadFile(path)
+					file, err := root.Open(path)
+					if err != nil {
+						return nil // Skip unreadable files
+					}
+
+					content, err := io.ReadAll(file)
+					_ = file.Close()
 					if err != nil {
 						return nil // Skip unreadable files
 					}

@@ -879,7 +879,17 @@ func writeOutputFile(outputFile string, data []byte) error {
 	}
 	defer root.Close()
 
-	if err := root.WriteFile(fileName, data, 0644); err != nil {
+	file, err := root.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open output file: %w", err)
+	}
+	defer file.Close()
+
+	if _, err := file.Write(data); err != nil {
+		return fmt.Errorf("failed to write output file: %w", err)
+	}
+
+	if err := file.Sync(); err != nil {
 		return fmt.Errorf("failed to write output file: %w", err)
 	}
 
