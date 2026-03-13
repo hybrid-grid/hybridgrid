@@ -25,6 +25,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
 	"github.com/h3nr1-d14z/hybridgrid/internal/graph"
 	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/client"
+	"github.com/h3nr1-d14z/hybridgrid/internal/security/validation"
 )
 
 var (
@@ -825,7 +826,7 @@ func runCompiler(defaultCompiler, envVar string, args []string) error {
 	}
 
 	// Write output file
-	if err := os.WriteFile(outputFile, result.ObjectFile, 0644); err != nil {
+	if err := writeOutputFile(outputFile, result.ObjectFile); err != nil {
 		return fmt.Errorf("failed to write output: %w", err)
 	}
 
@@ -846,11 +847,125 @@ func runCompiler(defaultCompiler, envVar string, args []string) error {
 
 // runLocalCompiler runs the compiler locally (for non-distributable operations).
 func runLocalCompiler(compiler string, args []string) error {
-	cmd := exec.Command(compiler, args...)
+	resolvedCompiler, err := resolveLocalCompilerPath(compiler)
+	if err != nil {
+		return err
+	}
+
+	// #nosec G204,G702 -- compiler path is validated and resolved before execution.
+	cmd := exec.Command(resolvedCompiler, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func writeOutputFile(outputFile string, data []byte) error {
+	cleanPath, err := resolveOutputPath(outputFile)
+	if err != nil {
+		return err
+	}
+
+	baseDir := filepath.Dir(cleanPath)
+	fileName := filepath.Base(cleanPath)
+	// #nosec G301,G302,G703 -- cleanPath is validated by resolveOutputPath before directory creation.
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	root, err := os.OpenRoot(baseDir)
+	if err != nil {
+		return fmt.Errorf("failed to open output directory: %w", err)
+	}
+	defer root.Close()
+
+	if err := root.WriteFile(fileName, data, 0644); err != nil {
+		return fmt.Errorf("failed to write output file: %w", err)
+	}
+
+	return nil
+}
+
+func resolveOutputPath(outputFile string) (string, error) {
+	if outputFile == "" {
+		return "", fmt.Errorf("output path cannot be empty")
+	}
+
+	baseDir, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	cleanPath := validation.SanitizePath(baseDir, outputFile)
+	if cleanPath == "" {
+		return "", fmt.Errorf("invalid output path: %s", outputFile)
+	}
+
+	if !filepath.IsAbs(cleanPath) {
+		cleanPath = filepath.Join(baseDir, cleanPath)
+	}
+
+	return cleanPath, nil
+}
+
+func resolveLocalCompilerPath(compiler string) (string, error) {
+	if compiler == "" {
+		return "", fmt.Errorf("compiler cannot be empty")
+	}
+
+	if strings.ContainsAny(compiler, "\r\n") {
+		return "", fmt.Errorf("compiler contains invalid characters")
+	}
+
+	if strings.ContainsAny(compiler, `/\`) {
+		cleanPath := validation.SanitizePath("", compiler)
+		if cleanPath == "" {
+			return "", fmt.Errorf("invalid compiler path: %s", compiler)
+		}
+
+		absPath, err := filepath.Abs(cleanPath)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve compiler path: %w", err)
+		}
+
+		// #nosec G304,G703 -- absPath is validated by SanitizePath and filepath.Abs before stat.
+		info, err := os.Stat(absPath)
+		if err != nil {
+			return "", fmt.Errorf("failed to stat compiler path: %w", err)
+		}
+		if info.IsDir() {
+			return "", fmt.Errorf("compiler path is a directory: %s", compiler)
+		}
+
+		return absPath, nil
+	}
+
+	if !isSafeExecutableName(compiler) {
+		return "", fmt.Errorf("invalid compiler name: %s", compiler)
+	}
+
+	resolvedCompiler, err := exec.LookPath(compiler)
+	if err != nil {
+		return "", fmt.Errorf("failed to find compiler %s: %w", compiler, err)
+	}
+
+	return resolvedCompiler, nil
+}
+
+func isSafeExecutableName(name string) bool {
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			continue
+		}
+		switch r {
+		case '.', '_', '-', '+':
+			continue
+		default:
+			return false
+		}
+	}
+
+	return true
 }
 
 // getCoordinatorAddress gets the coordinator address from flags, env, or mDNS.

@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"runtime"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -243,14 +243,18 @@ It executes build tasks received from the coordinator.`,
 // getOutboundIP returns the preferred outbound IP for reaching the target address.
 // This finds which local IP would be used to connect to the coordinator.
 func getOutboundIP(target string) string {
-	// Extract host from target (remove port if present)
 	host := target
-	if idx := strings.LastIndex(target, ":"); idx != -1 {
-		host = target[:idx]
+	if parsedHost, _, err := net.SplitHostPort(target); err == nil {
+		host = parsedHost
 	}
 
-	// Try to dial UDP (doesn't actually connect, just determines route)
-	conn, err := net.Dial("udp", host+":80")
+	ip, err := netip.ParseAddr(host)
+	if err != nil {
+		return ""
+	}
+
+	remote := net.UDPAddrFromAddrPort(netip.AddrPortFrom(ip, 80))
+	conn, err := net.DialUDP("udp", nil, remote)
 	if err != nil {
 		return ""
 	}

@@ -2,8 +2,10 @@ package capability
 
 import (
 	"encoding/json"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -205,16 +207,22 @@ func findClExe(vcToolsPath string) string {
 		return ""
 	}
 
+	root, err := os.OpenRoot(vcToolsPath)
+	if err != nil {
+		return ""
+	}
+	defer root.Close()
+
 	// Prefer x64 hosted x64 target
-	clPath := filepath.Join(vcToolsPath, "bin", "Hostx64", "x64", "cl.exe")
-	if _, err := os.Stat(clPath); err == nil {
-		return clPath
+	clPath := path.Join("bin", "Hostx64", "x64", "cl.exe")
+	if _, err := root.Stat(clPath); err == nil {
+		return filepath.Join(vcToolsPath, filepath.FromSlash(clPath))
 	}
 
 	// Fall back to x86 hosted x64 target
-	clPath = filepath.Join(vcToolsPath, "bin", "Hostx86", "x64", "cl.exe")
-	if _, err := os.Stat(clPath); err == nil {
-		return clPath
+	clPath = path.Join("bin", "Hostx86", "x64", "cl.exe")
+	if _, err := root.Stat(clPath); err == nil {
+		return filepath.Join(vcToolsPath, filepath.FromSlash(clPath))
 	}
 
 	return ""
@@ -232,16 +240,22 @@ func detectMSVCArchitectures(vcToolsPath string) []string {
 		hostArch = "Hostx86"
 	}
 
-	binPath := filepath.Join(vcToolsPath, "bin", hostArch)
-	entries, err := os.ReadDir(binPath)
+	root, err := os.OpenRoot(vcToolsPath)
+	if err != nil {
+		return nil
+	}
+	defer root.Close()
+
+	binPath := path.Join("bin", hostArch)
+	entries, err := fs.ReadDir(root.FS(), binPath)
 	if err != nil {
 		return nil
 	}
 
 	for _, entry := range entries {
 		if entry.IsDir() {
-			clPath := filepath.Join(binPath, entry.Name(), "cl.exe")
-			if _, err := os.Stat(clPath); err == nil {
+			clPath := path.Join(binPath, entry.Name(), "cl.exe")
+			if _, err := root.Stat(clPath); err == nil {
 				archs = append(archs, entry.Name())
 			}
 		}
@@ -258,8 +272,14 @@ func detectWindowsSDK() string {
 		sdkRoot = `C:\Program Files (x86)\Windows Kits\10`
 	}
 
-	includePath := filepath.Join(sdkRoot, "Include")
-	entries, err := os.ReadDir(includePath)
+	root, err := os.OpenRoot(sdkRoot)
+	if err != nil {
+		return ""
+	}
+	defer root.Close()
+
+	includePath := "Include"
+	entries, err := fs.ReadDir(root.FS(), includePath)
 	if err != nil {
 		return ""
 	}
@@ -269,8 +289,8 @@ func detectWindowsSDK() string {
 		name := entries[i].Name()
 		if strings.HasPrefix(name, "10.0.") && entries[i].IsDir() {
 			// Verify ucrt exists
-			ucrtPath := filepath.Join(includePath, name, "ucrt")
-			if _, err := os.Stat(ucrtPath); err == nil {
+			ucrtPath := path.Join(includePath, name, "ucrt")
+			if _, err := root.Stat(ucrtPath); err == nil {
 				return name
 			}
 		}

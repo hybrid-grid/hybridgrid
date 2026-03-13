@@ -3,6 +3,7 @@ package build
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -548,31 +549,37 @@ func (s *Service) collectIncludeFiles(args *compiler.ParsedArgs) (map[string][]b
 
 		// Check if it's a relative path (project-local)
 		if !filepath.IsAbs(includePath) || strings.HasPrefix(includePath, ".") {
-			// Collect all headers from this directory
-			err := filepath.Walk(includePath, func(path string, info os.FileInfo, err error) error {
+			root, err := os.OpenRoot(includePath)
+			if err != nil {
+				log.Debug().Err(err).Str("path", includePath).Msg("Error opening include path")
+				continue
+			}
+
+			// Collect all headers from this directory using root-scoped APIs.
+			err = fs.WalkDir(root.FS(), ".", func(path string, d fs.DirEntry, err error) error {
 				if err != nil {
 					return nil // Skip errors
 				}
-				if info.IsDir() {
+				if d.IsDir() {
 					return nil
 				}
 
 				ext := filepath.Ext(path)
 				if ext == ".h" || ext == ".hpp" || ext == ".hxx" || ext == ".hh" {
-					content, err := os.ReadFile(path)
+					content, err := root.ReadFile(path)
 					if err != nil {
 						return nil // Skip unreadable files
 					}
 
-					// Use relative path as key
-					relPath, _ := filepath.Rel(includePath, path)
-					if relPath == "" {
+					relPath := filepath.Clean(path)
+					if relPath == "." {
 						relPath = filepath.Base(path)
 					}
 					includeFiles[relPath] = content
 				}
 				return nil
 			})
+			_ = root.Close()
 			if err != nil {
 				log.Debug().Err(err).Str("path", includePath).Msg("Error walking include path")
 			}
