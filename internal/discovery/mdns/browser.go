@@ -198,7 +198,7 @@ func (b *Browser) handleDiscovery(entry *zeroconf.ServiceEntry) {
 	}
 
 	b.mu.Lock()
-	existing, exists := b.workers[workerID]
+	_, exists := b.workers[workerID]
 	b.workers[workerID] = worker
 	b.mu.Unlock()
 
@@ -212,9 +212,6 @@ func (b *Browser) handleDiscovery(entry *zeroconf.ServiceEntry) {
 		if b.callback != nil {
 			b.callback(worker, "found")
 		}
-	} else {
-		// Update existing worker's discovery time
-		existing.DiscoveredAt = time.Now()
 	}
 }
 

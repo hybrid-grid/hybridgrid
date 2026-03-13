@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -149,6 +150,15 @@ It executes build tasks received from the coordinator.`,
 			// Handle shutdown signals
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+			defer signal.Stop(sigCh)
+
+			stopHeartbeatCh := make(chan struct{})
+			var stopHeartbeatOnce sync.Once
+			stopHeartbeat := func() {
+				stopHeartbeatOnce.Do(func() {
+					close(stopHeartbeatCh)
+				})
+			}
 
 			errCh := make(chan error, 2)
 			go func() {
@@ -191,7 +201,7 @@ It executes build tasks received from the coordinator.`,
 						} else {
 							log.Debug().Bool("accepted", hResp.Accepted).Msg("Heartbeat sent")
 						}
-					case <-sigCh:
+					case <-stopHeartbeatCh:
 						return
 					}
 				}
@@ -199,6 +209,7 @@ It executes build tasks received from the coordinator.`,
 
 			select {
 			case sig := <-sigCh:
+				stopHeartbeat()
 				log.Info().Str("signal", sig.String()).Msg("Received shutdown signal")
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
@@ -206,6 +217,7 @@ It executes build tasks received from the coordinator.`,
 				srv.Stop()
 				return nil
 			case err := <-errCh:
+				stopHeartbeat()
 				return fmt.Errorf("server error: %w", err)
 			}
 		},

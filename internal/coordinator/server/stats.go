@@ -76,13 +76,15 @@ func (p *statsProvider) GetWorkers() []*dashboard.WorkerInfo {
 			circuitState = string(state)
 		}
 
+		caps := workerCapabilitiesOrDefault(w)
+
 		info := &dashboard.WorkerInfo{
 			ID:              w.ID,
-			Host:            w.Capabilities.Hostname,
+			Host:            caps.Hostname,
 			Address:         w.Address,
-			Architecture:    w.Capabilities.NativeArch.String(),
-			CPUCores:        w.Capabilities.CpuCores,
-			MemoryGB:        float64(w.Capabilities.MemoryBytes) / (1024 * 1024 * 1024),
+			Architecture:    caps.NativeArch.String(),
+			CPUCores:        caps.CpuCores,
+			MemoryGB:        float64(caps.MemoryBytes) / (1024 * 1024 * 1024),
 			ActiveTasks:     w.ActiveTasks,
 			TotalTasks:      w.TotalTasks,
 			SuccessRate:     successRate,

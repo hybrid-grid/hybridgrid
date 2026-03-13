@@ -132,7 +132,11 @@ func (m *Manager) SelectForCompiler(compiler string, targetArch pb.Architecture)
 
 // Close releases resources held by managed executors.
 func (m *Manager) Close() error {
-	if d, ok := m.docker.(*DockerExecutor); ok && d != nil {
+	if m.docker == nil {
+		return nil
+	}
+
+	if d, ok := m.docker.(interface{ Close() error }); ok {
 		return d.Close()
 	}
 	return nil

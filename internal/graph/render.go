@@ -3,8 +3,8 @@ package graph
 import (
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"os"
-	"text/template"
 )
 
 const htmlTemplate = `<!DOCTYPE html>
@@ -395,9 +395,9 @@ func RenderHTML(g *Graph, outputPath string) error {
 
 	// Execute template
 	data := struct {
-		GraphJSON string
+		GraphJSON template.JS
 	}{
-		GraphJSON: string(graphJSON),
+		GraphJSON: template.JS(string(graphJSON)),
 	}
 
 	if err := tmpl.Execute(file, data); err != nil {

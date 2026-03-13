@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -41,11 +42,11 @@ func newConnPool(dialOpts []grpc.DialOption) *connPool {
 // get returns an existing connection or creates a new one.
 func (p *connPool) get(ctx context.Context, addr string) (*grpc.ClientConn, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	if conn, ok := p.conns[addr]; ok {
+		p.mu.Unlock()
 		return conn, nil
 	}
+	p.mu.Unlock()
 
 	opts := make([]grpc.DialOption, len(p.dialOpts))
 	copy(opts, p.dialOpts)
@@ -54,6 +55,13 @@ func (p *connPool) get(ctx context.Context, addr string) (*grpc.ClientConn, erro
 	conn, err := grpc.DialContext(ctx, addr, opts...)
 	if err != nil {
 		return nil, err
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if existing, ok := p.conns[addr]; ok {
+		_ = conn.Close()
+		return existing, nil
 	}
 	p.conns[addr] = conn
 	return conn, nil
@@ -519,8 +527,8 @@ func (s *Server) HealthCheck(ctx context.Context, req *pb.HealthRequest) (*pb.He
 
 	return &pb.HealthResponse{
 		Healthy:     healthyCount > 0 || len(workers) == 0,
-		ActiveTasks: int32(atomic.LoadInt64(&s.activeTasks)),
-		QueuedTasks: int32(atomic.LoadInt64(&s.queuedTasks)),
+		ActiveTasks: clampInt64ToInt32(atomic.LoadInt64(&s.activeTasks)),
+		QueuedTasks: clampInt64ToInt32(atomic.LoadInt64(&s.queuedTasks)),
 	}, nil
 }
 
@@ -537,12 +545,14 @@ func (s *Server) GetWorkerStatus(ctx context.Context, req *pb.WorkerStatusReques
 			healthyCount++
 		}
 
+		caps := workerCapabilitiesOrDefault(w)
+
 		info := &pb.WorkerStatusResponse_WorkerInfo{
 			WorkerId:            w.ID,
-			Host:                w.Capabilities.Hostname,
-			NativeArch:          w.Capabilities.NativeArch,
-			CpuCores:            w.Capabilities.CpuCores,
-			MemoryBytes:         w.Capabilities.MemoryBytes,
+			Host:                caps.Hostname,
+			NativeArch:          caps.NativeArch,
+			CpuCores:            caps.CpuCores,
+			MemoryBytes:         caps.MemoryBytes,
 			ActiveTasks:         w.ActiveTasks,
 			TotalTasksCompleted: w.TotalTasks,
 			LastHeartbeatUnix:   w.LastHeartbeat.Unix(),
@@ -578,4 +588,22 @@ func (s *Server) ReportCacheHit(ctx context.Context, req *pb.ReportCacheHitReque
 		atomic.AddInt64(&s.cacheHits, int64(req.Hits))
 	}
 	return &pb.ReportCacheHitResponse{Acknowledged: true}, nil
+}
+
+func clampInt64ToInt32(v int64) int32 {
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if v < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(v)
+}
+
+func workerCapabilitiesOrDefault(worker *registry.WorkerInfo) *pb.WorkerCapabilities {
+	if worker != nil && worker.Capabilities != nil {
+		return worker.Capabilities
+	}
+
+	return &pb.WorkerCapabilities{}
 }

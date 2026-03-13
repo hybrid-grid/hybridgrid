@@ -60,6 +60,8 @@ func NewCircuitManager(cfg CircuitConfig) *CircuitManager {
 
 // OnStateChange sets a callback for circuit state changes.
 func (m *CircuitManager) OnStateChange(fn func(workerID string, from, to CircuitState)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.onChange = fn
 }
 
@@ -103,8 +105,8 @@ func (m *CircuitManager) getOrCreate(workerID string) *gobreaker.CircuitBreaker 
 				Str("to", string(toState)).
 				Msg("Circuit breaker state change")
 
-			if m.onChange != nil {
-				m.onChange(name, fromState, toState)
+			if onChange := m.stateChangeCallback(); onChange != nil {
+				onChange(name, fromState, toState)
 			}
 		},
 	}
@@ -113,6 +115,12 @@ func (m *CircuitManager) getOrCreate(workerID string) *gobreaker.CircuitBreaker 
 	m.breakers[workerID] = cb
 
 	return cb
+}
+
+func (m *CircuitManager) stateChangeCallback() func(workerID string, from, to CircuitState) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.onChange
 }
 
 // Execute wraps a function call with circuit breaker protection.

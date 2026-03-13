@@ -36,7 +36,14 @@ var (
 	verbose     bool
 )
 
+const (
+	wrapperCCEnv  = "HG_WRAP_CC_MODE"
+	wrapperCXXEnv = "HG_WRAP_CXX_MODE"
+)
+
 func main() {
+	injectWrappedCompilerMode()
+
 	// Configure logging
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
@@ -945,8 +952,21 @@ func wrapBuildCommand(command string, args []string) error {
 		return fmt.Errorf("failed to find hgbuild executable: %w", err)
 	}
 
-	ccValue := self + " cc"
-	cxxValue := self + " c++"
+	wrapperDir, err := os.MkdirTemp("", "hgbuild-wrap-")
+	if err != nil {
+		return fmt.Errorf("failed to create wrapper dir: %w", err)
+	}
+	defer os.RemoveAll(wrapperDir)
+
+	ccValue, err := createCompilerWrapper(wrapperDir, "hgcc", self, wrapperCCEnv)
+	if err != nil {
+		return err
+	}
+
+	cxxValue, err := createCompilerWrapper(wrapperDir, "hgcxx", self, wrapperCXXEnv)
+	if err != nil {
+		return err
+	}
 
 	// Build environment
 	env := os.Environ()
@@ -986,6 +1006,36 @@ func wrapBuildCommand(command string, args []string) error {
 	cmd.Stderr = os.Stderr
 
 	return cmd.Run()
+}
+
+func injectWrappedCompilerMode() {
+	mode := ""
+	switch {
+	case os.Getenv(wrapperCCEnv) == "1":
+		mode = "cc"
+	case os.Getenv(wrapperCXXEnv) == "1":
+		mode = "c++"
+	}
+
+	if mode == "" {
+		return
+	}
+
+	if len(os.Args) > 1 && (os.Args[1] == "cc" || os.Args[1] == "c++") {
+		return
+	}
+
+	os.Args = append([]string{os.Args[0], mode}, os.Args[1:]...)
+}
+
+func createCompilerWrapper(dir, name, self, modeEnv string) (string, error) {
+	path := filepath.Join(dir, name)
+	content := fmt.Sprintf("#!/bin/sh\nexport %s=1\nexec %q \"$@\"\n", modeEnv, self)
+	if err := os.WriteFile(path, []byte(content), 0755); err != nil {
+		return "", fmt.Errorf("failed to write compiler wrapper %s: %w", name, err)
+	}
+
+	return path, nil
 }
 
 // setEnv sets an environment variable in the env slice.

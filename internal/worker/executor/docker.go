@@ -40,9 +40,9 @@ func DefaultDockerResourceLimits() DockerResourceLimits {
 
 // DockerExecutor executes compilation inside Docker containers.
 type DockerExecutor struct {
-	client   *client.Client
-	images   map[pb.Architecture]string
-	limits   DockerResourceLimits
+	client *client.Client
+	images map[pb.Architecture]string
+	limits DockerResourceLimits
 }
 
 // Default dockcross images for cross-compilation.
@@ -150,7 +150,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, req *Request) (*Result, er
 
 	// Build compilation command
 	outFile := "output.o"
-	var compileCmd string
+	var compileCmd []string
 	if len(req.RawSource) > 0 {
 		compileCmd = e.buildRawCommand(req.Compiler, req.Args, srcFile, outFile, req.IncludePaths)
 	} else {
@@ -160,7 +160,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, req *Request) (*Result, er
 	// Create container config with security settings
 	containerConfig := &container.Config{
 		Image:      img,
-		Cmd:        []string{"/bin/sh", "-c", compileCmd},
+		Cmd:        compileCmd,
 		WorkingDir: "/work",
 		Tty:        false,
 	}
@@ -277,8 +277,8 @@ func (e *DockerExecutor) selectImage(arch pb.Architecture) string {
 	return ""
 }
 
-// buildCommand constructs the shell command for compilation.
-func (e *DockerExecutor) buildCommand(compiler string, args []string, srcFile, outFile string) string {
+// buildCommand constructs the argv used for compilation.
+func (e *DockerExecutor) buildCommand(compiler string, args []string, srcFile, outFile string) []string {
 	var cmdParts []string
 
 	// Use the appropriate compiler from dockcross
@@ -307,11 +307,11 @@ func (e *DockerExecutor) buildCommand(compiler string, args []string, srcFile, o
 	// Add input and output
 	cmdParts = append(cmdParts, srcFile, "-o", outFile)
 
-	return strings.Join(cmdParts, " ")
+	return cmdParts
 }
 
-// buildRawCommand constructs the shell command for raw source compilation in Docker.
-func (e *DockerExecutor) buildRawCommand(compiler string, args []string, srcFile, outFile string, includePaths []string) string {
+// buildRawCommand constructs the argv used for raw source compilation in Docker.
+func (e *DockerExecutor) buildRawCommand(compiler string, args []string, srcFile, outFile string, includePaths []string) []string {
 	var cmdParts []string
 
 	cmdParts = append(cmdParts, compiler)
@@ -346,7 +346,7 @@ func (e *DockerExecutor) buildRawCommand(compiler string, args []string, srcFile
 	}
 
 	cmdParts = append(cmdParts, srcFile, "-o", outFile)
-	return strings.Join(cmdParts, " ")
+	return cmdParts
 }
 
 // getLogs retrieves stdout and stderr from the container.

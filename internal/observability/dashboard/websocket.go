@@ -102,7 +102,7 @@ func (h *Hub) Run() {
 			log.Debug().Int("clients", len(h.clients)).Msg("WebSocket client disconnected")
 
 		case message := <-h.broadcast:
-			h.mu.RLock()
+			h.mu.Lock()
 			for client := range h.clients {
 				select {
 				case client.send <- message:
@@ -112,7 +112,7 @@ func (h *Hub) Run() {
 					delete(h.clients, client)
 				}
 			}
-			h.mu.RUnlock()
+			h.mu.Unlock()
 
 		case <-h.done:
 			return
@@ -260,7 +260,12 @@ func (c *Client) readPump() {
 		if json.Unmarshal(message, &msg) == nil && msg.Type == MessageTypePing {
 			pong := &Message{Type: MessageTypePong, Timestamp: time.Now().Unix()}
 			if data, err := json.Marshal(pong); err == nil {
-				c.send <- data
+				select {
+				case c.send <- data:
+				default:
+					log.Warn().Msg("WebSocket client send buffer full")
+					return
+				}
 			}
 		}
 	}

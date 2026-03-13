@@ -104,20 +104,21 @@ func NewStore(dir string, maxSizeMB int64, ttlHours int) (*Store, error) {
 func (s *Store) Get(key string) (io.ReadCloser, bool) {
 	s.mu.RLock()
 	entry, ok := s.entries[key]
-	s.mu.RUnlock()
-
 	if !ok {
+		s.mu.RUnlock()
 		return nil, false
 	}
 
 	// Check TTL
 	if time.Since(entry.CreatedAt) > s.ttl {
+		s.mu.RUnlock()
 		s.Delete(key)
 		return nil, false
 	}
 
 	path := s.keyPath(key)
 	f, err := os.Open(path)
+	s.mu.RUnlock()
 	if err != nil {
 		s.Delete(key)
 		return nil, false
@@ -125,8 +126,10 @@ func (s *Store) Get(key string) (io.ReadCloser, bool) {
 
 	// Update access time and hits
 	s.mu.Lock()
-	entry.AccessedAt = time.Now()
-	entry.Hits++
+	if current, exists := s.entries[key]; exists {
+		current.AccessedAt = time.Now()
+		current.Hits++
+	}
 	s.mu.Unlock()
 
 	return f, true

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"google.golang.org/protobuf/proto"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 )
@@ -162,9 +163,7 @@ func (r *InMemoryRegistry) Get(id string) (*WorkerInfo, bool) {
 		return nil, false
 	}
 
-	// Return a copy to prevent data races
-	copy := *worker
-	return &copy, true
+	return cloneWorkerInfo(worker), true
 }
 
 // List returns all registered workers.
@@ -174,8 +173,7 @@ func (r *InMemoryRegistry) List() []*WorkerInfo {
 
 	result := make([]*WorkerInfo, 0, len(r.workers))
 	for _, w := range r.workers {
-		copy := *w
-		result = append(result, &copy)
+		result = append(result, cloneWorkerInfo(w))
 	}
 	return result
 }
@@ -192,11 +190,23 @@ func (r *InMemoryRegistry) ListByCapability(buildType pb.BuildType, arch pb.Arch
 		}
 
 		if r.matchesCapability(w.Capabilities, buildType, arch) {
-			copy := *w
-			result = append(result, &copy)
+			result = append(result, cloneWorkerInfo(w))
 		}
 	}
 	return result
+}
+
+func cloneWorkerInfo(worker *WorkerInfo) *WorkerInfo {
+	if worker == nil {
+		return nil
+	}
+
+	copy := *worker
+	if worker.Capabilities != nil {
+		copy.Capabilities = proto.Clone(worker.Capabilities).(*pb.WorkerCapabilities)
+	}
+
+	return &copy
 }
 
 // matchesCapability checks if worker capabilities match the requirements.
