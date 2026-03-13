@@ -4,7 +4,7 @@ A distributed multi-platform build system for C/C++, Flutter, Unity, and more.
 
 Hybrid-Grid distributes compilation tasks across multiple machines on your LAN (via mDNS auto-discovery) or WAN, dramatically reducing build times for large projects.
 
-## v0.2.1 Release Status
+## v0.2.2 Release Status
 
 ### ✅ Production Ready Features
 | Feature | Status | Notes |
@@ -22,6 +22,8 @@ Hybrid-Grid distributes compilation tasks across multiple machines on your LAN (
 | **Circuit Breaker** | ✅ Working | Per-worker fault tolerance |
 | **Docker Cross-Compile** | ✅ Working | dockcross integration |
 | **Colored CLI Output** | ✅ Working | Progress bars and status tags |
+| **OpenTelemetry Tracing** | ✅ Implemented | Library, gRPC interceptors, per-RPC spans; needs startup wiring |
+| **TLS/mTLS** | ✅ Implemented | Cert loading, mTLS, token auth; needs CLI flags to enable |
 
 ### ⏳ Planned Features
 | Feature | Status | Notes |
@@ -29,9 +31,15 @@ Hybrid-Grid distributes compilation tasks across multiple machines on your LAN (
 | Flutter builds | ❌ Planned | v0.3.0 |
 | Unity builds | ❌ Planned | v0.3.0 |
 | Rust/Go/Node builds | ❌ Planned | v0.4.0 |
-| OpenTelemetry Tracing | ⏳ In Progress | Distributed trace support |
+| OTel/TLS startup wiring | ⏳ Next | Connect tracing.Init() and TLS config in main() |
 | WAN Registry | ❌ Planned | Currently LAN-only |
-| TLS/mTLS | ⚠️ Config Only | Code exists, not tested in prod |
+| Config Validation | ❌ Planned | Runtime config checks |
+
+### What's New in v0.2.2
+- **15 bug fixes**: hardened worker execution, coordinator concurrency, cache TTL, mDNS discovery, dashboard WebSocket, graph renderer, and compiler wrapper
+- **Security**: cleared all `gosec` findings, fixed graph XSS vulnerability
+- **CI**: upgraded Go to 1.25.8 and OpenTelemetry to v1.40.0 (resolved upstream CVEs)
+- **Full changelog**: [v0.2.1...v0.2.2](https://github.com/hybrid-grid/hybridgrid/compare/v0.2.1...v0.2.2)
 
 ### Tested Configurations
 - **macOS** (ARM64/x86_64) → Coordinator + Worker ✅
