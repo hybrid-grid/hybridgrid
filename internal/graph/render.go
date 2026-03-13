@@ -178,8 +178,9 @@ const htmlTemplate = `<!DOCTYPE html>
 
     <div class="tooltip" style="display: none;"></div>
 
-    <script>
-        const graphData = {{.GraphJSON}};
+	<script id="graph-data" type="application/json">{{.GraphJSON}}</script>
+	<script>
+		const graphData = JSON.parse(document.getElementById('graph-data').textContent);
 
         // HTML escape function to prevent XSS
         function escapeHtml(text) {
@@ -395,9 +396,9 @@ func RenderHTML(g *Graph, outputPath string) error {
 
 	// Execute template
 	data := struct {
-		GraphJSON template.JS
+		GraphJSON string
 	}{
-		GraphJSON: template.JS(string(graphJSON)),
+		GraphJSON: string(graphJSON),
 	}
 
 	if err := tmpl.Execute(file, data); err != nil {

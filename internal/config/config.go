@@ -36,12 +36,12 @@ type Config struct {
 
 // TLSConfig holds TLS/mTLS settings.
 type TLSConfig struct {
-	Enabled           bool   `mapstructure:"enabled"`
-	CertFile          string `mapstructure:"cert_file"`
-	KeyFile           string `mapstructure:"key_file"`
-	ClientCA          string `mapstructure:"client_ca"`
-	RequireClientCert bool   `mapstructure:"require_client_cert"`
-	InsecureSkipVerify bool  `mapstructure:"insecure_skip_verify"`
+	Enabled            bool   `mapstructure:"enabled"`
+	CertFile           string `mapstructure:"cert_file"`
+	KeyFile            string `mapstructure:"key_file"`
+	ClientCA           string `mapstructure:"client_ca"`
+	RequireClientCert  bool   `mapstructure:"require_client_cert"`
+	InsecureSkipVerify bool   `mapstructure:"insecure_skip_verify"`
 }
 
 // TracingConfig holds OpenTelemetry tracing settings.
