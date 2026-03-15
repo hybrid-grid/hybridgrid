@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testServiceType = "_hybridgrid-coord-test._tcp"
+
 func TestDefaultCoordBrowserConfig(t *testing.T) {
 	cfg := DefaultCoordBrowserConfig()
 
@@ -38,13 +40,13 @@ func TestCoordBrowser_DiscoverTimeout(t *testing.T) {
 	}
 
 	browser := NewCoordBrowser(CoordBrowserConfig{
-		Timeout: 500 * time.Millisecond, // short timeout
+		Timeout:     500 * time.Millisecond,
+		ServiceName: testServiceType,
 	})
 
 	ctx := context.Background()
 	_, err := browser.Discover(ctx)
 
-	// Should timeout since no coordinator running
 	if assert.Error(t, err) {
 		assert.Contains(t, err.Error(), "timeout")
 	}
@@ -56,7 +58,8 @@ func TestCoordBrowser_DiscoverWithFallback_UsesFallback(t *testing.T) {
 	}
 
 	browser := NewCoordBrowser(CoordBrowserConfig{
-		Timeout: 100 * time.Millisecond,
+		Timeout:     100 * time.Millisecond,
+		ServiceName: testServiceType,
 	})
 
 	ctx := context.Background()
@@ -72,7 +75,8 @@ func TestCoordBrowser_DiscoverWithFallback_NoFallback(t *testing.T) {
 	}
 
 	browser := NewCoordBrowser(CoordBrowserConfig{
-		Timeout: 100 * time.Millisecond,
+		Timeout:     100 * time.Millisecond,
+		ServiceName: testServiceType,
 	})
 
 	ctx := context.Background()
@@ -88,12 +92,12 @@ func TestCoordBrowser_ContextCancellation(t *testing.T) {
 	}
 
 	browser := NewCoordBrowser(CoordBrowserConfig{
-		Timeout: 30 * time.Second, // long timeout
+		Timeout:     30 * time.Second,
+		ServiceName: testServiceType,
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Cancel after short delay
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		cancel()
@@ -103,7 +107,6 @@ func TestCoordBrowser_ContextCancellation(t *testing.T) {
 	_, err := browser.Discover(ctx)
 	elapsed := time.Since(start)
 
-	// Should return quickly due to cancellation (< 1 second)
 	assert.Error(t, err)
 	assert.Less(t, elapsed, 2*time.Second)
 }

@@ -155,23 +155,32 @@ func ParseTXTRecords(txt []string) map[string]string {
 
 // CoordAnnouncerConfig holds coordinator announcer configuration.
 type CoordAnnouncerConfig struct {
-	Instance   string // e.g., "coord-hostname"
-	GRPCPort   int
-	HTTPPort   int
-	Version    string
-	InstanceID string // unique ID for this coordinator instance
+	Instance    string // e.g., "coord-hostname"
+	GRPCPort    int
+	HTTPPort    int
+	Version     string
+	InstanceID  string // unique ID for this coordinator instance
+	ServiceName string // mDNS service name (default: _hybridgrid-coord._tcp)
 }
 
 // CoordAnnouncer advertises a coordinator via mDNS.
 type CoordAnnouncer struct {
-	mu     sync.Mutex
-	server *zeroconf.Server
-	cfg    CoordAnnouncerConfig
+	mu          sync.Mutex
+	server      *zeroconf.Server
+	cfg         CoordAnnouncerConfig
+	serviceName string
 }
 
 // NewCoordAnnouncer creates a new coordinator mDNS announcer.
 func NewCoordAnnouncer(cfg CoordAnnouncerConfig) *CoordAnnouncer {
-	return &CoordAnnouncer{cfg: cfg}
+	serviceName := cfg.ServiceName
+	if serviceName == "" {
+		serviceName = CoordServiceType
+	}
+	return &CoordAnnouncer{
+		cfg:         cfg,
+		serviceName: serviceName,
+	}
 }
 
 // Start begins advertising the coordinator service via mDNS.
@@ -194,7 +203,7 @@ func (a *CoordAnnouncer) Start() error {
 
 	server, err := zeroconf.Register(
 		a.cfg.Instance,
-		CoordServiceType,
+		a.serviceName,
 		Domain,
 		a.cfg.GRPCPort,
 		txt,
@@ -208,7 +217,7 @@ func (a *CoordAnnouncer) Start() error {
 
 	log.Info().
 		Str("instance", a.cfg.Instance).
-		Str("service", CoordServiceType).
+		Str("service", a.serviceName).
 		Int("grpc_port", a.cfg.GRPCPort).
 		Msg("Coordinator mDNS announcer started")
 

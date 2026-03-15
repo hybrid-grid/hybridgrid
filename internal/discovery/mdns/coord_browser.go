@@ -23,7 +23,8 @@ type DiscoveredCoordinator struct {
 
 // CoordBrowserConfig holds coordinator browser configuration.
 type CoordBrowserConfig struct {
-	Timeout time.Duration // discovery timeout
+	Timeout     time.Duration // discovery timeout
+	ServiceName string        // mDNS service name (default: _hybridgrid-coord._tcp)
 }
 
 // DefaultCoordBrowserConfig returns sensible defaults.
@@ -35,7 +36,8 @@ func DefaultCoordBrowserConfig() CoordBrowserConfig {
 
 // CoordBrowser discovers coordinators via mDNS.
 type CoordBrowser struct {
-	timeout time.Duration
+	timeout     time.Duration
+	serviceName string
 }
 
 // NewCoordBrowser creates a new coordinator mDNS browser.
@@ -43,8 +45,13 @@ func NewCoordBrowser(cfg CoordBrowserConfig) *CoordBrowser {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 10 * time.Second
 	}
+	serviceName := cfg.ServiceName
+	if serviceName == "" {
+		serviceName = CoordServiceType
+	}
 	return &CoordBrowser{
-		timeout: cfg.Timeout,
+		timeout:     cfg.Timeout,
+		serviceName: serviceName,
 	}
 }
 
@@ -65,13 +72,13 @@ func (b *CoordBrowser) Discover(ctx context.Context) (*DiscoveredCoordinator, er
 	defer cancel()
 
 	log.Debug().
-		Str("service", CoordServiceType).
+		Str("service", b.serviceName).
 		Dur("timeout", b.timeout).
 		Msg("Starting coordinator discovery")
 
 	// Start browsing
 	go func() {
-		err := resolver.Browse(discoverCtx, CoordServiceType, Domain, entries)
+		err := resolver.Browse(discoverCtx, b.serviceName, Domain, entries)
 		if err != nil {
 			select {
 			case errCh <- fmt.Errorf("browse failed: %w", err):
