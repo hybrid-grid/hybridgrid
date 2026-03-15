@@ -1,6 +1,6 @@
 # Hybrid-Grid Build - Feature Checklist
 
-**Last Updated:** 2026-01-18
+**Last Updated:** 2026-03-15
 
 ## Phase 1: Foundation ✅
 
@@ -26,7 +26,7 @@
 - [x] Config file loading (YAML)
 - [x] Environment variable support
 - [x] Default config generation (WriteExample)
-- [ ] Config validation
+- [x] Config validation
 
 ### Compiler Parser
 - [x] GCC/Clang argument parsing
@@ -159,6 +159,7 @@
 - [x] TLS configuration (config.go)
 - [x] TLS certificate loading (loader.go)
 - [x] mTLS support for worker connections
+- [x] TLS startup wiring (CLI flags in all binaries)
 - [x] Token-based authentication (interceptor.go)
 - [x] gRPC auth interceptor (unary + stream)
 - [x] Token generation utility
@@ -166,11 +167,16 @@
 - [x] Input validation (request.go)
 - [x] Argument sanitization (sanitize.go)
 
+### Tracing
+- [x] OpenTelemetry library integration
+- [x] OTel/tracing startup wiring (CLI flags in all binaries)
+- [x] Request ID tracing
+
 ### Logging
 - [x] Structured logging (zerolog)
-- [ ] Log levels runtime configuration
-- [ ] Request ID tracing
-- [ ] Log rotation
+- [x] Runtime log level configuration
+- [x] File-based logging
+- [x] Log rotation
 
 ## Phase 5: Production Readiness
 
@@ -187,7 +193,7 @@
 - [x] Load testing script (test/load/load_test.go)
 - [x] Chaos testing script (test/chaos/chaos_test.go)
 - [x] Network partition tests (in chaos suite)
-- [ ] 80% overall coverage (currently ~70%)
+- [ ] 80% overall coverage (target 80%; current v0.2.3 package coverage: executor 67.2%, cli/build 71.7%, cli/output 96.7%, capability 25.5% on macOS)
 
 ### Documentation
 - [x] README.md
@@ -206,7 +212,7 @@
 
 ### Release
 - [x] Version tagging (v0.1.0)
-- [ ] Changelog (CHANGELOG.md)
+- [x] Changelog (CHANGELOG.md)
 - [x] Binary releases (goreleaser) - .goreleaser.yaml configured
 - [ ] Homebrew formula
 
@@ -216,16 +222,16 @@
 
 | Phase | Status | Progress |
 |-------|--------|----------|
-| Phase 1 | ✅ Complete | 35/36 tasks |
+| Phase 1 | ✅ Complete | 36/36 tasks |
 | Phase 2 | ✅ Complete | 19/19 tasks |
 | Phase 3 | ✅ Complete | 32/36 tasks |
-| Phase 4 | ✅ Complete | 19/22 tasks |
-| Phase 5 | ⏳ In Progress | 15/24 tasks |
+| Phase 4 | ✅ Complete | 23/23 v0.2.3 foundation tasks |
+| Phase 5 | ⏳ In Progress | 16/24 tasks |
 
-**Overall:** ~120/137 tasks (~88%)
-**Tests:** 170+ passing (19 packages)
-**Coverage:** ~70% average (target 80%)
-**Last Update:** 2026-01-18 - v0.1.0 Release
+**Overall:** Foundation hardening for v0.2.3 completed
+**Tests:** core suite passing with `make test`
+**Coverage:** executor 67.2%, cli/build 71.7%, cli/output 96.7%, capability 25.5% on macOS
+**Last Update:** 2026-03-15 - v0.2.3 Foundation Hardening
 
 ---
 
