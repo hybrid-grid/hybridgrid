@@ -25,11 +25,8 @@ var version = "v0.0.0-dev"
 func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
-	// Load and validate config
+	// Load default config (validation will happen in serveCmd.RunE after CLI flags applied)
 	cfg := config.DefaultConfig()
-	if err := cfg.Validate(); err != nil {
-		log.Fatal().Err(err).Msg("config validation failed")
-	}
 
 	// Setup logger
 	logger, logCloser, err := logging.SetupLogger(cfg.Log)
@@ -70,6 +67,17 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			httpPort, _ := cmd.Flags().GetInt("http-port")
 			token, _ := cmd.Flags().GetString("token")
 			noMdns, _ := cmd.Flags().GetBool("no-mdns")
+
+			// Validate port ranges
+			if grpcPort < 1 || grpcPort > 65535 {
+				return fmt.Errorf("invalid configuration: coordinator.grpc_port must be 1-65535, got %d", grpcPort)
+			}
+			if httpPort < 1 || httpPort > 65535 {
+				return fmt.Errorf("invalid configuration: coordinator.http_port must be 1-65535, got %d", httpPort)
+			}
+			if grpcPort == httpPort {
+				return fmt.Errorf("invalid configuration: coordinator.grpc_port and coordinator.http_port must be different, got %d for both", grpcPort)
+			}
 
 			// TLS flags
 			tlsCert, _ := cmd.Flags().GetString("tls-cert")
