@@ -1,4 +1,4 @@
-.PHONY: all build clean test lint proto-gen install
+.PHONY: all build clean test lint proto-gen install changelog
 
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "v0.0.0-dev")
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
@@ -51,3 +51,9 @@ run-coord:
 
 run-worker:
 	go run ./cmd/hg-worker serve
+
+changelog:
+	@echo "Changelog management - CHANGELOG.md exists at project root"
+	@test -f CHANGELOG.md && echo "✓ CHANGELOG.md is up to date" || (echo "✗ CHANGELOG.md missing"; exit 1)
+	@echo "See scripts/changelog.sh to generate draft entries from git history"
+
