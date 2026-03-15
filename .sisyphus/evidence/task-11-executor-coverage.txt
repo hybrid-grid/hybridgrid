@@ -1,0 +1,4 @@
+Command: go test -cover ./internal/worker/executor/...
+Result: ok   github.com/h3nr1-d14z/hybridgrid/internal/worker/executor  coverage: 67.2% of statements
+
+Status: PASS (target >= 60%)

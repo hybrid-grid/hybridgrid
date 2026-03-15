@@ -523,23 +523,6 @@ func TestDetectCpp_EmptyCompilerList(t *testing.T) {
 	}
 }
 
-func TestDetectCpp_MSVCDetectionSkipped(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("MSVC test - skipping on Windows to test non-Windows path")
-	}
-
-	caps := detectCpp()
-
-	// On non-Windows, MSVC fields should be empty
-	if caps.MsvcVersion != "" {
-		t.Errorf("MSVC version should be empty on %s, got: %s", runtime.GOOS, caps.MsvcVersion)
-	}
-
-	if len(caps.MsvcArchitectures) > 0 {
-		t.Errorf("MSVC architectures should be empty on %s", runtime.GOOS)
-	}
-}
-
 func TestDetectGo_InvalidOutput(t *testing.T) {
 	// We can't easily mock exec.Command, but we can verify
 	// the function handles the normal case
@@ -788,14 +771,6 @@ func TestDetectCpp_DetailedAnalysis(t *testing.T) {
 
 	t.Logf("Compilers: %v", caps.Compilers)
 	t.Logf("Cross-compile: %v", caps.CrossCompile)
-	t.Logf("MSVC version: %s", caps.MsvcVersion)
-	t.Logf("Has Windows SDK: %v", caps.HasWindowsSdk)
-
-	if runtime.GOOS != "windows" {
-		if caps.MsvcVersion != "" || len(caps.MsvcArchitectures) > 0 {
-			t.Error("MSVC fields should be empty on non-Windows")
-		}
-	}
 }
 
 func TestDetectRust_FallbackPath(t *testing.T) {

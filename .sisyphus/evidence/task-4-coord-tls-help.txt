@@ -1,0 +1,10 @@
+Start the coordinator server
+
+Usage:
+  hg-coord serve [flags]
+
+Relevant TLS flags:
+      --tls-ca string                 Path to CA certificate for client verification (mTLS)
+      --tls-cert string               Path to TLS certificate file (PEM format)
+      --tls-key string                Path to TLS private key file (PEM format)
+      --tls-require-client-cert       Require client certificates (mTLS)

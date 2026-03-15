@@ -225,12 +225,12 @@
 | Phase 1 | ✅ Complete | 36/36 tasks |
 | Phase 2 | ✅ Complete | 19/19 tasks |
 | Phase 3 | ✅ Complete | 32/36 tasks |
-| Phase 4 | ✅ Complete | 23/23 v0.2.3 foundation tasks |
+| Phase 4 | ⏳ In Progress | 22/23 v0.2.3 foundation tasks |
 | Phase 5 | ⏳ In Progress | 16/24 tasks |
 
-**Overall:** Foundation hardening for v0.2.3 completed
+**Overall:** Foundation hardening for v0.2.3 is nearly complete; capability coverage remains blocked on macOS-specific testability constraints
 **Tests:** core suite passing with `make test`
-**Coverage:** executor 67.2%, cli/build 71.7%, cli/output 96.7%, capability 25.5% on macOS
+**Coverage:** executor 67.2%, cli/build 71.7%, cli/output 96.7%, capability 31.2% on macOS (target 60% still unmet)
 **Last Update:** 2026-03-15 - v0.2.3 Foundation Hardening
 
 ---

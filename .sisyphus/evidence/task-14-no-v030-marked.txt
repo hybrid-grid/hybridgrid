@@ -1,0 +1,7 @@
+CHECKLIST.md still keeps v0.3.0 work unmarked:
+- line 184: - [ ] Flutter build support
+- line 185: - [ ] Unity build support
+- line 252: - ❌ Flutter/Unity/Rust/Go/Node builds (C/C++ only)
+- line 253: - ❌ WAN Registry (LAN only via mDNS)
+
+Status: v0.3.0 scope remains deferred and not marked complete.

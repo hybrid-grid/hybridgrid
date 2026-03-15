@@ -1,0 +1,6 @@
+Search: grep "Insecure:\s*true" across cmd/ and internal/
+Result: no matches found
+
+Interpretation:
+- No server/client wiring path hardcodes `Insecure: true`
+- TLS behavior is controlled by runtime flags/config instead of forced insecure mode
