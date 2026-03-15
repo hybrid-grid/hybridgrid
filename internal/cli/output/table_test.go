@@ -2,10 +2,39 @@ package output
 
 import (
 	"bytes"
+	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
 )
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	original := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe failed: %v", err)
+	}
+	os.Stdout = w
+	defer func() {
+		os.Stdout = original
+	}()
+
+	fn()
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stdout pipe failed: %v", err)
+	}
+
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("ReadAll failed: %v", err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("close stdout reader failed: %v", err)
+	}
+	return string(data)
+}
 
 func TestNewTable(t *testing.T) {
 	var buf bytes.Buffer
@@ -237,5 +266,150 @@ func TestTableConfigCenter(t *testing.T) {
 	table := NewTableWithConfig([]string{"Col1"}, TableConfig{Writer: &buf, Center: true})
 	if table == nil {
 		t.Fatal("NewTableWithConfig with Center returned nil")
+	}
+}
+
+func TestPrintBuildSummary(t *testing.T) {
+	DisableColors()
+	defer EnableColors()
+
+	output := captureStdout(t, func() {
+		PrintBuildSummary(BuildStats{
+			Total:       10,
+			Remote:      4,
+			CacheHits:   3,
+			Local:       2,
+			Failed:      1,
+			Duration:    12*time.Second + 500*time.Millisecond,
+			TimeSaved:   4 * time.Second,
+			TasksFailed: []string{"a.c", "b.c"},
+		})
+	})
+
+	checks := []string{"Build Summary", "Total Files", "Remote", "Cache Hits", "Local Fallback", "Failed", "Time Saved", "Failed files:", "a.c", "b.c"}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got %q", check, output)
+		}
+	}
+}
+
+func TestPrintWorkersTable(t *testing.T) {
+	DisableColors()
+	defer EnableColors()
+
+	noWorkersOutput := captureStdout(t, func() {
+		PrintWorkersTable(nil, 0, 0)
+	})
+	if !strings.Contains(noWorkersOutput, "No workers connected") {
+		t.Fatalf("expected no-workers message, got %q", noWorkersOutput)
+	}
+
+	workersOutput := captureStdout(t, func() {
+		PrintWorkersTable([]WorkerInfo{{
+			ID:           "worker-identifier-1234567890",
+			Arch:         "amd64",
+			Cores:        8,
+			MemoryGB:     16,
+			ActiveTasks:  2,
+			CircuitState: "OPEN",
+		}}, 1, 0)
+	})
+
+	checks := []string{"Workers:", "amd64", "16.0 GB", "2", "OPEN", "worker-identifier"}
+	for _, check := range checks {
+		if !strings.Contains(workersOutput, check) {
+			t.Fatalf("expected output to contain %q, got %q", check, workersOutput)
+		}
+	}
+}
+
+func TestPrintWorkersTableCompact(t *testing.T) {
+	DisableColors()
+	defer EnableColors()
+
+	output := captureStdout(t, func() {
+		PrintWorkersTableCompact([]WorkerInfo{{
+			ID:           "compact-worker-identifier-1234567890",
+			Arch:         "arm64",
+			Cores:        12,
+			CircuitState: "HALF_OPEN",
+		}}, 1, 1)
+	})
+
+	checks := []string{"Workers:", "arm64", "12", "HALF_OPEN", "compact-worker-id"}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got %q", check, output)
+		}
+	}
+}
+
+func TestPrintStatus(t *testing.T) {
+	DisableColors()
+	defer EnableColors()
+
+	fullOutput := captureStdout(t, func() {
+		PrintStatus(StatusInfo{
+			Address:     "localhost:9000",
+			Healthy:     true,
+			ActiveTasks: 3,
+			QueuedTasks: 1,
+			Workers:     2,
+			CacheHits:   9,
+			Uptime:      2*time.Hour + 5*time.Minute,
+		})
+	})
+
+	checks := []string{"Coordinator Status", "localhost:9000", "healthy", "Active Tasks:", "Queued Tasks:", "Workers:", "Cache Hits:", "2h5m"}
+	for _, check := range checks {
+		if !strings.Contains(fullOutput, check) {
+			t.Fatalf("expected output to contain %q, got %q", check, fullOutput)
+		}
+	}
+
+	minimalOutput := captureStdout(t, func() {
+		PrintStatus(StatusInfo{Address: "localhost:9000"})
+	})
+	if strings.Contains(minimalOutput, "Cache Hits:") || strings.Contains(minimalOutput, "Workers:") {
+		t.Fatalf("did not expect optional rows in minimal output: %q", minimalOutput)
+	}
+}
+
+func TestPrintCacheStats(t *testing.T) {
+	DisableColors()
+	defer EnableColors()
+
+	highUsageOutput := captureStdout(t, func() {
+		PrintCacheStats(CacheStats{
+			Directory: "/tmp/cache",
+			Entries:   5,
+			TotalSize: 95 * 1024 * 1024,
+			MaxSize:   100 * 1024 * 1024,
+			TotalHits: 9,
+			TotalMiss: 1,
+		})
+	})
+
+	highChecks := []string{"Cache Statistics", "/tmp/cache", "Entries:", "95.0%", "Total Hits:", "Total Miss:", "90.0%"}
+	for _, check := range highChecks {
+		if !strings.Contains(highUsageOutput, check) {
+			t.Fatalf("expected output to contain %q, got %q", check, highUsageOutput)
+		}
+	}
+
+	zeroMissOutput := captureStdout(t, func() {
+		PrintCacheStats(CacheStats{
+			Directory: "/tmp/cache",
+			Entries:   2,
+			TotalSize: 10 * 1024 * 1024,
+			MaxSize:   100 * 1024 * 1024,
+			TotalHits: 0,
+			TotalMiss: 0,
+		})
+	})
+
+	if strings.Contains(zeroMissOutput, "Total Miss:") || strings.Contains(zeroMissOutput, "Hit Rate:") {
+		t.Fatalf("did not expect miss or hit-rate rows in zero-hit output: %q", zeroMissOutput)
 	}
 }
