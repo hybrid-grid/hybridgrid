@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -40,6 +41,14 @@ func RequestIDFromContext(ctx context.Context) string {
 	return id
 }
 
+func withRequestIDLogger(ctx context.Context, requestID string) (context.Context, zerolog.Logger) {
+	logger := log.With().Str("request_id", requestID).Logger()
+	ctx = context.WithValue(ctx, contextKey, requestID)
+	ctx = logger.WithContext(ctx)
+	ctx = metadata.AppendToOutgoingContext(ctx, requestIDMetadataKey, requestID)
+	return ctx, logger
+}
+
 // UnaryRequestIDInterceptor returns a unary server interceptor that extracts or generates
 // a request ID from incoming metadata, adds it to context and outgoing metadata.
 func UnaryRequestIDInterceptor() grpc.UnaryServerInterceptor {
@@ -64,13 +73,8 @@ func UnaryRequestIDInterceptor() grpc.UnaryServerInterceptor {
 			}
 		}
 
-		log.Info().Str("request_id", requestID).Msg("Request ID extracted/generated")
-
-		// Add request ID to context
-		ctx = context.WithValue(ctx, contextKey, requestID)
-
-		// Add request ID to outgoing metadata
-		ctx = metadata.AppendToOutgoingContext(ctx, requestIDMetadataKey, requestID)
+		ctx, logger := withRequestIDLogger(ctx, requestID)
+		logger.Info().Msg("Request ID extracted/generated")
 
 		return handler(ctx, req)
 	}
@@ -102,13 +106,8 @@ func StreamRequestIDInterceptor() grpc.StreamServerInterceptor {
 			}
 		}
 
-		log.Info().Str("request_id", requestID).Msg("Request ID extracted/generated")
-
-		// Add request ID to context
-		ctx = context.WithValue(ctx, contextKey, requestID)
-
-		// Add request ID to outgoing metadata
-		ctx = metadata.AppendToOutgoingContext(ctx, requestIDMetadataKey, requestID)
+		ctx, logger := withRequestIDLogger(ctx, requestID)
+		logger.Info().Msg("Request ID extracted/generated")
 
 		// Wrap the stream with the new context
 		wrappedStream := &wrappedServerStream{
