@@ -32,11 +32,7 @@ var version = "v0.0.0-dev"
 func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
-	// Load and validate config
 	cfg := config.DefaultConfig()
-	if err := cfg.Validate(); err != nil {
-		log.Fatal().Err(err).Msg("config validation failed")
-	}
 
 	// Setup logger
 	logger, logCloser, err := logging.SetupLogger(cfg.Log)
@@ -91,6 +87,16 @@ It executes build tasks received from the coordinator.`,
 			tracingServiceName, _ := cmd.Flags().GetString("tracing-service-name")
 			tracingTimeout, _ := cmd.Flags().GetDuration("tracing-timeout")
 			tracingBatchSize, _ := cmd.Flags().GetInt("tracing-batch-size")
+
+			if port < 1 || port > 65535 {
+				return fmt.Errorf("invalid configuration: worker.port must be 1-65535, got %d", port)
+			}
+			if httpPort < 1 || httpPort > 65535 {
+				return fmt.Errorf("invalid configuration: worker.http_port must be 1-65535, got %d", httpPort)
+			}
+			if port == httpPort {
+				return fmt.Errorf("invalid configuration: worker.port and worker.http_port must be different, got %d for both", port)
+			}
 
 			// Resolve coordinator address
 			if coordinator == "" {

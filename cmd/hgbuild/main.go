@@ -53,11 +53,7 @@ const (
 func main() {
 	injectWrappedCompilerMode()
 
-	// Load and validate config
 	cfg := config.DefaultConfig()
-	if err := cfg.Validate(); err != nil {
-		log.Fatal().Err(err).Msg("config validation failed")
-	}
 
 	// Setup logger
 	logger, logCloser, err := logging.SetupLogger(cfg.Log)
@@ -88,6 +84,34 @@ Environment:
 			cmd.Help()
 		},
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			clientCfg := config.ClientConfig{
+				CoordinatorAddr: coordinator,
+				Timeout:         timeout,
+			}
+			if err := clientCfg.Validate(); err != nil {
+				return fmt.Errorf("invalid configuration: %w", err)
+			}
+
+			tlsCfg := config.TLSConfig{
+				Enabled:            tlsCert != "" || tlsKey != "" || tlsCA != "",
+				CertFile:           tlsCert,
+				KeyFile:            tlsKey,
+				ClientCA:           tlsCA,
+				InsecureSkipVerify: insecure,
+			}
+			if err := tlsCfg.Validate(); err != nil {
+				return fmt.Errorf("invalid configuration: %w", err)
+			}
+
+			tracingCfg := config.TracingConfig{
+				Enable:     tracingEnable,
+				Endpoint:   tracingEndpoint,
+				SampleRate: tracingSampleRate,
+			}
+			if err := tracingCfg.Validate(); err != nil {
+				return fmt.Errorf("invalid configuration: %w", err)
+			}
+
 			if tracingEnable {
 				ctx := cmd.Context()
 				if ctx == nil {
