@@ -764,17 +764,158 @@ func TestDetectArch_Coverage(t *testing.T) {
 }
 
 func TestDetectMemory_AllPlatforms(t *testing.T) {
-	// Test that detectMemory delegates to correct platform function
 	mem := detectMemory()
 
 	switch runtime.GOOS {
 	case "linux", "darwin", "windows":
-		// Should attempt detection
 		t.Logf("Memory on %s: %d bytes", runtime.GOOS, mem)
 	default:
-		// Unknown platform should return 0
 		if mem != 0 {
 			t.Errorf("Unknown platform should return 0, got %d", mem)
 		}
 	}
+}
+
+func TestDetectCpp_DetailedAnalysis(t *testing.T) {
+	caps := detectCpp()
+	if caps == nil {
+		t.Fatal("detectCpp should never return nil")
+	}
+
+	if caps.Compilers == nil {
+		t.Fatal("Compilers should not be nil")
+	}
+
+	t.Logf("Compilers: %v", caps.Compilers)
+	t.Logf("Cross-compile: %v", caps.CrossCompile)
+	t.Logf("MSVC version: %s", caps.MsvcVersion)
+	t.Logf("Has Windows SDK: %v", caps.HasWindowsSdk)
+
+	if runtime.GOOS != "windows" {
+		if caps.MsvcVersion != "" || len(caps.MsvcArchitectures) > 0 {
+			t.Error("MSVC fields should be empty on non-Windows")
+		}
+	}
+}
+
+func TestDetectRust_FallbackPath(t *testing.T) {
+	caps := detectRust()
+	if caps == nil {
+		t.Log("Rust not installed")
+		return
+	}
+
+	if caps.Toolchains == nil || caps.Targets == nil {
+		t.Fatal("Rust capability slices should not be nil")
+	}
+
+	if len(caps.Toolchains) == 0 {
+		t.Error("Rust detected but no toolchains")
+	}
+
+	t.Logf("Toolchains: %v", caps.Toolchains)
+	t.Logf("Targets: %v", caps.Targets)
+}
+
+func TestDetectMemory_LinuxPath(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux-specific test")
+	}
+
+	mem := detectMemoryLinux()
+	t.Logf("Linux memory: %d", mem)
+}
+
+func TestDetectMemory_DarwinPath(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Darwin-specific test")
+	}
+
+	mem := detectMemoryDarwin()
+	if mem <= 0 {
+		t.Error("Darwin should detect memory")
+	}
+	t.Logf("Darwin memory: %d", mem)
+}
+
+func TestDetectMemory_WindowsPath(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-specific test")
+	}
+
+	mem := detectMemoryWindows()
+	t.Logf("Windows memory: %d", mem)
+}
+
+func TestDetectArch_UnknownArch(t *testing.T) {
+	arch := detectArch()
+
+	switch runtime.GOARCH {
+	case "amd64":
+		if arch != pb.Architecture_ARCH_X86_64 {
+			t.Errorf("amd64 should map to ARCH_X86_64, got %v", arch)
+		}
+	case "arm64":
+		if arch != pb.Architecture_ARCH_ARM64 {
+			t.Errorf("arm64 should map to ARCH_ARM64, got %v", arch)
+		}
+	case "arm":
+		if arch != pb.Architecture_ARCH_ARMV7 {
+			t.Errorf("arm should map to ARCH_ARMV7, got %v", arch)
+		}
+	default:
+		if arch != pb.Architecture_ARCH_UNSPECIFIED {
+			t.Errorf("unknown arch should map to ARCH_UNSPECIFIED, got %v", arch)
+		}
+	}
+}
+
+func TestDetectGo_AlwaysAvailable(t *testing.T) {
+	caps := detectGo()
+	if caps == nil {
+		t.Fatal("Go should always be available in test environment")
+	}
+	if caps.Version == "" {
+		t.Error("Go version should not be empty")
+	}
+	if !caps.CrossCompile {
+		t.Error("Go should support cross-compile")
+	}
+}
+
+func TestDetectNode_PackageManagerDetection(t *testing.T) {
+	caps := detectNode()
+	if caps == nil {
+		t.Skip("Node not installed")
+		return
+	}
+
+	if len(caps.Versions) == 0 {
+		t.Error("Node should have versions when detected")
+	}
+
+	t.Logf("Node versions: %v", caps.Versions)
+	t.Logf("Package managers: %v", caps.PackageManagers)
+}
+
+func TestDetectFlutter_WebPlatform(t *testing.T) {
+	caps := detectFlutter()
+	if caps == nil {
+		t.Skip("Flutter not installed")
+		return
+	}
+
+	hasWeb := false
+	for _, p := range caps.Platforms {
+		if p == pb.TargetPlatform_PLATFORM_WEB {
+			hasWeb = true
+			break
+		}
+	}
+
+	if !hasWeb {
+		t.Error("Flutter should always have web platform")
+	}
+
+	t.Logf("Platforms: %v", caps.Platforms)
 }
