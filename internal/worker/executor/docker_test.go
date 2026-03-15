@@ -1,97 +1,18 @@
 package executor
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
 	"strings"
 	"testing"
 
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
 	dockerclient "github.com/docker/docker/client"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 )
-
-// mockDockerClient is a mock implementation of Docker client interface
-type mockDockerClient struct {
-	pingError            error
-	containerCreateError error
-	containerStartError  error
-	containerWaitChan    <-chan container.WaitResponse
-	containerWaitError   <-chan error
-	containerLogsData    string
-	containerLogsError   error
-	imageListResponse    []image.Summary
-	imageListError       error
-	imagePullError       error
-}
-
-func (m *mockDockerClient) Ping(ctx context.Context) (types.Ping, error) {
-	return types.Ping{}, m.pingError
-}
-
-func (m *mockDockerClient) ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig interface{}, platformConfig interface{}, containerName string) (container.CreateResponse, error) {
-	if m.containerCreateError != nil {
-		return container.CreateResponse{}, m.containerCreateError
-	}
-	return container.CreateResponse{ID: "test-container-id"}, nil
-}
-
-func (m *mockDockerClient) ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error {
-	return m.containerStartError
-}
-
-func (m *mockDockerClient) ContainerWait(ctx context.Context, containerID string, condition container.WaitCondition) (<-chan container.WaitResponse, <-chan error) {
-	if m.containerWaitChan == nil {
-		ch := make(chan container.WaitResponse, 1)
-		ch <- container.WaitResponse{StatusCode: 0}
-		close(ch)
-		errCh := make(chan error, 1)
-		close(errCh)
-		return ch, errCh
-	}
-	return m.containerWaitChan, m.containerWaitError
-}
-
-func (m *mockDockerClient) ContainerLogs(ctx context.Context, containerID string, options container.LogsOptions) (io.ReadCloser, error) {
-	if m.containerLogsError != nil {
-		return nil, m.containerLogsError
-	}
-	return io.NopCloser(bytes.NewBufferString(m.containerLogsData)), nil
-}
-
-func (m *mockDockerClient) ContainerRemove(ctx context.Context, containerID string, options container.RemoveOptions) error {
-	return nil
-}
-
-func (m *mockDockerClient) ContainerKill(ctx context.Context, containerID string, signal string) error {
-	return nil
-}
-
-func (m *mockDockerClient) ImageList(ctx context.Context, options image.ListOptions) ([]image.Summary, error) {
-	if m.imageListError != nil {
-		return nil, m.imageListError
-	}
-	return m.imageListResponse, nil
-}
-
-func (m *mockDockerClient) ImagePull(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error) {
-	if m.imagePullError != nil {
-		return nil, m.imagePullError
-	}
-	return io.NopCloser(bytes.NewBufferString("{}")), nil
-}
-
-func (m *mockDockerClient) Close() error {
-	return nil
-}
 
 // TestDockerExecutor_Name tests the Name method
 func TestDockerExecutor_Name(t *testing.T) {
