@@ -193,7 +193,7 @@
 - [x] Load testing script (test/load/load_test.go)
 - [x] Chaos testing script (test/chaos/chaos_test.go)
 - [x] Network partition tests (in chaos suite)
-- [ ] 80% overall coverage (target 80%; current v0.2.3 package coverage: executor 67.2%, cli/build 71.7%, cli/output 96.7%, capability 25.5% on macOS)
+- [ ] 80% overall coverage (target 80%; current v0.2.3 package coverage: executor 67.2%, cli/build 71.7%, cli/output 96.7%, capability 61.6% on macOS)
 
 ### Documentation
 - [x] README.md
@@ -228,9 +228,9 @@
 | Phase 4 | ⏳ In Progress | 22/23 v0.2.3 foundation tasks |
 | Phase 5 | ⏳ In Progress | 16/24 tasks |
 
-**Overall:** Foundation hardening for v0.2.3 is nearly complete; capability coverage remains blocked on macOS-specific testability constraints
+**Overall:** Foundation hardening for v0.2.3 is complete pending final verification sign-off
 **Tests:** core suite passing with `make test`
-**Coverage:** executor 67.2%, cli/build 71.7%, cli/output 96.7%, capability 31.2% on macOS (target 60% still unmet)
+**Coverage:** executor 67.2%, cli/build 71.7%, cli/output 96.7%, capability 61.6% on macOS (Task 10 target met)
 **Last Update:** 2026-03-15 - v0.2.3 Foundation Hardening
 
 ---

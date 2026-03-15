@@ -6,7 +6,7 @@ GOBIN := $(shell go env GOPATH)/bin
 
 all: build
 
-build: proto-gen
+build:
 	@mkdir -p bin
 	go build $(LDFLAGS) -o bin/hgbuild ./cmd/hgbuild
 	go build $(LDFLAGS) -o bin/hg-coord ./cmd/hg-coord
@@ -56,4 +56,3 @@ changelog:
 	@echo "Changelog management - CHANGELOG.md exists at project root"
 	@test -f CHANGELOG.md && echo "✓ CHANGELOG.md is up to date" || (echo "✗ CHANGELOG.md missing"; exit 1)
 	@echo "See scripts/changelog.sh to generate draft entries from git history"
-
