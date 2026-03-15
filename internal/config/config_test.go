@@ -465,7 +465,7 @@ func TestValidate_TLSConfig(t *testing.T) {
 		{"tls enabled with cert/key", true, "/etc/tls/cert.pem", "/etc/tls/key.pem", false, "", false, false, ""},
 		{"tls enabled no cert", true, "", "/etc/tls/key.pem", false, "", false, true, "cert_file"},
 		{"tls enabled no key", true, "/etc/tls/cert.pem", "", false, "", false, true, "key_file"},
-		{"tls insecure skip", true, "", "", false, "", true, false, ""},
+		{"tls insecure skip still needs certs", true, "", "", false, "", true, true, "cert_file"},
 		{"mtls no client_ca", true, "/etc/tls/cert.pem", "/etc/tls/key.pem", true, "", false, true, "client_ca"},
 		{"mtls valid", true, "/etc/tls/cert.pem", "/etc/tls/key.pem", true, "/etc/tls/ca.pem", false, false, ""},
 	}
@@ -535,6 +535,7 @@ func TestValidate_ClientTimeout(t *testing.T) {
 	}{
 		{"valid timeout 30s", 30 * time.Second, false},
 		{"valid timeout disabled (0)", 0, false},
+		{"invalid timeout negative", -1 * time.Second, true},
 		{"invalid timeout 500ms", 500 * time.Millisecond, true},
 		{"valid timeout 1s", time.Second, false},
 	}
@@ -560,6 +561,7 @@ func TestValidate_WorkerTimeout(t *testing.T) {
 	}{
 		{"valid timeout 5m", 5 * time.Minute, false},
 		{"valid timeout disabled (0)", 0, false},
+		{"invalid timeout negative", -1 * time.Second, true},
 		{"invalid timeout 500ms", 500 * time.Millisecond, true},
 		{"valid timeout 1s", time.Second, false},
 	}
@@ -568,6 +570,30 @@ func TestValidate_WorkerTimeout(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := DefaultConfig()
 			cfg.Worker.Timeout = tt.timeout
+
+			err := cfg.Validate()
+			if (err != nil) != tt.wantError {
+				t.Errorf("Validate() error = %v, wantError %v", err, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestValidate_WorkerHeartbeat(t *testing.T) {
+	tests := []struct {
+		name      string
+		heartbeat int
+		wantError bool
+	}{
+		{"valid heartbeat default", 30, false},
+		{"valid heartbeat disabled (0)", 0, false},
+		{"invalid heartbeat negative", -1, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.Worker.HeartbeatSec = tt.heartbeat
 
 			err := cfg.Validate()
 			if (err != nil) != tt.wantError {

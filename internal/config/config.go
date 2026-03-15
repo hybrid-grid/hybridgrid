@@ -385,12 +385,16 @@ func (c *WorkerConfig) Validate() error {
 		return fmt.Errorf("config: worker.max_parallel must be >= 0, got %d", c.MaxParallel)
 	}
 
+	if c.Timeout < 0 {
+		return fmt.Errorf("config: worker.timeout must be >= 0, got %v", c.Timeout)
+	}
+
 	if c.Timeout > 0 && c.Timeout < time.Second {
 		return fmt.Errorf("config: worker.timeout must be > 0s, got %v", c.Timeout)
 	}
 
-	if c.HeartbeatSec > 0 && c.HeartbeatSec < 1 {
-		return fmt.Errorf("config: worker.heartbeat_sec must be > 0, got %d", c.HeartbeatSec)
+	if c.HeartbeatSec < 0 {
+		return fmt.Errorf("config: worker.heartbeat_sec must be >= 0, got %d", c.HeartbeatSec)
 	}
 
 	return nil
@@ -398,6 +402,10 @@ func (c *WorkerConfig) Validate() error {
 
 // Validate validates the client configuration.
 func (c *ClientConfig) Validate() error {
+	if c.Timeout < 0 {
+		return fmt.Errorf("config: client.timeout must be >= 0, got %v", c.Timeout)
+	}
+
 	if c.Timeout > 0 && c.Timeout < time.Second {
 		return fmt.Errorf("config: client.timeout must be > 0s or 0 (disabled), got %v", c.Timeout)
 	}
@@ -482,14 +490,11 @@ func (c *TLSConfig) Validate() error {
 		return nil
 	}
 
-	// InsecureSkipVerify allows TLS without certificates (for testing)
-	if !c.InsecureSkipVerify {
-		if c.CertFile == "" {
-			return errors.New("config: tls.cert_file is required when TLS is enabled")
-		}
-		if c.KeyFile == "" {
-			return errors.New("config: tls.key_file is required when TLS is enabled")
-		}
+	if c.CertFile == "" {
+		return errors.New("config: tls.cert_file is required when TLS is enabled")
+	}
+	if c.KeyFile == "" {
+		return errors.New("config: tls.key_file is required when TLS is enabled")
 	}
 
 	if c.RequireClientCert && c.ClientCA == "" {
