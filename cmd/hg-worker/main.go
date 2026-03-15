@@ -174,20 +174,12 @@ It executes build tasks received from the coordinator.`,
 			cfg.Tracing.Timeout = tracingTimeout
 			cfg.Tracing.BatchSize = tracingBatchSize
 
-			if tlsCert != "" && tlsKey != "" {
-				cfg.TLS.Enabled = true
-				cfg.TLS.CertFile = tlsCert
-				cfg.TLS.KeyFile = tlsKey
-				cfg.TLS.ClientCA = tlsCA
-				cfg.TLS.RequireClientCert = tlsRequireClientCert
-			} else if tlsCert != "" || tlsKey != "" {
-				// One TLS flag provided but not both - enable for validation
-				cfg.TLS.Enabled = true
-				cfg.TLS.CertFile = tlsCert
-				cfg.TLS.KeyFile = tlsKey
-				cfg.TLS.ClientCA = tlsCA
-				cfg.TLS.RequireClientCert = tlsRequireClientCert
-			}
+			anyTLSFlags := tlsCert != "" || tlsKey != "" || tlsCA != "" || tlsRequireClientCert
+			cfg.TLS.CertFile = tlsCert
+			cfg.TLS.KeyFile = tlsKey
+			cfg.TLS.ClientCA = tlsCA
+			cfg.TLS.RequireClientCert = tlsRequireClientCert
+			cfg.TLS.Enabled = anyTLSFlags
 
 			// Validate TLS configuration if any TLS flags were provided
 			if cfg.TLS.Enabled {
