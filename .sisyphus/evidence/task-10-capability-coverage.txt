@@ -1,0 +1,27 @@
+ok   	github.com/h3nr1-d14z/hybridgrid/internal/capability	13.736s	coverage: 61.6% of statements
+github.com/h3nr1-d14z/hybridgrid/internal/capability/detect.go:14:	Detect				100.0%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/detect.go:44:	detectArch			100.0%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/detect.go:48:	detectArchForGOARCH		100.0%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/detect.go:61:	detectMemory			100.0%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/detect.go:65:	detectMemoryForGOOS		100.0%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/detect.go:78:	detectMemoryLinux		0.0%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/detect.go:109:	detectMemoryDarwin		77.8%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/detect.go:124:	detectMemoryWindows		0.0%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/detect.go:175:	detectDocker			100.0%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/detect.go:180:	detectCpp			100.0%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/detect.go:184:	detectCppForGOOS		100.0%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/detect.go:247:	detectGo			77.8%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/detect.go:267:	detectRust			87.5%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/detect.go:317:	detectNode			100.0%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/detect.go:342:	detectFlutter			84.6%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/msvc.go:36:	DetectMSVC			0.0%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/msvc.go:40:	detectMSVCForGOOS		100.0%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/msvc.go:66:	detectMSVCFromEnv		70.6%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/msvc.go:105:	detectMSVCFromVSWhere		0.0%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/msvc.go:165:	detectMSVCFromKnownPaths	0.0%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/msvc.go:214:	findClExe			84.6%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/msvc.go:241:	detectMSVCArchitectures		80.0%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/msvc.go:277:	detectWindowsSDK		77.8%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/msvc.go:312:	GetVCVarsPath			66.7%
+github.com/h3nr1-d14z/hybridgrid/internal/capability/msvc.go:326:	GetClExeForArch			66.7%
+total:									(statements)			61.6%

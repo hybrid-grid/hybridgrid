@@ -42,7 +42,11 @@ func Detect() *pb.WorkerCapabilities {
 }
 
 func detectArch() pb.Architecture {
-	switch runtime.GOARCH {
+	return detectArchForGOARCH(runtime.GOARCH)
+}
+
+func detectArchForGOARCH(goarch string) pb.Architecture {
+	switch goarch {
 	case "amd64":
 		return pb.Architecture_ARCH_X86_64
 	case "arm64":
@@ -55,13 +59,17 @@ func detectArch() pb.Architecture {
 }
 
 func detectMemory() int64 {
-	switch runtime.GOOS {
+	return detectMemoryForGOOS(runtime.GOOS, detectMemoryLinux, detectMemoryDarwin, detectMemoryWindows)
+}
+
+func detectMemoryForGOOS(goos string, linux, darwin, windows func() int64) int64 {
+	switch goos {
 	case "linux":
-		return detectMemoryLinux()
+		return linux()
 	case "darwin":
-		return detectMemoryDarwin()
+		return darwin()
 	case "windows":
-		return detectMemoryWindows()
+		return windows()
 	default:
 		return 0
 	}
@@ -170,20 +178,24 @@ func detectDocker() bool {
 }
 
 func detectCpp() *pb.CppCapability {
+	return detectCppForGOOS(runtime.GOOS, exec.LookPath, DetectMSVC)
+}
+
+func detectCppForGOOS(goos string, lookPath func(string) (string, error), detectMSVCFn func() *MSVCInfo) *pb.CppCapability {
 	cap := &pb.CppCapability{
 		Compilers: make([]string, 0),
 	}
 
 	compilers := []string{"gcc", "g++", "clang", "clang++"}
 	for _, c := range compilers {
-		if _, err := exec.LookPath(c); err == nil {
+		if _, err := lookPath(c); err == nil {
 			cap.Compilers = append(cap.Compilers, c)
 		}
 	}
 
 	// On Windows, detect MSVC
-	if runtime.GOOS == "windows" {
-		msvc := DetectMSVC()
+	if goos == "windows" {
+		msvc := detectMSVCFn()
 		if msvc != nil && msvc.Available {
 			cap.Compilers = append(cap.Compilers, "cl.exe")
 			// Set MSVC-specific fields
@@ -200,7 +212,7 @@ func detectCpp() *pb.CppCapability {
 			"i686-w64-mingw32-gcc",
 		}
 		for _, c := range mingwCompilers {
-			if _, err := exec.LookPath(c); err == nil {
+			if _, err := lookPath(c); err == nil {
 				cap.Compilers = append(cap.Compilers, c)
 				cap.CrossCompile = true
 			}
@@ -208,7 +220,7 @@ func detectCpp() *pb.CppCapability {
 	}
 
 	// Check for cross-compile toolchains (Linux/macOS)
-	if runtime.GOOS != "windows" {
+	if goos != "windows" {
 		crossCompilers := []string{
 			// Linux cross-compilers
 			"aarch64-linux-gnu-gcc",
@@ -222,7 +234,7 @@ func detectCpp() *pb.CppCapability {
 			"x86_64-unknown-linux-gnu-gcc",
 		}
 		for _, c := range crossCompilers {
-			if _, err := exec.LookPath(c); err == nil {
+			if _, err := lookPath(c); err == nil {
 				cap.CrossCompile = true
 				break
 			}

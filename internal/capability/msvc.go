@@ -34,22 +34,31 @@ type vswhereFindResult struct {
 // DetectMSVC detects MSVC installations on Windows.
 // Returns nil if not on Windows or MSVC is not found.
 func DetectMSVC() *MSVCInfo {
-	if runtime.GOOS != "windows" {
+	return detectMSVCForGOOS(runtime.GOOS, detectMSVCFromEnv, detectMSVCFromVSWhere, detectMSVCFromKnownPaths)
+}
+
+func detectMSVCForGOOS(
+	goos string,
+	fromEnv func() *MSVCInfo,
+	fromVSWhere func() *MSVCInfo,
+	fromKnownPaths func() *MSVCInfo,
+) *MSVCInfo {
+	if goos != "windows" {
 		return nil
 	}
 
 	// 1. Try environment variable (fast path for VS Developer Command Prompt)
-	if info := detectMSVCFromEnv(); info != nil && info.Available {
+	if info := fromEnv(); info != nil && info.Available {
 		return info
 	}
 
 	// 2. Try vswhere (most reliable)
-	if info := detectMSVCFromVSWhere(); info != nil && info.Available {
+	if info := fromVSWhere(); info != nil && info.Available {
 		return info
 	}
 
 	// 3. Fall back to known paths
-	return detectMSVCFromKnownPaths()
+	return fromKnownPaths()
 }
 
 // detectMSVCFromEnv detects MSVC from environment variables.
