@@ -130,14 +130,15 @@ It executes build tasks received from the coordinator.`,
 				Msg("Starting Hybrid-Grid Worker")
 
 			if tracingEnable {
-				tracingCfg := tracing.WorkerConfig()
-				tracingCfg.Enable = true
-				tracingCfg.Endpoint = tracingEndpoint
-				tracingCfg.SampleRate = tracingSampleRate
-				tracingCfg.Insecure = tracingInsecure
-				tracingCfg.ServiceName = tracingServiceName
-				tracingCfg.Timeout = tracingTimeout
-				tracingCfg.BatchSize = tracingBatchSize
+				tracingCfg := config.TracingToLibConfig(config.TracingConfig{
+					Enable:      tracingEnable,
+					Endpoint:    tracingEndpoint,
+					ServiceName: tracingServiceName,
+					SampleRate:  tracingSampleRate,
+					Insecure:    tracingInsecure,
+					Timeout:     tracingTimeout,
+					BatchSize:   tracingBatchSize,
+				})
 
 				tp, err := tracing.Init(ctx, tracingCfg)
 				if err != nil {

@@ -102,14 +102,15 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 
 			// Initialize tracing if enabled
 			if tracingEnable {
-				tracingCfg := tracing.CoordinatorConfig()
-				tracingCfg.Enable = tracingEnable
-				tracingCfg.Endpoint = tracingEndpoint
-				tracingCfg.SampleRate = tracingSampleRate
-				tracingCfg.Insecure = tracingInsecure
-				tracingCfg.ServiceName = tracingServiceName
-				tracingCfg.Timeout = tracingTimeout
-				tracingCfg.BatchSize = tracingBatchSize
+				tracingCfg := config.TracingToLibConfig(config.TracingConfig{
+					Enable:      tracingEnable,
+					Endpoint:    tracingEndpoint,
+					ServiceName: tracingServiceName,
+					SampleRate:  tracingSampleRate,
+					Insecure:    tracingInsecure,
+					Timeout:     tracingTimeout,
+					BatchSize:   tracingBatchSize,
+				})
 
 				tp, err := tracing.Init(ctx, tracingCfg)
 				if err != nil {

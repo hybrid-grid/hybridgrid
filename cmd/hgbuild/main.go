@@ -118,10 +118,15 @@ Environment:
 					ctx = context.Background()
 				}
 
-				tracingCfg := tracing.ClientConfig()
-				tracingCfg.Enable = tracingEnable
-				tracingCfg.Endpoint = tracingEndpoint
-				tracingCfg.SampleRate = tracingSampleRate
+				tracingCfg := config.TracingToLibConfig(config.TracingConfig{
+					Enable:      tracingEnable,
+					Endpoint:    tracingEndpoint,
+					ServiceName: "hgbuild",
+					SampleRate:  tracingSampleRate,
+					Insecure:    true,
+					Timeout:     10 * time.Second,
+					BatchSize:   512,
+				})
 
 				tp, err := tracing.Init(ctx, tracingCfg)
 				if err != nil {
