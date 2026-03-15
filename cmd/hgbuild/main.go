@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
@@ -25,6 +24,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
 	"github.com/h3nr1-d14z/hybridgrid/internal/graph"
 	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/client"
+	"github.com/h3nr1-d14z/hybridgrid/internal/logging"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 	"github.com/h3nr1-d14z/hybridgrid/internal/security/validation"
 )
@@ -53,9 +53,19 @@ const (
 func main() {
 	injectWrappedCompilerMode()
 
-	// Configure logging
-	zerolog.SetGlobalLevel(zerolog.InfoLevel)
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+	// Load and validate config
+	cfg := config.DefaultConfig()
+	if err := cfg.Validate(); err != nil {
+		log.Fatal().Err(err).Msg("config validation failed")
+	}
+
+	// Setup logger
+	logger, logCloser, err := logging.SetupLogger(cfg.Log)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to setup logger")
+	}
+	log.Logger = logger
+	defer logCloser.Close()
 
 	rootCmd := &cobra.Command{
 		Use:   "hgbuild",
@@ -118,7 +128,6 @@ Environment:
 	}
 
 	// Global flags
-	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file (default: ~/.hybridgrid/config.yaml)")
 	rootCmd.PersistentFlags().StringVarP(&coordinator, "coordinator", "C", "", "coordinator address (auto-discover if empty)")
 	rootCmd.PersistentFlags().BoolVar(&insecure, "insecure", true, "use insecure connection")
 	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 2*time.Minute, "connection timeout")
@@ -715,7 +724,7 @@ func filterHgbuildFlags(args []string) []string {
 	var filtered []string
 	skipNext := false
 
-	for i, arg := range args {
+	for _, arg := range args {
 		if skipNext {
 			skipNext = false
 			continue
@@ -727,15 +736,6 @@ func filterHgbuildFlags(args []string) []string {
 			skipNext = true // skip next arg (the value)
 			continue
 		case strings.HasPrefix(arg, "--coordinator="):
-			continue
-		case arg == "--config" || arg == "-c":
-			// Note: -c is also compiler flag for compile-only, but we only skip
-			// if next arg looks like a file path
-			if i+1 < len(args) && (strings.HasSuffix(args[i+1], ".yaml") || strings.HasSuffix(args[i+1], ".yml")) {
-				skipNext = true
-				continue
-			}
-		case strings.HasPrefix(arg, "--config="):
 			continue
 		case arg == "--timeout":
 			skipNext = true

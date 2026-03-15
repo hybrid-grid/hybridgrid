@@ -736,13 +736,14 @@ func (x *NodeConfig) GetEnvVars() map[string]string {
 }
 
 type CppCapability struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	Compilers         []string               `protobuf:"bytes,1,rep,name=compilers,proto3" json:"compilers,omitempty"` // [gcc, clang, cl.exe]
-	CrossCompile      bool                   `protobuf:"varint,2,opt,name=cross_compile,json=crossCompile,proto3" json:"cross_compile,omitempty"`
-	DockerImages      []string               `protobuf:"bytes,3,rep,name=docker_images,json=dockerImages,proto3" json:"docker_images,omitempty"`
-	MsvcVersion       string                 `protobuf:"bytes,4,opt,name=msvc_version,json=msvcVersion,proto3" json:"msvc_version,omitempty"`                   // e.g., "2022", "2019"
-	MsvcArchitectures []string               `protobuf:"bytes,5,rep,name=msvc_architectures,json=msvcArchitectures,proto3" json:"msvc_architectures,omitempty"` // e.g., ["x64", "x86", "arm64"]
-	HasWindowsSdk     bool                   `protobuf:"varint,6,opt,name=has_windows_sdk,json=hasWindowsSdk,proto3" json:"has_windows_sdk,omitempty"`          // Whether Windows SDK is available
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Compilers    []string               `protobuf:"bytes,1,rep,name=compilers,proto3" json:"compilers,omitempty"` // [gcc, clang, cl.exe]
+	CrossCompile bool                   `protobuf:"varint,2,opt,name=cross_compile,json=crossCompile,proto3" json:"cross_compile,omitempty"`
+	DockerImages []string               `protobuf:"bytes,3,rep,name=docker_images,json=dockerImages,proto3" json:"docker_images,omitempty"`
+	// MSVC-specific fields (Windows only)
+	MsvcVersion       string   `protobuf:"bytes,4,opt,name=msvc_version,json=msvcVersion,proto3" json:"msvc_version,omitempty"`                   // e.g., "2022", "2019"
+	MsvcArchitectures []string `protobuf:"bytes,5,rep,name=msvc_architectures,json=msvcArchitectures,proto3" json:"msvc_architectures,omitempty"` // e.g., ["x64", "x86", "arm64"]
+	HasWindowsSdk     bool     `protobuf:"varint,6,opt,name=has_windows_sdk,json=hasWindowsSdk,proto3" json:"has_windows_sdk,omitempty"`          // Whether Windows SDK is available
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -2928,11 +2929,14 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\benv_vars\x18\x04 \x03(\v2&.hybridgrid.v1.NodeConfig.EnvVarsEntryR\aenvVars\x1a:\n" +
 	"\fEnvVarsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"w\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf1\x01\n" +
 	"\rCppCapability\x12\x1c\n" +
 	"\tcompilers\x18\x01 \x03(\tR\tcompilers\x12#\n" +
 	"\rcross_compile\x18\x02 \x01(\bR\fcrossCompile\x12#\n" +
-	"\rdocker_images\x18\x03 \x03(\tR\fdockerImages\"\xbb\x01\n" +
+	"\rdocker_images\x18\x03 \x03(\tR\fdockerImages\x12!\n" +
+	"\fmsvc_version\x18\x04 \x01(\tR\vmsvcVersion\x12-\n" +
+	"\x12msvc_architectures\x18\x05 \x03(\tR\x11msvcArchitectures\x12&\n" +
+	"\x0fhas_windows_sdk\x18\x06 \x01(\bR\rhasWindowsSdk\"\xbb\x01\n" +
 	"\x11FlutterCapability\x12\x1f\n" +
 	"\vsdk_version\x18\x01 \x01(\tR\n" +
 	"sdkVersion\x12;\n" +

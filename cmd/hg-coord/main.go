@@ -12,8 +12,10 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
+	"github.com/h3nr1-d14z/hybridgrid/internal/config"
 	coordserver "github.com/h3nr1-d14z/hybridgrid/internal/coordinator/server"
 	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
+	"github.com/h3nr1-d14z/hybridgrid/internal/logging"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/dashboard"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 )
@@ -22,7 +24,20 @@ var version = "v0.0.0-dev"
 
 func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
+	// Load and validate config
+	cfg := config.DefaultConfig()
+	if err := cfg.Validate(); err != nil {
+		log.Fatal().Err(err).Msg("config validation failed")
+	}
+
+	// Setup logger
+	logger, logCloser, err := logging.SetupLogger(cfg.Log)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to setup logger")
+	}
+	log.Logger = logger
+	defer logCloser.Close()
 
 	rootCmd := &cobra.Command{
 		Use:   "hg-coord",
@@ -206,7 +221,6 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 
 	serveCmd.Flags().Int("grpc-port", 9000, "gRPC server port")
 	serveCmd.Flags().Int("http-port", 8080, "HTTP/Dashboard port")
-	serveCmd.Flags().String("config", "", "Path to config file")
 	serveCmd.Flags().String("token", "", "Authentication token")
 	serveCmd.Flags().Bool("no-mdns", false, "Disable mDNS advertisement")
 	serveCmd.Flags().String("tls-cert", "", "Path to TLS certificate file (PEM format)")

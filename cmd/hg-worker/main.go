@@ -19,8 +19,10 @@ import (
 	"github.com/spf13/cobra"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
+	"github.com/h3nr1-d14z/hybridgrid/internal/config"
 	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
 	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/client"
+	"github.com/h3nr1-d14z/hybridgrid/internal/logging"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 	workerserver "github.com/h3nr1-d14z/hybridgrid/internal/worker/server"
 )
@@ -29,7 +31,20 @@ var version = "v0.0.0-dev"
 
 func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
+	// Load and validate config
+	cfg := config.DefaultConfig()
+	if err := cfg.Validate(); err != nil {
+		log.Fatal().Err(err).Msg("config validation failed")
+	}
+
+	// Setup logger
+	logger, logCloser, err := logging.SetupLogger(cfg.Log)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to setup logger")
+	}
+	log.Logger = logger
+	defer logCloser.Close()
 
 	rootCmd := &cobra.Command{
 		Use:   "hg-worker",
@@ -243,6 +258,7 @@ It executes build tasks received from the coordinator.`,
 			// Start metrics HTTP server
 			metricsMux := http.NewServeMux()
 			metricsMux.Handle("/metrics", promhttp.Handler())
+			metricsMux.Handle("/log-level", logging.NewLogLevelHandler())
 			metricsMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte("OK"))
@@ -300,7 +316,6 @@ It executes build tasks received from the coordinator.`,
 	serveCmd.Flags().Int("http-port", 9090, "Worker HTTP/metrics port")
 	serveCmd.Flags().String("coordinator", "", "Coordinator address (empty for mDNS auto-discovery)")
 	serveCmd.Flags().String("advertise-address", "", "Address to advertise to coordinator (default: hostname:port)")
-	serveCmd.Flags().String("config", "", "Path to config file")
 	serveCmd.Flags().String("token", "", "Authentication token")
 	serveCmd.Flags().Int("max-parallel", 0, "Max parallel tasks (0 = auto)")
 	serveCmd.Flags().Duration("discovery-timeout", 10*time.Second, "mDNS discovery timeout")

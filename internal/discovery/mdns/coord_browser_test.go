@@ -45,8 +45,9 @@ func TestCoordBrowser_DiscoverTimeout(t *testing.T) {
 	_, err := browser.Discover(ctx)
 
 	// Should timeout since no coordinator running
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "timeout")
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "timeout")
+	}
 }
 
 func TestCoordBrowser_DiscoverWithFallback_UsesFallback(t *testing.T) {

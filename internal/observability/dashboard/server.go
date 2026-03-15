@@ -10,6 +10,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
+
+	"github.com/h3nr1-d14z/hybridgrid/internal/logging"
 )
 
 //go:embed assets/*
@@ -59,6 +61,9 @@ func New(cfg Config, provider StatsProvider) *Server {
 
 	// Prometheus metrics endpoint
 	mux.Handle("/metrics", promhttp.Handler())
+
+	// Log level endpoint
+	mux.Handle("/log-level", logging.NewLogLevelHandler())
 
 	// API endpoints
 	mux.HandleFunc("/api/v1/stats", s.handleStats)
