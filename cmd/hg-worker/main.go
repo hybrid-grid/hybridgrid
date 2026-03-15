@@ -21,6 +21,7 @@ import (
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
 	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/client"
+	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 	workerserver "github.com/h3nr1-d14z/hybridgrid/internal/worker/server"
 )
 
@@ -52,6 +53,11 @@ It executes build tasks received from the coordinator.`,
 		Use:   "serve",
 		Short: "Start the worker agent",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
+
 			coordinator, _ := cmd.Flags().GetString("coordinator")
 			port, _ := cmd.Flags().GetInt("port")
 			httpPort, _ := cmd.Flags().GetInt("http-port")
@@ -59,6 +65,17 @@ It executes build tasks received from the coordinator.`,
 			maxParallel, _ := cmd.Flags().GetInt("max-parallel")
 			discoveryTimeout, _ := cmd.Flags().GetDuration("discovery-timeout")
 			advertiseAddr, _ := cmd.Flags().GetString("advertise-address")
+			tlsCert, _ := cmd.Flags().GetString("tls-cert")
+			tlsKey, _ := cmd.Flags().GetString("tls-key")
+			tlsCA, _ := cmd.Flags().GetString("tls-ca")
+			tlsRequireClientCert, _ := cmd.Flags().GetBool("tls-require-client-cert")
+			tracingEnable, _ := cmd.Flags().GetBool("tracing-enable")
+			tracingEndpoint, _ := cmd.Flags().GetString("tracing-endpoint")
+			tracingSampleRate, _ := cmd.Flags().GetFloat64("tracing-sample-rate")
+			tracingInsecure, _ := cmd.Flags().GetBool("tracing-insecure")
+			tracingServiceName, _ := cmd.Flags().GetString("tracing-service-name")
+			tracingTimeout, _ := cmd.Flags().GetDuration("tracing-timeout")
+			tracingBatchSize, _ := cmd.Flags().GetInt("tracing-batch-size")
 
 			// Resolve coordinator address
 			if coordinator == "" {
@@ -91,10 +108,64 @@ It executes build tasks received from the coordinator.`,
 				Str("version", version).
 				Msg("Starting Hybrid-Grid Worker")
 
+			if tracingEnable {
+				tracingCfg := tracing.WorkerConfig()
+				tracingCfg.Enable = true
+				tracingCfg.Endpoint = tracingEndpoint
+				tracingCfg.SampleRate = tracingSampleRate
+				tracingCfg.Insecure = tracingInsecure
+				tracingCfg.ServiceName = tracingServiceName
+				tracingCfg.Timeout = tracingTimeout
+				tracingCfg.BatchSize = tracingBatchSize
+
+				tp, err := tracing.Init(ctx, tracingCfg)
+				if err != nil {
+					return fmt.Errorf("failed to initialize tracing: %w", err)
+				}
+				if tp != nil {
+					defer func() {
+						shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+						defer cancel()
+						if err := tp.Shutdown(shutdownCtx); err != nil {
+							log.Warn().Err(err).Msg("Failed to shutdown tracer provider")
+						}
+					}()
+				}
+
+				log.Info().
+					Str("endpoint", tracingEndpoint).
+					Str("service", tracingServiceName).
+					Float64("sample_rate", tracingSampleRate).
+					Msg("Tracing enabled")
+			}
+
 			// Create and start worker gRPC server
 			cfg := workerserver.DefaultConfig()
 			cfg.Port = port
 			cfg.MaxConcurrent = maxParallel
+			cfg.EnableRequestID = true
+			cfg.Tracing.Enable = tracingEnable
+			cfg.Tracing.Endpoint = tracingEndpoint
+			cfg.Tracing.ServiceName = tracingServiceName
+			cfg.Tracing.SampleRate = tracingSampleRate
+			cfg.Tracing.Insecure = tracingInsecure
+			cfg.Tracing.Timeout = tracingTimeout
+			cfg.Tracing.BatchSize = tracingBatchSize
+
+			if tlsCert != "" && tlsKey != "" {
+				cfg.TLS.Enabled = true
+				cfg.TLS.CertFile = tlsCert
+				cfg.TLS.KeyFile = tlsKey
+				cfg.TLS.ClientCA = tlsCA
+				cfg.TLS.RequireClientCert = tlsRequireClientCert
+
+				log.Info().
+					Str("cert", tlsCert).
+					Bool("mtls", tlsRequireClientCert).
+					Msg("TLS enabled")
+			} else {
+				log.Debug().Msg("TLS disabled")
+			}
 
 			srv := workerserver.New(cfg)
 			caps := srv.Capabilities()
@@ -104,10 +175,12 @@ It executes build tasks received from the coordinator.`,
 
 			// Connect to coordinator
 			cli, err := client.New(client.Config{
-				Address:   coordinator,
-				AuthToken: token,
-				Timeout:   30 * time.Second,
-				Insecure:  true, // TODO: Add TLS support
+				Address:       coordinator,
+				AuthToken:     token,
+				Timeout:       30 * time.Second,
+				Insecure:      !cfg.TLS.Enabled,
+				EnableTracing: tracingEnable,
+				TLS:           cfg.TLS,
 			})
 			if err != nil {
 				return fmt.Errorf("failed to connect to coordinator: %w", err)
@@ -231,6 +304,17 @@ It executes build tasks received from the coordinator.`,
 	serveCmd.Flags().String("token", "", "Authentication token")
 	serveCmd.Flags().Int("max-parallel", 0, "Max parallel tasks (0 = auto)")
 	serveCmd.Flags().Duration("discovery-timeout", 10*time.Second, "mDNS discovery timeout")
+	serveCmd.Flags().String("tls-cert", "", "Path to TLS certificate file (PEM format)")
+	serveCmd.Flags().String("tls-key", "", "Path to TLS private key file (PEM format)")
+	serveCmd.Flags().String("tls-ca", "", "Path to CA certificate for client verification (mTLS)")
+	serveCmd.Flags().Bool("tls-require-client-cert", false, "Require client certificates (mTLS)")
+	serveCmd.Flags().Bool("tracing-enable", false, "Enable OpenTelemetry tracing")
+	serveCmd.Flags().String("tracing-endpoint", "localhost:4317", "OTLP gRPC endpoint")
+	serveCmd.Flags().Float64("tracing-sample-rate", 0.1, "Tracing sample rate (0.0-1.0)")
+	serveCmd.Flags().Bool("tracing-insecure", true, "Use insecure connection for tracing")
+	serveCmd.Flags().String("tracing-service-name", "hybridgrid-worker", "Service name in traces")
+	serveCmd.Flags().Duration("tracing-timeout", 10*time.Second, "Timeout for OTLP exports")
+	serveCmd.Flags().Int("tracing-batch-size", 512, "Max spans to batch before export")
 
 	rootCmd.AddCommand(versionCmd, serveCmd)
 

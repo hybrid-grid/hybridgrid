@@ -21,6 +21,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/registry"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/resilience"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/scheduler"
+	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/interceptors"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 	hgtls "github.com/h3nr1-d14z/hybridgrid/internal/security/tls"
 )
@@ -79,20 +80,22 @@ func (p *connPool) closeAll() {
 
 // Config holds the coordinator gRPC server configuration.
 type Config struct {
-	Port           int
-	AuthToken      string
-	HeartbeatTTL   time.Duration
-	RequestTimeout time.Duration
-	TLS            hgtls.Config
-	Tracing        tracing.Config
+	Port            int
+	AuthToken       string
+	HeartbeatTTL    time.Duration
+	RequestTimeout  time.Duration
+	TLS             hgtls.Config
+	Tracing         tracing.Config
+	EnableRequestID bool
 }
 
 // DefaultConfig returns sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		Port:           50051,
-		HeartbeatTTL:   60 * time.Second,
-		RequestTimeout: 120 * time.Second,
+		Port:            50051,
+		HeartbeatTTL:    60 * time.Second,
+		RequestTimeout:  120 * time.Second,
+		EnableRequestID: true,
 	}
 }
 
@@ -196,6 +199,15 @@ func (s *Server) Start() error {
 	if s.config.Tracing.Enable {
 		opts = append(opts, tracing.ServerOptions()...)
 		log.Info().Msg("OpenTelemetry tracing enabled for coordinator gRPC server")
+	}
+
+	// Add request ID interceptors if enabled
+	if s.config.EnableRequestID {
+		opts = append(opts,
+			grpc.UnaryInterceptor(interceptors.UnaryRequestIDInterceptor()),
+			grpc.StreamInterceptor(interceptors.StreamRequestIDInterceptor()),
+		)
+		log.Info().Msg("Request ID interceptor enabled for coordinator gRPC server")
 	}
 
 	s.server = grpc.NewServer(opts...)

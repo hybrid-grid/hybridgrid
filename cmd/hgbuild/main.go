@@ -25,16 +25,24 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
 	"github.com/h3nr1-d14z/hybridgrid/internal/graph"
 	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/client"
+	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 	"github.com/h3nr1-d14z/hybridgrid/internal/security/validation"
 )
 
 var (
-	version     = "v0.0.0-dev"
-	cfgFile     string
-	coordinator string
-	insecure    bool
-	timeout     time.Duration
-	verbose     bool
+	version           = "v0.0.0-dev"
+	cfgFile           string
+	coordinator       string
+	insecure          bool
+	timeout           time.Duration
+	verbose           bool
+	tlsCert           string
+	tlsKey            string
+	tlsCA             string
+	tracingEnable     bool
+	tracingEndpoint   string
+	tracingSampleRate float64
+	tracerShutdown    func() error
 )
 
 const (
@@ -69,6 +77,44 @@ Environment:
 		Run: func(cmd *cobra.Command, args []string) {
 			cmd.Help()
 		},
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if tracingEnable {
+				ctx := cmd.Context()
+				if ctx == nil {
+					ctx = context.Background()
+				}
+
+				tracingCfg := tracing.ClientConfig()
+				tracingCfg.Enable = tracingEnable
+				tracingCfg.Endpoint = tracingEndpoint
+				tracingCfg.SampleRate = tracingSampleRate
+
+				tp, err := tracing.Init(ctx, tracingCfg)
+				if err != nil {
+					return fmt.Errorf("failed to initialize tracing: %w", err)
+				}
+				if tp != nil {
+					tracerShutdown = func() error {
+						shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+						defer cancel()
+						return tp.Shutdown(shutdownCtx)
+					}
+					log.Info().
+						Str("endpoint", tracingEndpoint).
+						Float64("sample_rate", tracingSampleRate).
+						Msg("Tracing enabled")
+				}
+			}
+			return nil
+		},
+		PersistentPostRun: func(cmd *cobra.Command, args []string) {
+			if tracerShutdown != nil {
+				if err := tracerShutdown(); err != nil {
+					log.Warn().Err(err).Msg("Failed to shutdown tracer provider")
+				}
+				tracerShutdown = nil
+			}
+		},
 	}
 
 	// Global flags
@@ -77,6 +123,12 @@ Environment:
 	rootCmd.PersistentFlags().BoolVar(&insecure, "insecure", true, "use insecure connection")
 	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 2*time.Minute, "connection timeout")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
+	rootCmd.PersistentFlags().StringVar(&tlsCert, "tls-cert", "", "Path to TLS certificate file (PEM format)")
+	rootCmd.PersistentFlags().StringVar(&tlsKey, "tls-key", "", "Path to TLS private key file (PEM format)")
+	rootCmd.PersistentFlags().StringVar(&tlsCA, "tls-ca", "", "Path to CA certificate for server verification")
+	rootCmd.PersistentFlags().BoolVar(&tracingEnable, "tracing-enable", false, "Enable OpenTelemetry tracing")
+	rootCmd.PersistentFlags().StringVar(&tracingEndpoint, "tracing-endpoint", "localhost:4317", "OTLP gRPC endpoint")
+	rootCmd.PersistentFlags().Float64Var(&tracingSampleRate, "tracing-sample-rate", 0.01, "Tracing sample rate (0.0-1.0)")
 
 	// Commands
 	rootCmd.AddCommand(
@@ -119,11 +171,7 @@ func newStatusCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			output.AutoDetectColors()
 
-			c, err := client.New(client.Config{
-				Address:  coordinator,
-				Insecure: insecure,
-				Timeout:  timeout,
-			})
+			c, err := client.New(newClientConfig(coordinator, timeout))
 			if err != nil {
 				return fmt.Errorf("failed to connect: %w", err)
 			}
@@ -159,11 +207,7 @@ func newWorkersCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			output.AutoDetectColors()
 
-			c, err := client.New(client.Config{
-				Address:  coordinator,
-				Insecure: insecure,
-				Timeout:  timeout,
-			})
+			c, err := client.New(newClientConfig(coordinator, timeout))
 			if err != nil {
 				return fmt.Errorf("failed to connect: %w", err)
 			}
@@ -227,11 +271,7 @@ Examples:
   hgbuild build *.c -o myapp              Compile multiple files`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := client.New(client.Config{
-				Address:  coordinator,
-				Insecure: insecure,
-				Timeout:  5 * time.Minute, // Builds take longer
-			})
+			c, err := client.New(newClientConfig(coordinator, 5*time.Minute))
 			if err != nil {
 				return fmt.Errorf("failed to connect: %w", err)
 			}
@@ -776,11 +816,7 @@ func runCompiler(defaultCompiler, envVar string, args []string) error {
 	defer svc.Close()
 
 	// Connect to coordinator
-	clientCfg := client.Config{
-		Address:  coordAddr,
-		Insecure: insecure,
-		Timeout:  timeout,
-	}
+	clientCfg := newClientConfig(coordAddr, timeout)
 	c, err := client.New(clientCfg)
 	if err != nil {
 		// Fallback to local
@@ -1173,4 +1209,23 @@ func setEnv(env []string, key, value string) []string {
 		}
 	}
 	return append(env, prefix+value)
+}
+
+func newClientConfig(address string, requestTimeout time.Duration) client.Config {
+	clientCfg := client.Config{
+		Address:       address,
+		Insecure:      insecure,
+		Timeout:       requestTimeout,
+		EnableTracing: tracingEnable,
+	}
+
+	if tlsCert != "" && tlsKey != "" {
+		clientCfg.TLS.Enabled = true
+		clientCfg.TLS.CertFile = tlsCert
+		clientCfg.TLS.KeyFile = tlsKey
+		clientCfg.TLS.ClientCA = tlsCA
+		clientCfg.Insecure = false
+	}
+
+	return clientCfg
 }

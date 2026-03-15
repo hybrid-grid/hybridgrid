@@ -15,6 +15,7 @@ import (
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 	"github.com/h3nr1-d14z/hybridgrid/internal/capability"
+	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/interceptors"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 	hgtls "github.com/h3nr1-d14z/hybridgrid/internal/security/tls"
 	"github.com/h3nr1-d14z/hybridgrid/internal/worker/executor"
@@ -22,19 +23,21 @@ import (
 
 // Config holds the worker gRPC server configuration.
 type Config struct {
-	Port           int
-	MaxConcurrent  int
-	DefaultTimeout time.Duration
-	TLS            hgtls.Config
-	Tracing        tracing.Config
+	Port            int
+	MaxConcurrent   int
+	DefaultTimeout  time.Duration
+	TLS             hgtls.Config
+	Tracing         tracing.Config
+	EnableRequestID bool
 }
 
 // DefaultConfig returns sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		Port:           50052,
-		MaxConcurrent:  4,
-		DefaultTimeout: 120 * time.Second,
+		Port:            50052,
+		MaxConcurrent:   4,
+		DefaultTimeout:  120 * time.Second,
+		EnableRequestID: true,
 	}
 }
 
@@ -100,6 +103,15 @@ func (s *Server) Start() error {
 	if s.config.Tracing.Enable {
 		opts = append(opts, tracing.ServerOptions()...)
 		log.Info().Msg("OpenTelemetry tracing enabled for worker gRPC server")
+	}
+
+	// Add request ID interceptors if enabled
+	if s.config.EnableRequestID {
+		opts = append(opts,
+			grpc.UnaryInterceptor(interceptors.UnaryRequestIDInterceptor()),
+			grpc.StreamInterceptor(interceptors.StreamRequestIDInterceptor()),
+		)
+		log.Info().Msg("Request ID interceptor enabled for worker gRPC server")
 	}
 
 	s.server = grpc.NewServer(opts...)

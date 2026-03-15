@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -14,6 +15,7 @@ import (
 	coordserver "github.com/h3nr1-d14z/hybridgrid/internal/coordinator/server"
 	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/dashboard"
+	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 )
 
 var version = "v0.0.0-dev"
@@ -44,10 +46,30 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 		Use:   "serve",
 		Short: "Start the coordinator server",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
+
 			grpcPort, _ := cmd.Flags().GetInt("grpc-port")
 			httpPort, _ := cmd.Flags().GetInt("http-port")
 			token, _ := cmd.Flags().GetString("token")
 			noMdns, _ := cmd.Flags().GetBool("no-mdns")
+
+			// TLS flags
+			tlsCert, _ := cmd.Flags().GetString("tls-cert")
+			tlsKey, _ := cmd.Flags().GetString("tls-key")
+			tlsCA, _ := cmd.Flags().GetString("tls-ca")
+			tlsRequireClientCert, _ := cmd.Flags().GetBool("tls-require-client-cert")
+
+			// Tracing flags
+			tracingEnable, _ := cmd.Flags().GetBool("tracing-enable")
+			tracingEndpoint, _ := cmd.Flags().GetString("tracing-endpoint")
+			tracingSampleRate, _ := cmd.Flags().GetFloat64("tracing-sample-rate")
+			tracingInsecure, _ := cmd.Flags().GetBool("tracing-insecure")
+			tracingServiceName, _ := cmd.Flags().GetString("tracing-service-name")
+			tracingTimeout, _ := cmd.Flags().GetDuration("tracing-timeout")
+			tracingBatchSize, _ := cmd.Flags().GetInt("tracing-batch-size")
 
 			log.Info().
 				Int("grpc_port", grpcPort).
@@ -55,11 +77,66 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 				Str("version", version).
 				Msg("Starting Hybrid-Grid Coordinator")
 
+			// Initialize tracing if enabled
+			if tracingEnable {
+				tracingCfg := tracing.CoordinatorConfig()
+				tracingCfg.Enable = tracingEnable
+				tracingCfg.Endpoint = tracingEndpoint
+				tracingCfg.SampleRate = tracingSampleRate
+				tracingCfg.Insecure = tracingInsecure
+				tracingCfg.ServiceName = tracingServiceName
+				tracingCfg.Timeout = tracingTimeout
+				tracingCfg.BatchSize = tracingBatchSize
+
+				tp, err := tracing.Init(ctx, tracingCfg)
+				if err != nil {
+					return fmt.Errorf("failed to initialize tracing: %w", err)
+				}
+				if tp != nil {
+					defer func() {
+						shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+						defer cancel()
+						if err := tp.Shutdown(shutdownCtx); err != nil {
+							log.Warn().Err(err).Msg("Failed to shutdown tracer provider")
+						}
+					}()
+					log.Info().
+						Str("endpoint", tracingEndpoint).
+						Str("service", tracingServiceName).
+						Float64("sample_rate", tracingSampleRate).
+						Msg("Tracing enabled")
+				}
+			}
+
 			cfg := coordserver.DefaultConfig()
 			cfg.Port = grpcPort
 			cfg.AuthToken = token
 			cfg.HeartbeatTTL = 60 * time.Second
 			cfg.RequestTimeout = 120 * time.Second
+			cfg.EnableRequestID = true
+			cfg.Tracing.Enable = tracingEnable
+			cfg.Tracing.Endpoint = tracingEndpoint
+			cfg.Tracing.ServiceName = tracingServiceName
+			cfg.Tracing.SampleRate = tracingSampleRate
+			cfg.Tracing.Insecure = tracingInsecure
+			cfg.Tracing.Timeout = tracingTimeout
+			cfg.Tracing.BatchSize = tracingBatchSize
+
+			// Configure TLS from CLI flags
+			if tlsCert != "" && tlsKey != "" {
+				cfg.TLS.Enabled = true
+				cfg.TLS.CertFile = tlsCert
+				cfg.TLS.KeyFile = tlsKey
+				cfg.TLS.ClientCA = tlsCA
+				cfg.TLS.RequireClientCert = tlsRequireClientCert
+
+				log.Info().
+					Str("cert", tlsCert).
+					Bool("mtls", tlsRequireClientCert).
+					Msg("TLS enabled")
+			} else {
+				log.Debug().Msg("TLS disabled")
+			}
 
 			srv := coordserver.New(cfg)
 
@@ -132,6 +209,17 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 	serveCmd.Flags().String("config", "", "Path to config file")
 	serveCmd.Flags().String("token", "", "Authentication token")
 	serveCmd.Flags().Bool("no-mdns", false, "Disable mDNS advertisement")
+	serveCmd.Flags().String("tls-cert", "", "Path to TLS certificate file (PEM format)")
+	serveCmd.Flags().String("tls-key", "", "Path to TLS private key file (PEM format)")
+	serveCmd.Flags().String("tls-ca", "", "Path to CA certificate for client verification (mTLS)")
+	serveCmd.Flags().Bool("tls-require-client-cert", false, "Require client certificates (mTLS)")
+	serveCmd.Flags().Bool("tracing-enable", false, "Enable OpenTelemetry tracing")
+	serveCmd.Flags().String("tracing-endpoint", "localhost:4317", "OTLP gRPC endpoint")
+	serveCmd.Flags().Float64("tracing-sample-rate", 0.1, "Tracing sample rate (0.0-1.0)")
+	serveCmd.Flags().Bool("tracing-insecure", true, "Use insecure connection for tracing")
+	serveCmd.Flags().String("tracing-service-name", "hybridgrid-coordinator", "Service name in traces")
+	serveCmd.Flags().Duration("tracing-timeout", 10*time.Second, "Timeout for OTLP exports")
+	serveCmd.Flags().Int("tracing-batch-size", 512, "Max spans to batch before export")
 
 	rootCmd.AddCommand(versionCmd, serveCmd)
 
