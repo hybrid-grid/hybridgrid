@@ -153,6 +153,20 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 				cfg.TLS.KeyFile = tlsKey
 				cfg.TLS.ClientCA = tlsCA
 				cfg.TLS.RequireClientCert = tlsRequireClientCert
+			} else if tlsCert != "" || tlsKey != "" {
+				// One TLS flag provided but not both - enable for validation
+				cfg.TLS.Enabled = true
+				cfg.TLS.CertFile = tlsCert
+				cfg.TLS.KeyFile = tlsKey
+				cfg.TLS.ClientCA = tlsCA
+				cfg.TLS.RequireClientCert = tlsRequireClientCert
+			}
+
+			// Validate TLS configuration if any TLS flags were provided
+			if cfg.TLS.Enabled {
+				if err := cfg.TLS.Validate(); err != nil {
+					return err
+				}
 
 				log.Info().
 					Str("cert", tlsCert).
