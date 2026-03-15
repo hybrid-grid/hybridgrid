@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,8 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
+
+	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 )
 
 // Config holds the application configuration.
@@ -46,10 +49,22 @@ type TLSConfig struct {
 
 // TracingConfig holds OpenTelemetry tracing settings.
 type TracingConfig struct {
-	Enable     bool    `mapstructure:"enable"`
-	Endpoint   string  `mapstructure:"endpoint"`
-	SampleRate float64 `mapstructure:"sample_rate"`
-	Insecure   bool    `mapstructure:"insecure"`
+	Enable      bool              `mapstructure:"enable"`
+	Endpoint    string            `mapstructure:"endpoint"`
+	ServiceName string            `mapstructure:"service_name"`
+	SampleRate  float64           `mapstructure:"sample_rate"`
+	Insecure    bool              `mapstructure:"insecure"`
+	Headers     map[string]string `mapstructure:"headers"`
+	Timeout     time.Duration     `mapstructure:"timeout"`
+	BatchSize   int               `mapstructure:"batch_size"`
+}
+
+// LogRotationConfig holds log rotation settings.
+type LogRotationConfig struct {
+	MaxSizeMB  int  `mapstructure:"max_size_mb"`
+	MaxBackups int  `mapstructure:"max_backups"`
+	MaxAgeDays int  `mapstructure:"max_age_days"`
+	Compress   bool `mapstructure:"compress"`
 }
 
 // CoordinatorConfig holds coordinator-specific settings.
@@ -91,9 +106,10 @@ type CacheConfig struct {
 
 // LogConfig holds logging settings.
 type LogConfig struct {
-	Level  string `mapstructure:"level"`
-	Format string `mapstructure:"format"`
-	File   string `mapstructure:"file"`
+	Level    string            `mapstructure:"level"`
+	Format   string            `mapstructure:"format"`
+	File     string            `mapstructure:"file"`
+	Rotation LogRotationConfig `mapstructure:"rotation"`
 }
 
 // DefaultConfig returns the default configuration.
@@ -125,6 +141,22 @@ func DefaultConfig() *Config {
 		Log: LogConfig{
 			Level:  "info",
 			Format: "console",
+			Rotation: LogRotationConfig{
+				MaxSizeMB:  100,
+				MaxBackups: 3,
+				MaxAgeDays: 28,
+				Compress:   true,
+			},
+		},
+		Tracing: TracingConfig{
+			Enable:      false,
+			Endpoint:    "localhost:4317",
+			ServiceName: "hybridgrid",
+			SampleRate:  0.1,
+			Insecure:    true,
+			Headers:     make(map[string]string),
+			Timeout:     10 * time.Second,
+			BatchSize:   512,
 		},
 	}
 }
@@ -190,6 +222,19 @@ func setDefaults(v *viper.Viper, cfg *Config) {
 
 	v.SetDefault("log.level", cfg.Log.Level)
 	v.SetDefault("log.format", cfg.Log.Format)
+	v.SetDefault("log.rotation.max_size_mb", cfg.Log.Rotation.MaxSizeMB)
+	v.SetDefault("log.rotation.max_backups", cfg.Log.Rotation.MaxBackups)
+	v.SetDefault("log.rotation.max_age_days", cfg.Log.Rotation.MaxAgeDays)
+	v.SetDefault("log.rotation.compress", cfg.Log.Rotation.Compress)
+
+	v.SetDefault("tracing.enable", cfg.Tracing.Enable)
+	v.SetDefault("tracing.endpoint", cfg.Tracing.Endpoint)
+	v.SetDefault("tracing.service_name", cfg.Tracing.ServiceName)
+	v.SetDefault("tracing.sample_rate", cfg.Tracing.SampleRate)
+	v.SetDefault("tracing.insecure", cfg.Tracing.Insecure)
+	v.SetDefault("tracing.headers", cfg.Tracing.Headers)
+	v.SetDefault("tracing.timeout", cfg.Tracing.Timeout)
+	v.SetDefault("tracing.batch_size", cfg.Tracing.BatchSize)
 }
 
 // WriteExample writes an example config file.
@@ -229,6 +274,11 @@ log:
   level: info           # debug, info, warn, error
   format: console       # console, json
   # file: /var/log/hybridgrid.log
+  rotation:
+    max_size_mb: 100    # Max size in MB before rotation
+    max_backups: 3      # Max number of backup files to keep
+    max_age_days: 28    # Max age in days before deletion
+    compress: true      # Compress rotated logs
 
 # TLS / mTLS configuration (optional)
 tls:
@@ -243,8 +293,225 @@ tls:
 tracing:
   enable: false
   endpoint: "localhost:4317"    # OTLP gRPC endpoint
+  service_name: "hybridgrid"    # Service name in traces
   sample_rate: 0.1              # 0.0 to 1.0 (10% default)
   insecure: true                # Disable TLS for OTLP connection
+  timeout: 10s                  # Timeout for OTLP exports
+  batch_size: 512               # Max spans to batch before export
+  # headers:                      # Additional OTLP headers (optional)
+  #   header_name: header_value
 `
 	return os.WriteFile(path, []byte(example), 0644)
+}
+
+// TracingToLibConfig converts config.TracingConfig to tracing.Config for use with tracing.Init().
+func TracingToLibConfig(tc TracingConfig) tracing.Config {
+	return tracing.Config{
+		Enable:      tc.Enable,
+		Endpoint:    tc.Endpoint,
+		ServiceName: tc.ServiceName,
+		SampleRate:  tc.SampleRate,
+		Insecure:    tc.Insecure,
+		Headers:     tc.Headers,
+		Timeout:     tc.Timeout,
+		BatchSize:   tc.BatchSize,
+	}
+}
+
+// Validate validates all configuration fields and returns the first error found.
+func (c *Config) Validate() error {
+	// Validate coordinator
+	if err := c.Coordinator.Validate(); err != nil {
+		return err
+	}
+
+	// Validate worker
+	if err := c.Worker.Validate(); err != nil {
+		return err
+	}
+
+	// Validate client
+	if err := c.Client.Validate(); err != nil {
+		return err
+	}
+
+	// Validate cache
+	if err := c.Cache.Validate(); err != nil {
+		return err
+	}
+
+	// Validate log
+	if err := c.Log.Validate(); err != nil {
+		return err
+	}
+
+	// Validate TLS
+	if err := c.TLS.Validate(); err != nil {
+		return err
+	}
+
+	// Validate tracing
+	if err := c.Tracing.Validate(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Validate validates the coordinator configuration.
+func (c *CoordinatorConfig) Validate() error {
+	if c.GRPCPort < 1 || c.GRPCPort > 65535 {
+		return fmt.Errorf("config: coordinator.grpc_port must be 1-65535, got %d", c.GRPCPort)
+	}
+
+	if c.HTTPPort < 1 || c.HTTPPort > 65535 {
+		return fmt.Errorf("config: coordinator.http_port must be 1-65535, got %d", c.HTTPPort)
+	}
+
+	if c.GRPCPort == c.HTTPPort {
+		return fmt.Errorf("config: coordinator.grpc_port and coordinator.http_port must be different, got %d for both", c.GRPCPort)
+	}
+
+	return nil
+}
+
+// Validate validates the worker configuration.
+func (c *WorkerConfig) Validate() error {
+	if c.Port < 1 || c.Port > 65535 {
+		return fmt.Errorf("config: worker.port must be 1-65535, got %d", c.Port)
+	}
+
+	if c.MaxParallel < 0 {
+		return fmt.Errorf("config: worker.max_parallel must be >= 0, got %d", c.MaxParallel)
+	}
+
+	if c.Timeout > 0 && c.Timeout < time.Second {
+		return fmt.Errorf("config: worker.timeout must be > 0s, got %v", c.Timeout)
+	}
+
+	if c.HeartbeatSec > 0 && c.HeartbeatSec < 1 {
+		return fmt.Errorf("config: worker.heartbeat_sec must be > 0, got %d", c.HeartbeatSec)
+	}
+
+	return nil
+}
+
+// Validate validates the client configuration.
+func (c *ClientConfig) Validate() error {
+	if c.Timeout > 0 && c.Timeout < time.Second {
+		return fmt.Errorf("config: client.timeout must be > 0s or 0 (disabled), got %v", c.Timeout)
+	}
+
+	return nil
+}
+
+// Validate validates the cache configuration.
+func (c *CacheConfig) Validate() error {
+	if !c.Enable {
+		return nil
+	}
+
+	if c.MaxSize <= 0 {
+		return fmt.Errorf("config: cache.max_size_mb must be > 0 when cache is enabled, got %d", c.MaxSize)
+	}
+
+	if c.TTLHours <= 0 {
+		return fmt.Errorf("config: cache.ttl_hours must be > 0 when cache is enabled, got %d", c.TTLHours)
+	}
+
+	if c.Dir == "" {
+		return errors.New("config: cache.dir must not be empty when cache is enabled")
+	}
+
+	return nil
+}
+
+// Validate validates the log configuration.
+func (c *LogConfig) Validate() error {
+	validLevels := map[string]bool{
+		"debug": true,
+		"info":  true,
+		"warn":  true,
+		"error": true,
+		"fatal": true,
+	}
+
+	if !validLevels[c.Level] {
+		return fmt.Errorf("config: log.level must be one of {debug,info,warn,error,fatal}, got %s", c.Level)
+	}
+
+	validFormats := map[string]bool{
+		"console": true,
+		"json":    true,
+	}
+
+	if !validFormats[c.Format] {
+		return fmt.Errorf("config: log.format must be one of {console,json}, got %s", c.Format)
+	}
+
+	// Validate rotation settings only if File is set
+	if c.File != "" {
+		if err := c.Rotation.Validate(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// Validate validates the log rotation configuration.
+func (c *LogRotationConfig) Validate() error {
+	if c.MaxSizeMB <= 0 {
+		return fmt.Errorf("config: log.rotation.max_size_mb must be > 0, got %d", c.MaxSizeMB)
+	}
+
+	if c.MaxBackups < 0 {
+		return fmt.Errorf("config: log.rotation.max_backups must be >= 0, got %d", c.MaxBackups)
+	}
+
+	if c.MaxAgeDays <= 0 {
+		return fmt.Errorf("config: log.rotation.max_age_days must be > 0, got %d", c.MaxAgeDays)
+	}
+
+	return nil
+}
+
+// Validate validates the TLS configuration.
+func (c *TLSConfig) Validate() error {
+	if !c.Enabled {
+		return nil
+	}
+
+	// InsecureSkipVerify allows TLS without certificates (for testing)
+	if !c.InsecureSkipVerify {
+		if c.CertFile == "" {
+			return errors.New("config: tls.cert_file is required when TLS is enabled")
+		}
+		if c.KeyFile == "" {
+			return errors.New("config: tls.key_file is required when TLS is enabled")
+		}
+	}
+
+	if c.RequireClientCert && c.ClientCA == "" {
+		return errors.New("config: tls.client_ca is required when tls.require_client_cert is true")
+	}
+
+	return nil
+}
+
+// Validate validates the tracing configuration.
+func (c *TracingConfig) Validate() error {
+	if !c.Enable {
+		return nil
+	}
+
+	if c.Endpoint == "" {
+		return errors.New("config: tracing.endpoint is required when tracing is enabled")
+	}
+
+	if c.SampleRate < 0 || c.SampleRate > 1 {
+		return fmt.Errorf("config: tracing.sample_rate must be 0-1, got %f", c.SampleRate)
+	}
+
+	return nil
 }
