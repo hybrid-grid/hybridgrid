@@ -35,9 +35,9 @@ func (w *syncedFileWriter) Close() error {
 }
 
 // SetupFileWriter opens a file for appending and returns it as an io.WriteCloser.
-// If the file doesn't exist, it creates it with mode 0600.
+// If the file doesn't exist, it creates it with mode 0644.
 func SetupFileWriter(filePath string) (io.WriteCloser, error) {
-	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return nil, err
 	}
