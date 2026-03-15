@@ -72,10 +72,19 @@ func SetupLogger(cfg config.LogConfig) (zerolog.Logger, io.Closer, error) {
 		output = zerolog.ConsoleWriter{Out: os.Stderr}
 		closer = noOpCloser{}
 	} else {
-		// File is set: open it
-		fileWriter, err := SetupFileWriter(cfg.File)
-		if err != nil {
-			return zerolog.Logger{}, nil, err
+		// File is set: determine if rotation is configured
+		var fileWriter io.WriteCloser
+		var err error
+
+		// Check if rotation is enabled (any non-zero value in rotation config)
+		if cfg.Rotation.MaxSizeMB > 0 || cfg.Rotation.MaxBackups > 0 || cfg.Rotation.MaxAgeDays > 0 {
+			fileWriter = NewRotatingWriter(cfg.Rotation, cfg.File)
+		} else {
+			// Rotation not configured: use plain file writer
+			fileWriter, err = SetupFileWriter(cfg.File)
+			if err != nil {
+				return zerolog.Logger{}, nil, err
+			}
 		}
 
 		// Check format preference
