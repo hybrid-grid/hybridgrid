@@ -1,0 +1,6 @@
+=== RUN   TestSetupFileWriter_CreatesFile
+--- PASS: TestSetupFileWriter_CreatesFile (0.01s)
+=== RUN   TestSetupFileWriter_AppendsToExisting
+--- PASS: TestSetupFileWriter_AppendsToExisting (0.02s)
+PASS
+ok  	github.com/h3nr1-d14z/hybridgrid/internal/logging	1.234s

@@ -1,0 +1,10 @@
+=== RUN   TestNewRotatingWriter_ConfigPassthrough
+=== RUN   TestNewRotatingWriter_ConfigPassthrough/default_config
+=== RUN   TestNewRotatingWriter_ConfigPassthrough/custom_config
+=== RUN   TestNewRotatingWriter_ConfigPassthrough/minimal_config
+--- PASS: TestNewRotatingWriter_ConfigPassthrough (0.00s)
+    --- PASS: TestNewRotatingWriter_ConfigPassthrough/default_config (0.00s)
+    --- PASS: TestNewRotatingWriter_ConfigPassthrough/custom_config (0.00s)
+    --- PASS: TestNewRotatingWriter_ConfigPassthrough/minimal_config (0.00s)
+PASS
+ok  	github.com/h3nr1-d14z/hybridgrid/internal/logging	0.813s

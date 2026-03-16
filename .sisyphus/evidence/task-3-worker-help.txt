@@ -1,0 +1,22 @@
+Start the worker agent
+
+Usage:
+  hg-worker serve [flags]
+
+Flags:
+      --advertise-address string      Address to advertise to coordinator (default: hostname:port)
+      --config string                 Path to config file
+      --coordinator string            Coordinator address (empty for mDNS auto-discovery)
+      --discovery-timeout duration    mDNS discovery timeout (default 10s)
+  -h, --help                          help for serve
+      --http-port int                 Worker HTTP/metrics port (default 9090)
+      --max-parallel int              Max parallel tasks (0 = auto)
+      --port int                      Worker gRPC port (default 50052)
+      --token string                  Authentication token
+      --tracing-batch-size int        Max spans to batch before export (default 512)
+      --tracing-enable                Enable OpenTelemetry tracing
+      --tracing-endpoint string       OTLP gRPC endpoint (default "localhost:4317")
+      --tracing-insecure              Use insecure connection for tracing (default true)
+      --tracing-sample-rate float     Tracing sample rate (0.0-1.0) (default 0.1)
+      --tracing-service-name string   Service name in traces (default "hybridgrid-worker")
+      --tracing-timeout duration      Timeout for OTLP exports (default 10s)

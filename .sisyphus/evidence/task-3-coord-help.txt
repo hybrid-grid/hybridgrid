@@ -1,0 +1,23 @@
+Start the coordinator server
+
+Usage:
+  hg-coord serve [flags]
+
+Flags:
+      --config string                 Path to config file
+      --grpc-port int                 gRPC server port (default 9000)
+  -h, --help                          help for serve
+      --http-port int                 HTTP/Dashboard port (default 8080)
+      --no-mdns                       Disable mDNS advertisement
+      --tls-ca string                 Path to CA certificate for client verification (mTLS)
+      --tls-cert string               Path to TLS certificate file (PEM format)
+      --tls-key string                Path to TLS private key file (PEM format)
+      --tls-require-client-cert       Require client certificates (mTLS)
+      --token string                  Authentication token
+      --tracing-batch-size int        Max spans to batch before export (default 512)
+      --tracing-enable                Enable OpenTelemetry tracing
+      --tracing-endpoint string       OTLP gRPC endpoint (default "localhost:4317")
+      --tracing-insecure              Use insecure connection for tracing (default true)
+      --tracing-sample-rate float     Tracing sample rate (0.0-1.0) (default 0.1)
+      --tracing-service-name string   Service name in traces (default "hybridgrid-coordinator")
+      --tracing-timeout duration      Timeout for OTLP exports (default 10s)

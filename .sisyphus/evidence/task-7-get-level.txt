@@ -1,0 +1,4 @@
+=== RUN   TestLogLevelHandler_GET
+--- PASS: TestLogLevelHandler_GET (0.00s)
+PASS
+ok  	github.com/h3nr1-d14z/hybridgrid/internal/logging	1.084s

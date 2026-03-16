@@ -1,0 +1,15 @@
+services:
+  coordinator:
+    command: hg-coord serve --grpc-port=9000 --http-port=8080 --tls-cert=/certs/server.crt --tls-key=/certs/server.key --tls-ca=/certs/ca.crt --tls-require-client-cert
+    volumes:
+      - ./certs/:/certs:ro
+
+  worker-1:
+    command: hg-worker serve --coordinator=coordinator:9000 --port=50052 --http-port=9090 --advertise-address=worker-1:50052 --max-parallel=4 --tls-cert=/certs/server.crt --tls-key=/certs/server.key --tls-ca=/certs/ca.crt --tls-require-client-cert
+    volumes:
+      - ./certs/:/certs:ro
+
+  worker-2:
+    command: hg-worker serve --coordinator=coordinator:9000 --port=50052 --http-port=9090 --advertise-address=worker-2:50052 --max-parallel=4 --tls-cert=/certs/server.crt --tls-key=/certs/server.key --tls-ca=/certs/ca.crt --tls-require-client-cert
+    volumes:
+      - ./certs/:/certs:ro

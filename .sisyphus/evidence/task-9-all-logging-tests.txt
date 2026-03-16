@@ -1,0 +1,73 @@
+=== RUN   TestLogLevelHandler_GET
+--- PASS: TestLogLevelHandler_GET (0.00s)
+=== RUN   TestLogLevelHandler_PUT_ValidLevel
+{"level":"info","from":"info","to":"debug","time":"2026-03-15T14:58:10+07:00","message":"Log level changed"}
+--- PASS: TestLogLevelHandler_PUT_ValidLevel (0.00s)
+=== RUN   TestLogLevelHandler_POST_ValidLevel
+--- PASS: TestLogLevelHandler_POST_ValidLevel (0.00s)
+=== RUN   TestLogLevelHandler_InvalidLevel
+--- PASS: TestLogLevelHandler_InvalidLevel (0.00s)
+=== RUN   TestLogLevelHandler_InvalidJSON
+--- PASS: TestLogLevelHandler_InvalidJSON (0.00s)
+=== RUN   TestLogLevelHandler_AllValidLevels
+=== RUN   TestLogLevelHandler_AllValidLevels/trace
+{"level":"info","from":"info","to":"trace","time":"2026-03-15T14:58:10+07:00","message":"Log level changed"}
+=== RUN   TestLogLevelHandler_AllValidLevels/debug
+{"level":"info","from":"trace","to":"debug","time":"2026-03-15T14:58:10+07:00","message":"Log level changed"}
+=== RUN   TestLogLevelHandler_AllValidLevels/info
+{"level":"info","from":"debug","to":"info","time":"2026-03-15T14:58:10+07:00","message":"Log level changed"}
+=== RUN   TestLogLevelHandler_AllValidLevels/warn
+=== RUN   TestLogLevelHandler_AllValidLevels/error
+=== RUN   TestLogLevelHandler_AllValidLevels/fatal
+=== RUN   TestLogLevelHandler_AllValidLevels/panic
+--- PASS: TestLogLevelHandler_AllValidLevels (0.00s)
+    --- PASS: TestLogLevelHandler_AllValidLevels/trace (0.00s)
+    --- PASS: TestLogLevelHandler_AllValidLevels/debug (0.00s)
+    --- PASS: TestLogLevelHandler_AllValidLevels/info (0.00s)
+    --- PASS: TestLogLevelHandler_AllValidLevels/warn (0.00s)
+    --- PASS: TestLogLevelHandler_AllValidLevels/error (0.00s)
+    --- PASS: TestLogLevelHandler_AllValidLevels/fatal (0.00s)
+    --- PASS: TestLogLevelHandler_AllValidLevels/panic (0.00s)
+=== RUN   TestLogLevelHandler_MethodNotAllowed
+--- PASS: TestLogLevelHandler_MethodNotAllowed (0.00s)
+=== RUN   TestLogLevelHandler_ContentTypeHeader
+--- PASS: TestLogLevelHandler_ContentTypeHeader (0.00s)
+=== RUN   TestNewRotatingWriter_CreatesFile
+--- PASS: TestNewRotatingWriter_CreatesFile (0.00s)
+=== RUN   TestNewRotatingWriter_WritesSuccessfully
+--- PASS: TestNewRotatingWriter_WritesSuccessfully (0.00s)
+=== RUN   TestNewRotatingWriter_ConfigPassthrough
+=== RUN   TestNewRotatingWriter_ConfigPassthrough/default_config
+=== RUN   TestNewRotatingWriter_ConfigPassthrough/custom_config
+=== RUN   TestNewRotatingWriter_ConfigPassthrough/minimal_config
+--- PASS: TestNewRotatingWriter_ConfigPassthrough (0.00s)
+    --- PASS: TestNewRotatingWriter_ConfigPassthrough/default_config (0.00s)
+    --- PASS: TestNewRotatingWriter_ConfigPassthrough/custom_config (0.00s)
+    --- PASS: TestNewRotatingWriter_ConfigPassthrough/minimal_config (0.00s)
+=== RUN   TestNewRotatingWriter_ImplementsWriteCloser
+--- PASS: TestNewRotatingWriter_ImplementsWriteCloser (0.00s)
+=== RUN   TestSetupFileWriter_CreatesFile
+--- PASS: TestSetupFileWriter_CreatesFile (0.01s)
+=== RUN   TestSetupFileWriter_AppendsToExisting
+--- PASS: TestSetupFileWriter_AppendsToExisting (0.01s)
+=== RUN   TestSetupLogger_NoFile_DefaultsToConsole
+--- PASS: TestSetupLogger_NoFile_DefaultsToConsole (0.00s)
+=== RUN   TestSetupLogger_WithFile_WritesJSON
+--- PASS: TestSetupLogger_WithFile_WritesJSON (0.01s)
+=== RUN   TestSetupLogger_LevelParsing
+=== RUN   TestSetupLogger_LevelParsing/debug
+=== RUN   TestSetupLogger_LevelParsing/info
+=== RUN   TestSetupLogger_LevelParsing/warn
+=== RUN   TestSetupLogger_LevelParsing/error
+=== RUN   TestSetupLogger_LevelParsing/invalid_defaults_to_info
+--- PASS: TestSetupLogger_LevelParsing (0.00s)
+    --- PASS: TestSetupLogger_LevelParsing/debug (0.00s)
+    --- PASS: TestSetupLogger_LevelParsing/info (0.00s)
+    --- PASS: TestSetupLogger_LevelParsing/warn (0.00s)
+    --- PASS: TestSetupLogger_LevelParsing/error (0.00s)
+    --- PASS: TestSetupLogger_LevelParsing/invalid_defaults_to_info (0.00s)
+=== RUN   TestSetupLogger_MultiOutput
+[90m2:58PM[0m [32mINF[0m [1mtest message[0m [36mtest=[0mmultioutput
+--- PASS: TestSetupLogger_MultiOutput (0.01s)
+PASS
+ok  	github.com/h3nr1-d14z/hybridgrid/internal/logging	1.071s

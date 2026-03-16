@@ -1,0 +1,4 @@
+=== RUN   TestLogLevelHandler_InvalidLevel
+--- PASS: TestLogLevelHandler_InvalidLevel (0.00s)
+PASS
+ok  	github.com/h3nr1-d14z/hybridgrid/internal/logging	0.579s

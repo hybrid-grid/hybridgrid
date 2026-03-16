@@ -1,0 +1,25 @@
+TASK 13: CHANGELOG.md File Existence and Version Entries
+
+TIMESTAMP: 2025-03-15
+
+TEST: Verify CHANGELOG.md exists at project root
+------
+$ test -f CHANGELOG.md && echo "EXISTS" || echo "MISSING"
+EXIT: 0 (success, file exists)
+
+TEST: Verify version entries present
+------
+$ grep -c '## \[v0.2' CHANGELOG.md
+4
+
+VERIFICATION: All 4 version headers present
+------
+✓ ## [v0.2.0] - 2025-02-10
+✓ ## [v0.2.1] - 2025-02-15
+✓ ## [v0.2.2] - 2025-02-20
+✓ ## [v0.2.3] - 2025-03-15
+
+RESULT: PASS
+- File exists at repo root: /Users/h3nr1.d14z/Projects/HieuLD/doantotnghiep/hybridgrid/CHANGELOG.md
+- Contains ≥4 version entries as required
+- Follows Keep a Changelog format

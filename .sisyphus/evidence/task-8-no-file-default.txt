@@ -1,0 +1,4 @@
+=== RUN   TestSetupLogger_NoFile_DefaultsToConsole
+--- PASS: TestSetupLogger_NoFile_DefaultsToConsole (0.00s)
+PASS
+ok  	github.com/h3nr1-d14z/hybridgrid/internal/logging	0.769s

@@ -1,0 +1,2 @@
+ok  	github.com/h3nr1-d14z/hybridgrid/internal/cli/build	3.600s
+ok  	github.com/h3nr1-d14z/hybridgrid/internal/cli/output	2.228s

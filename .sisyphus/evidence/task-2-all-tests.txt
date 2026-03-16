@@ -1,0 +1,169 @@
+=== RUN   TestDefaultConfig
+--- PASS: TestDefaultConfig (0.00s)
+=== RUN   TestLoad_NoConfigFile
+--- PASS: TestLoad_NoConfigFile (0.00s)
+=== RUN   TestLoad_WithConfigFile
+--- PASS: TestLoad_WithConfigFile (0.00s)
+=== RUN   TestLoad_InvalidConfigFile
+--- PASS: TestLoad_InvalidConfigFile (0.00s)
+=== RUN   TestLoad_EnvOverride
+    config_test.go:173: Config loaded with env prefix HG
+    config_test.go:174: GRPCPort: 9000
+--- PASS: TestLoad_EnvOverride (0.00s)
+=== RUN   TestWriteExample
+    config_test.go:206: Example config written (1961 bytes)
+--- PASS: TestWriteExample (0.00s)
+=== RUN   TestConfig_WorkDir
+--- PASS: TestConfig_WorkDir (0.00s)
+=== RUN   TestConfig_CacheDir
+--- PASS: TestConfig_CacheDir (0.00s)
+=== RUN   TestValidate_DefaultConfigIsValid
+--- PASS: TestValidate_DefaultConfigIsValid (0.00s)
+=== RUN   TestValidate_CoordinatorPortRange
+=== RUN   TestValidate_CoordinatorPortRange/valid_ports
+=== RUN   TestValidate_CoordinatorPortRange/grpc_port_1
+=== RUN   TestValidate_CoordinatorPortRange/grpc_port_65535
+=== RUN   TestValidate_CoordinatorPortRange/grpc_port_0
+=== RUN   TestValidate_CoordinatorPortRange/grpc_port_65536
+=== RUN   TestValidate_CoordinatorPortRange/grpc_port_negative
+=== RUN   TestValidate_CoordinatorPortRange/http_port_0
+=== RUN   TestValidate_CoordinatorPortRange/http_port_65536
+=== RUN   TestValidate_CoordinatorPortRange/ports_equal
+--- PASS: TestValidate_CoordinatorPortRange (0.00s)
+    --- PASS: TestValidate_CoordinatorPortRange/valid_ports (0.00s)
+    --- PASS: TestValidate_CoordinatorPortRange/grpc_port_1 (0.00s)
+    --- PASS: TestValidate_CoordinatorPortRange/grpc_port_65535 (0.00s)
+    --- PASS: TestValidate_CoordinatorPortRange/grpc_port_0 (0.00s)
+    --- PASS: TestValidate_CoordinatorPortRange/grpc_port_65536 (0.00s)
+    --- PASS: TestValidate_CoordinatorPortRange/grpc_port_negative (0.00s)
+    --- PASS: TestValidate_CoordinatorPortRange/http_port_0 (0.00s)
+    --- PASS: TestValidate_CoordinatorPortRange/http_port_65536 (0.00s)
+    --- PASS: TestValidate_CoordinatorPortRange/ports_equal (0.00s)
+=== RUN   TestValidate_WorkerPort
+=== RUN   TestValidate_WorkerPort/valid_port_9001
+=== RUN   TestValidate_WorkerPort/port_1
+=== RUN   TestValidate_WorkerPort/port_65535
+=== RUN   TestValidate_WorkerPort/port_0
+=== RUN   TestValidate_WorkerPort/port_65536
+=== RUN   TestValidate_WorkerPort/port_negative
+--- PASS: TestValidate_WorkerPort (0.00s)
+    --- PASS: TestValidate_WorkerPort/valid_port_9001 (0.00s)
+    --- PASS: TestValidate_WorkerPort/port_1 (0.00s)
+    --- PASS: TestValidate_WorkerPort/port_65535 (0.00s)
+    --- PASS: TestValidate_WorkerPort/port_0 (0.00s)
+    --- PASS: TestValidate_WorkerPort/port_65536 (0.00s)
+    --- PASS: TestValidate_WorkerPort/port_negative (0.00s)
+=== RUN   TestValidate_WorkerMaxParallel
+=== RUN   TestValidate_WorkerMaxParallel/zero_(auto)
+=== RUN   TestValidate_WorkerMaxParallel/positive
+=== RUN   TestValidate_WorkerMaxParallel/negative
+--- PASS: TestValidate_WorkerMaxParallel (0.00s)
+    --- PASS: TestValidate_WorkerMaxParallel/zero_(auto) (0.00s)
+    --- PASS: TestValidate_WorkerMaxParallel/positive (0.00s)
+    --- PASS: TestValidate_WorkerMaxParallel/negative (0.00s)
+=== RUN   TestValidate_CacheConfig
+=== RUN   TestValidate_CacheConfig/cache_disabled
+=== RUN   TestValidate_CacheConfig/cache_valid
+=== RUN   TestValidate_CacheConfig/cache_max_size_0
+=== RUN   TestValidate_CacheConfig/cache_ttl_0
+=== RUN   TestValidate_CacheConfig/cache_dir_empty
+--- PASS: TestValidate_CacheConfig (0.00s)
+    --- PASS: TestValidate_CacheConfig/cache_disabled (0.00s)
+    --- PASS: TestValidate_CacheConfig/cache_valid (0.00s)
+    --- PASS: TestValidate_CacheConfig/cache_max_size_0 (0.00s)
+    --- PASS: TestValidate_CacheConfig/cache_ttl_0 (0.00s)
+    --- PASS: TestValidate_CacheConfig/cache_dir_empty (0.00s)
+=== RUN   TestValidate_LogLevel
+=== RUN   TestValidate_LogLevel/debug
+=== RUN   TestValidate_LogLevel/info
+=== RUN   TestValidate_LogLevel/warn
+=== RUN   TestValidate_LogLevel/error
+=== RUN   TestValidate_LogLevel/fatal
+=== RUN   TestValidate_LogLevel/trace_(invalid)
+=== RUN   TestValidate_LogLevel/invalid
+--- PASS: TestValidate_LogLevel (0.00s)
+    --- PASS: TestValidate_LogLevel/debug (0.00s)
+    --- PASS: TestValidate_LogLevel/info (0.00s)
+    --- PASS: TestValidate_LogLevel/warn (0.00s)
+    --- PASS: TestValidate_LogLevel/error (0.00s)
+    --- PASS: TestValidate_LogLevel/fatal (0.00s)
+    --- PASS: TestValidate_LogLevel/trace_(invalid) (0.00s)
+    --- PASS: TestValidate_LogLevel/invalid (0.00s)
+=== RUN   TestValidate_LogFormat
+=== RUN   TestValidate_LogFormat/console
+=== RUN   TestValidate_LogFormat/json
+=== RUN   TestValidate_LogFormat/text_(invalid)
+=== RUN   TestValidate_LogFormat/invalid
+--- PASS: TestValidate_LogFormat (0.00s)
+    --- PASS: TestValidate_LogFormat/console (0.00s)
+    --- PASS: TestValidate_LogFormat/json (0.00s)
+    --- PASS: TestValidate_LogFormat/text_(invalid) (0.00s)
+    --- PASS: TestValidate_LogFormat/invalid (0.00s)
+=== RUN   TestValidate_LogRotation
+=== RUN   TestValidate_LogRotation/no_file,_no_rotation_check
+=== RUN   TestValidate_LogRotation/valid_rotation
+=== RUN   TestValidate_LogRotation/invalid_max_size_mb
+=== RUN   TestValidate_LogRotation/negative_max_backups
+=== RUN   TestValidate_LogRotation/invalid_max_age_days
+--- PASS: TestValidate_LogRotation (0.00s)
+    --- PASS: TestValidate_LogRotation/no_file,_no_rotation_check (0.00s)
+    --- PASS: TestValidate_LogRotation/valid_rotation (0.00s)
+    --- PASS: TestValidate_LogRotation/invalid_max_size_mb (0.00s)
+    --- PASS: TestValidate_LogRotation/negative_max_backups (0.00s)
+    --- PASS: TestValidate_LogRotation/invalid_max_age_days (0.00s)
+=== RUN   TestValidate_TLSConfig
+=== RUN   TestValidate_TLSConfig/tls_disabled
+=== RUN   TestValidate_TLSConfig/tls_enabled_with_cert/key
+=== RUN   TestValidate_TLSConfig/tls_enabled_no_cert
+=== RUN   TestValidate_TLSConfig/tls_enabled_no_key
+=== RUN   TestValidate_TLSConfig/tls_insecure_skip
+=== RUN   TestValidate_TLSConfig/mtls_no_client_ca
+=== RUN   TestValidate_TLSConfig/mtls_valid
+--- PASS: TestValidate_TLSConfig (0.00s)
+    --- PASS: TestValidate_TLSConfig/tls_disabled (0.00s)
+    --- PASS: TestValidate_TLSConfig/tls_enabled_with_cert/key (0.00s)
+    --- PASS: TestValidate_TLSConfig/tls_enabled_no_cert (0.00s)
+    --- PASS: TestValidate_TLSConfig/tls_enabled_no_key (0.00s)
+    --- PASS: TestValidate_TLSConfig/tls_insecure_skip (0.00s)
+    --- PASS: TestValidate_TLSConfig/mtls_no_client_ca (0.00s)
+    --- PASS: TestValidate_TLSConfig/mtls_valid (0.00s)
+=== RUN   TestValidate_TracingConfig
+=== RUN   TestValidate_TracingConfig/tracing_disabled
+=== RUN   TestValidate_TracingConfig/tracing_valid
+=== RUN   TestValidate_TracingConfig/tracing_no_endpoint
+=== RUN   TestValidate_TracingConfig/tracing_sample_rate_low
+=== RUN   TestValidate_TracingConfig/tracing_sample_rate_high
+=== RUN   TestValidate_TracingConfig/tracing_sample_rate_0
+=== RUN   TestValidate_TracingConfig/tracing_sample_rate_1
+--- PASS: TestValidate_TracingConfig (0.00s)
+    --- PASS: TestValidate_TracingConfig/tracing_disabled (0.00s)
+    --- PASS: TestValidate_TracingConfig/tracing_valid (0.00s)
+    --- PASS: TestValidate_TracingConfig/tracing_no_endpoint (0.00s)
+    --- PASS: TestValidate_TracingConfig/tracing_sample_rate_low (0.00s)
+    --- PASS: TestValidate_TracingConfig/tracing_sample_rate_high (0.00s)
+    --- PASS: TestValidate_TracingConfig/tracing_sample_rate_0 (0.00s)
+    --- PASS: TestValidate_TracingConfig/tracing_sample_rate_1 (0.00s)
+=== RUN   TestValidate_ClientTimeout
+=== RUN   TestValidate_ClientTimeout/valid_timeout_30s
+=== RUN   TestValidate_ClientTimeout/valid_timeout_disabled_(0)
+=== RUN   TestValidate_ClientTimeout/invalid_timeout_500ms
+=== RUN   TestValidate_ClientTimeout/valid_timeout_1s
+--- PASS: TestValidate_ClientTimeout (0.00s)
+    --- PASS: TestValidate_ClientTimeout/valid_timeout_30s (0.00s)
+    --- PASS: TestValidate_ClientTimeout/valid_timeout_disabled_(0) (0.00s)
+    --- PASS: TestValidate_ClientTimeout/invalid_timeout_500ms (0.00s)
+    --- PASS: TestValidate_ClientTimeout/valid_timeout_1s (0.00s)
+=== RUN   TestValidate_WorkerTimeout
+=== RUN   TestValidate_WorkerTimeout/valid_timeout_5m
+=== RUN   TestValidate_WorkerTimeout/valid_timeout_disabled_(0)
+=== RUN   TestValidate_WorkerTimeout/invalid_timeout_500ms
+=== RUN   TestValidate_WorkerTimeout/valid_timeout_1s
+--- PASS: TestValidate_WorkerTimeout (0.00s)
+    --- PASS: TestValidate_WorkerTimeout/valid_timeout_5m (0.00s)
+    --- PASS: TestValidate_WorkerTimeout/valid_timeout_disabled_(0) (0.00s)
+    --- PASS: TestValidate_WorkerTimeout/invalid_timeout_500ms (0.00s)
+    --- PASS: TestValidate_WorkerTimeout/valid_timeout_1s (0.00s)
+=== RUN   TestValidate_FirstErrorOnly
+--- PASS: TestValidate_FirstErrorOnly (0.00s)
+PASS
+ok  	github.com/h3nr1-d14z/hybridgrid/internal/config	(cached)

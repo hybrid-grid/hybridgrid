@@ -1,0 +1,30 @@
+=== TASK 1: TRACING CONFIG PARITY ===
+Date: 2026-03-15
+
+REQUIREMENT: config.TracingConfig must have exactly 8 fields matching tracing.Config
+
+TARGET (internal/observability/tracing/config.go):
+1. Enable bool
+2. Endpoint string
+3. ServiceName string
+4. SampleRate float64
+5. Insecure bool
+6. Headers map[string]string
+7. Timeout time.Duration
+8. BatchSize int
+
+ACTUAL (internal/config/config.go):
+1. Enable bool ✅
+2. Endpoint string ✅
+3. ServiceName string ✅
+4. SampleRate float64 ✅
+5. Insecure bool ✅
+6. Headers map[string]string ✅
+7. Timeout time.Duration ✅
+8. BatchSize int ✅
+
+FIELD COUNT: 8/8 ✅
+FIELD NAMES: ALL MATCH ✅
+MAPSTRUCTURE TAGS: ALL PRESENT ✅
+
+STATUS: ✅ PARITY ACHIEVED

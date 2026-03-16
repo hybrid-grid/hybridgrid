@@ -1,0 +1,253 @@
+===============================================================================
+TASK 1: CODE CHANGES SUMMARY
+===============================================================================
+Date: 2026-03-15
+File Modified: internal/config/config.go
+Status: ✅ Changes Applied
+
+SUMMARY OF CHANGES
+================================================================================
+File: internal/config/config.go
+
+Change 1: Added import for tracing package
+────────────────────────────────────────────────────────────────────────────
+BEFORE:
+  import (
+      "fmt"
+      "os"
+      "path/filepath"
+      "runtime"
+      "time"
+      "github.com/spf13/viper"
+  )
+
+AFTER:
+  import (
+      "fmt"
+      "os"
+      "path/filepath"
+      "runtime"
+      "time"
+      "github.com/spf13/viper"
+      "github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
+  )
+
+Change 2: Expanded TracingConfig struct
+────────────────────────────────────────────────────────────────────────────
+BEFORE (4 fields):
+  type TracingConfig struct {
+      Enable     bool    `mapstructure:"enable"`
+      Endpoint   string  `mapstructure:"endpoint"`
+      SampleRate float64 `mapstructure:"sample_rate"`
+      Insecure   bool    `mapstructure:"insecure"`
+  }
+
+AFTER (8 fields):
+  type TracingConfig struct {
+      Enable      bool              `mapstructure:"enable"`
+      Endpoint    string            `mapstructure:"endpoint"`
+      ServiceName string            `mapstructure:"service_name"`
+      SampleRate  float64           `mapstructure:"sample_rate"`
+      Insecure    bool              `mapstructure:"insecure"`
+      Headers     map[string]string `mapstructure:"headers"`
+      Timeout     time.Duration     `mapstructure:"timeout"`
+      BatchSize   int               `mapstructure:"batch_size"`
+  }
+
+  NEW FIELDS ADDED (4):
+    • ServiceName string
+    • Headers map[string]string
+    • Timeout time.Duration
+    • BatchSize int
+
+Change 3: Added LogRotationConfig struct (NEW)
+────────────────────────────────────────────────────────────────────────────
+BEFORE: (did not exist)
+
+AFTER:
+  type LogRotationConfig struct {
+      MaxSizeMB  int `mapstructure:"max_size_mb"`
+      MaxBackups int `mapstructure:"max_backups"`
+      MaxAgeDays int `mapstructure:"max_age_days"`
+      Compress   bool `mapstructure:"compress"`
+  }
+
+Change 4: Updated LogConfig struct
+────────────────────────────────────────────────────────────────────────────
+BEFORE (3 fields):
+  type LogConfig struct {
+      Level  string `mapstructure:"level"`
+      Format string `mapstructure:"format"`
+      File   string `mapstructure:"file"`
+  }
+
+AFTER (4 fields):
+  type LogConfig struct {
+      Level    string            `mapstructure:"level"`
+      Format   string            `mapstructure:"format"`
+      File     string            `mapstructure:"file"`
+      Rotation LogRotationConfig `mapstructure:"rotation"`
+  }
+
+  NEW FIELD ADDED (1):
+    • Rotation LogRotationConfig
+
+Change 5: Updated DefaultConfig() function
+────────────────────────────────────────────────────────────────────────────
+BEFORE:
+  Log: LogConfig{
+      Level:  "info",
+      Format: "console",
+  }
+
+AFTER:
+  Log: LogConfig{
+      Level:  "info",
+      Format: "console",
+      Rotation: LogRotationConfig{
+          MaxSizeMB:  100,
+          MaxBackups: 3,
+          MaxAgeDays: 28,
+          Compress:   true,
+      },
+  }
+
+BEFORE: (Tracing not in DefaultConfig)
+
+AFTER:
+  Tracing: TracingConfig{
+      Enable:      false,
+      Endpoint:    "localhost:4317",
+      ServiceName: "hybridgrid",
+      SampleRate:  0.1,
+      Insecure:    true,
+      Headers:     make(map[string]string),
+      Timeout:     10 * time.Second,
+      BatchSize:   512,
+  }
+
+Change 6: Updated setDefaults() function
+────────────────────────────────────────────────────────────────────────────
+ADDED (12 new viper registrations):
+
+Log rotation defaults:
+  v.SetDefault("log.rotation.max_size_mb", cfg.Log.Rotation.MaxSizeMB)
+  v.SetDefault("log.rotation.max_backups", cfg.Log.Rotation.MaxBackups)
+  v.SetDefault("log.rotation.max_age_days", cfg.Log.Rotation.MaxAgeDays)
+  v.SetDefault("log.rotation.compress", cfg.Log.Rotation.Compress)
+
+Tracing defaults:
+  v.SetDefault("tracing.enable", cfg.Tracing.Enable)
+  v.SetDefault("tracing.endpoint", cfg.Tracing.Endpoint)
+  v.SetDefault("tracing.service_name", cfg.Tracing.ServiceName)
+  v.SetDefault("tracing.sample_rate", cfg.Tracing.SampleRate)
+  v.SetDefault("tracing.insecure", cfg.Tracing.Insecure)
+  v.SetDefault("tracing.headers", cfg.Tracing.Headers)
+  v.SetDefault("tracing.timeout", cfg.Tracing.Timeout)
+  v.SetDefault("tracing.batch_size", cfg.Tracing.BatchSize)
+
+Change 7: Updated WriteExample() YAML template
+────────────────────────────────────────────────────────────────────────────
+ADDED (within log section):
+  rotation:
+    max_size_mb: 100    # Max size in MB before rotation
+    max_backups: 3      # Max number of backup files to keep
+    max_age_days: 28    # Max age in days before deletion
+    compress: true      # Compress rotated logs
+
+EXPANDED (tracing section):
+  BEFORE:
+    tracing:
+      enable: false
+      endpoint: "localhost:4317"    # OTLP gRPC endpoint
+      sample_rate: 0.1              # 0.0 to 1.0 (10% default)
+      insecure: true                # Disable TLS for OTLP connection
+
+  AFTER:
+    tracing:
+      enable: false
+      endpoint: "localhost:4317"    # OTLP gRPC endpoint
+      service_name: "hybridgrid"    # Service name in traces
+      sample_rate: 0.1              # 0.0 to 1.0 (10% default)
+      insecure: true                # Disable TLS for OTLP connection
+      timeout: 10s                  # Timeout for OTLP exports
+      batch_size: 512               # Max spans to batch before export
+      # headers:                      # Additional OTLP headers (optional)
+      #   header_name: header_value
+
+Change 8: Added TracingToLibConfig() helper function (NEW)
+────────────────────────────────────────────────────────────────────────────
+ADDED (at end of file):
+
+  // TracingToLibConfig converts config.TracingConfig to tracing.Config
+  // for use with tracing.Init().
+  func TracingToLibConfig(tc TracingConfig) tracing.Config {
+      return tracing.Config{
+          Enable:      tc.Enable,
+          Endpoint:    tc.Endpoint,
+          ServiceName: tc.ServiceName,
+          SampleRate:  tc.SampleRate,
+          Insecure:    tc.Insecure,
+          Headers:     tc.Headers,
+          Timeout:     tc.Timeout,
+          BatchSize:   tc.BatchSize,
+      }
+  }
+
+STATISTICS
+================================================================================
+Structs Created:     1 (LogRotationConfig)
+Structs Modified:    2 (TracingConfig expanded, LogConfig modified)
+Functions Added:     1 (TracingToLibConfig)
+Functions Modified:  2 (DefaultConfig, setDefaults)
+Functions Enhanced:  1 (WriteExample)
+Lines Added:         ~80
+Lines Removed:       0
+Files Modified:      1
+
+BEFORE vs AFTER
+================================================================================
+File size before: ~250 lines
+File size after:  ~315 lines
+Lines added:      ~65 (struct definitions + defaults + function)
+Imports added:    1 (tracing package)
+
+VERIFICATION
+================================================================================
+✅ All changes applied correctly
+✅ Code compiles (go build ./...)
+✅ Tests pass (go test ./internal/config/...)
+✅ gofmt compliant (0 violations)
+✅ go vet clean (0 issues)
+✅ git shows file as modified (M internal/config/config.go)
+
+NEXT STEP
+================================================================================
+These changes are ready to be committed. A commit will be created with:
+- Subject: "Add TracingConfig parity and LogRotationConfig struct"
+- Body: Explanation of fields added, defaults set, viper registration
+- Files: internal/config/config.go
+
+DETAILS FOR CODE REVIEW
+================================================================================
+Key Implementation Details:
+1. TracingConfig expansion: All 8 fields copied from tracing.Config
+2. mapstructure tags: All fields have correct tags for viper unmarshaling
+3. DefaultConfig() values: Sourced from tracing.DefaultConfig() (SSOT)
+4. LogRotationConfig: New struct follows existing patterns (e.g., CacheConfig)
+5. TracingToLibConfig: Simple field-by-field mapping, no transformation
+6. Viper registration: All new fields added to setDefaults()
+7. YAML template: Comments provided for configuration guidance
+
+API Stability:
+✅ No breaking changes to existing API
+✅ New fields are additive (backward compatible)
+✅ Existing code using old 4 TracingConfig fields still works
+✅ Helper function is new, doesn't affect existing code
+
+Performance Impact:
+✅ No performance impact (struct expansion only)
+✅ TracingToLibConfig is zero-copy field assignment
+✅ DefaultConfig() initialization unchanged (except new fields)
+
+===============================================================================

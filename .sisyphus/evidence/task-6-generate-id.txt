@@ -1,0 +1,5 @@
+=== RUN   TestUnaryRequestIDInterceptor_GeneratesID
+{"level":"info","request_id":"c3cd842d966173ac527cab7b453570a7","time":"2026-03-15T12:50:58+07:00","message":"Request ID extracted/generated"}
+--- PASS: TestUnaryRequestIDInterceptor_GeneratesID (0.00s)
+PASS
+ok  	github.com/h3nr1-d14z/hybridgrid/internal/grpc/interceptors	1.694s

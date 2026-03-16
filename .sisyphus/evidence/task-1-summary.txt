@@ -1,0 +1,82 @@
+=== TASK 1: COMPLETE SUMMARY ===
+Date: 2026-03-15
+Status: ✅ DELIVERED
+
+OBJECTIVE:
+Expand config.TracingConfig to match tracing.Config (8 fields) + add LogRotationConfig struct
+
+DELIVERABLES:
+✅ config.TracingConfig expanded from 4 → 8 fields
+   - Preserved: Enable, Endpoint, SampleRate, Insecure
+   - Added: ServiceName, Headers, Timeout, BatchSize
+
+✅ LogRotationConfig struct created with 4 fields
+   - MaxSizeMB (int), MaxBackups (int), MaxAgeDays (int), Compress (bool)
+
+✅ LogConfig.Rotation field added
+   - Type: LogRotationConfig
+   - mapstructure tag: "rotation"
+
+✅ DefaultConfig() updated
+   - Tracing: ServiceName="hybridgrid", SampleRate=0.1, Insecure=true, Timeout=10s, BatchSize=512
+   - Rotation: MaxSizeMB=100, MaxBackups=3, MaxAgeDays=28, Compress=true
+
+✅ setDefaults() updated
+   - Registered 8 tracing fields with viper
+   - Registered 4 rotation fields with viper
+   - Total new registrations: 12
+
+✅ WriteExample() updated
+   - Added rotation section under log (4 fields as comments)
+   - Added expanded tracing section (7 fields including new ones)
+
+✅ TracingToLibConfig() helper function added
+   - Signature: TracingToLibConfig(tc TracingConfig) tracing.Config
+   - Maps all 8 fields correctly for use with tracing.Init()
+
+VERIFICATION:
+✅ go build ./... → EXIT 0 (all packages compile)
+✅ Field count: 8/8 (matches tracing.Config exactly)
+✅ Field names: ALL MATCH (Enable, Endpoint, ServiceName, SampleRate, Insecure, Headers, Timeout, BatchSize)
+✅ mapstructure tags: ALL PRESENT
+✅ gofmt: COMPLIANT (0 violations)
+✅ go vet: CLEAN (0 issues)
+✅ go doc: Shows correct types + documentation
+
+FILES MODIFIED:
+- internal/config/config.go (single file)
+  - Lines changed: ~80 (added structs, updated functions, new helper)
+
+UNBLOCKED TASKS:
+- Task 2 (Config validation) - can now call Validate() on expanded structs
+- Task 3 (OTel wiring) - config has correct shape for tracing.Init()
+- Task 4 (hg-worker wiring) - can pass converted config to tracing.Init()
+- Task 9 (CLI flags) - all config fields available for flag binding
+
+PATTERN ESTABLISHED:
+Following internal/security/tls/config.go pattern:
+1. Config struct mirrors library struct (shapes align)
+2. Uses mapstructure tags for viper unmarshaling
+3. Helper function converts config → library type
+4. Defaults sourced from library DefaultConfig() (single source of truth)
+
+NOTES:
+- No config file loading added (deferred per plan)
+- No validation added (Task 2 responsibility)
+- No CLI wiring added (Task 9 responsibility)
+- Import added: internal/observability/tracing (used by TracingToLibConfig)
+
+QA EXECUTED:
+1. Field parity check: config.TracingConfig vs tracing.Config → 100% match
+2. Default values check: All 8+4 fields have correct defaults
+3. Build verification: go build ./... succeeds
+4. Format check: gofmt compliant, go vet clean
+5. Documentation: go doc shows correct types + signatures
+
+EVIDENCE SAVED:
+- .sisyphus/evidence/task-1-build-success.txt
+- .sisyphus/evidence/task-1-tracing-config-parity.txt
+- .sisyphus/evidence/task-1-default-config-test.txt
+- .sisyphus/notepads/v023-foundation/learnings.md (appended)
+
+STATUS: ✅ COMPLETE - Ready for Task 2

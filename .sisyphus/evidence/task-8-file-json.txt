@@ -1,0 +1,4 @@
+=== RUN   TestSetupLogger_WithFile_WritesJSON
+--- PASS: TestSetupLogger_WithFile_WritesJSON (0.01s)
+PASS
+ok  	github.com/h3nr1-d14z/hybridgrid/internal/logging	0.611s

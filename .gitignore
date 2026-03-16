@@ -48,6 +48,11 @@ temp/
 dist/
 /build/
 
+# Test/E2E certificates (generated, not source-controlled)
+test/e2e/certs/
 
 #Ignore vscode AI rules
 .github/instructions/codacy.instructions.md
+
+# E2E generated TLS assets
+test/e2e/certs/

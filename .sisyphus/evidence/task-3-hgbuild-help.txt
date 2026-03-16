@@ -1,0 +1,47 @@
+hgbuild is a CLI client for the Hybrid-Grid Build system.
+It intercepts compiler commands and distributes them to remote workers.
+
+Quick start:
+  hgbuild make -j8            Wrap make with distributed compilation
+  hgbuild cc -c main.c        Compile C file (drop-in gcc replacement)
+  hgbuild c++ -c main.cpp     Compile C++ file (drop-in g++ replacement)
+  hgbuild status              Check coordinator status
+  hgbuild workers             List available workers
+
+Environment:
+  HG_COORDINATOR    Coordinator address (default: auto-discover via mDNS)
+  HG_CC             C compiler to use (default: gcc)
+  HG_CXX            C++ compiler to use (default: g++)
+
+Usage:
+  hgbuild [flags]
+  hgbuild [command]
+
+Available Commands:
+  build       Submit a build job to the coordinator
+  c++         C++ compiler wrapper (drop-in g++ replacement)
+  cache       Manage local cache
+  cc          C compiler wrapper (drop-in gcc replacement)
+  completion  Generate the autocompletion script for the specified shell
+  config      Manage configuration
+  graph       Generate build dependency graph visualization
+  help        Help about any command
+  make        Run make with distributed compilation
+  ninja       Run ninja with distributed compilation
+  status      Show coordinator and worker status
+  version     Print version information
+  workers     List available workers
+  wrap        Wrap any build command with distributed compilation
+
+Flags:
+  -c, --config string               config file (default: ~/.hybridgrid/config.yaml)
+  -C, --coordinator string          coordinator address (auto-discover if empty)
+  -h, --help                        help for hgbuild
+      --insecure                    use insecure connection (default true)
+      --timeout duration            connection timeout (default 2m0s)
+      --tracing-enable              Enable OpenTelemetry tracing
+      --tracing-endpoint string     OTLP gRPC endpoint (default "localhost:4317")
+      --tracing-sample-rate float   Tracing sample rate (0.0-1.0) (default 0.01)
+  -v, --verbose                     verbose output
+
+Use "hgbuild [command] --help" for more information about a command.

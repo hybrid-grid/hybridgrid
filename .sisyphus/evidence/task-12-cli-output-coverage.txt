@@ -1,0 +1,1 @@
+ok  	github.com/h3nr1-d14z/hybridgrid/internal/cli/output	(cached)	coverage: 96.7% of statements

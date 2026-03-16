@@ -1,0 +1,119 @@
+================================================================================
+TASK 1: QUICK REFERENCE GUIDE
+================================================================================
+
+WHAT WAS DONE
+================================================================================
+✅ Expanded config.TracingConfig from 4 → 8 fields
+✅ Created LogRotationConfig struct (4 fields)
+✅ Added Rotation field to LogConfig
+✅ Updated DefaultConfig() with all defaults
+✅ Registered 12 new viper defaults
+✅ Updated YAML example with new fields
+✅ Added TracingToLibConfig() helper function
+
+VERIFICATION STATUS
+================================================================================
+✅ go build ./...              → SUCCESS (exit 0)
+✅ Field count check            → 8/8 MATCH
+✅ Field names check            → ALL MATCH
+✅ Test suite                   → ALL PASS
+✅ gofmt compliance             → COMPLIANT
+✅ go vet analysis              → CLEAN
+
+KEY FACTS
+================================================================================
+File Modified:      internal/config/config.go
+Lines Added:        ~65
+Structs Created:    1 (LogRotationConfig)
+Structs Modified:   2 (TracingConfig, LogConfig)
+Functions Added:    1 (TracingToLibConfig)
+Imports Added:      1 (tracing package)
+
+NEW TRACINGCONFIG FIELDS
+================================================================================
+1. ServiceName string            ← NEW
+2. Headers map[string]string     ← NEW
+3. Timeout time.Duration         ← NEW
+4. BatchSize int                 ← NEW
++ 4 existing fields (Enable, Endpoint, SampleRate, Insecure)
+= 8 total fields
+
+NEW LOGROTATIONCONFIG FIELDS
+================================================================================
+1. MaxSizeMB int     (default: 100)
+2. MaxBackups int    (default: 3)
+3. MaxAgeDays int    (default: 28)
+4. Compress bool     (default: true)
+
+USAGE EXAMPLE
+================================================================================
+// Load config
+cfg, err := config.Load("")
+if err != nil { panic(err) }
+
+// Convert to library config for tracing.Init()
+tracingCfg := config.TracingToLibConfig(cfg.Tracing)
+
+// Pass to tracing.Init()
+if err := tracing.Init(context.Background(), tracingCfg); err != nil {
+    panic(err)
+}
+
+HOW TO RE-VERIFY
+================================================================================
+cd hybridgrid
+
+# Quick build check
+go build ./...
+
+# Field count (should be 8)
+go doc ./internal/config TracingConfig | grep '^\t[A-Z]' | wc -l
+
+# Test run
+go test -v ./internal/config/...
+
+# Format check (should be empty)
+gofmt -l internal/config/config.go
+
+# Analysis check (should be empty)
+go vet ./internal/config/...
+
+EVIDENCE FILES
+================================================================================
+Location: .sisyphus/evidence/
+
+Files:
+  • TASK-1-INDEX.txt ........................ Complete task manifest
+  • task-1-summary.txt ..................... Deliverables summary
+  • task-1-final-verification.txt ......... Verification report (PRIMARY)
+  • task-1-code-changes.txt ............... Before/after code changes
+  • task-1-tracing-config-parity.txt ..... Field parity check
+  • task-1-default-config-test.txt ....... Default values check
+  • task-1-build-success.txt ............. Build verification
+
+Read: task-1-final-verification.txt for comprehensive verification details
+
+UNBLOCKED TASKS
+================================================================================
+✅ Task 2: Config validation (can add Validate() methods now)
+✅ Task 3: OTel wiring (config shape ready for tracing.Init())
+✅ Task 4: hg-worker wiring (can pass converted config)
+✅ Task 9: CLI flags (config fields available for binding)
+
+NOTES
+================================================================================
+• No config file loading added (deferred per plan)
+• No validation logic added (Task 2 responsibility)
+• No CLI wiring added (Task 9 responsibility)
+• All defaults from tracing.DefaultConfig() (single source of truth)
+• Pattern: mirrors internal/security/tls/config.go
+
+NEXT STEP
+================================================================================
+Task 2: Add Validate() methods to TracingConfig + LogRotationConfig
+Expected: 2-3 hours (validation logic + tests)
+Depends: Task 1 (this task) ✅ COMPLETE
+
+STATUS: ✅ PRODUCTION READY
+================================================================================

@@ -1,0 +1,22 @@
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:1.60
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+    networks:
+      - hg-e2e-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  coordinator:
+    command: hg-coord serve --grpc-port=9000 --http-port=8080 --tracing-enable --tracing-endpoint=jaeger:4317
+
+  worker-1:
+    command: hg-worker serve --coordinator=coordinator:9000 --port=50052 --http-port=9090 --advertise-address=worker-1:50052 --max-parallel=4 --tracing-enable --tracing-endpoint=jaeger:4317
+
+  worker-2:
+    command: hg-worker serve --coordinator=coordinator:9000 --port=50052 --http-port=9090 --advertise-address=worker-2:50052 --max-parallel=4 --tracing-enable --tracing-endpoint=jaeger:4317

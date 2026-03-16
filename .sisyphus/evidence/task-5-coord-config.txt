@@ -1,0 +1,53 @@
+QA Evidence: Scenario 1 - Coordinator Config Struct Verification
+==================================================================
+
+Command: go doc ./internal/coordinator/server Config
+
+Output:
+-------
+package server // import "github.com/h3nr1-d14z/hybridgrid/internal/coordinator/server"
+
+type Config struct {
+	Port            int
+	AuthToken       string
+	HeartbeatTTL    time.Duration
+	RequestTimeout  time.Duration
+	TLS             hgtls.Config
+	Tracing         tracing.Config
+	EnableRequestID bool
+}
+    Config holds the coordinator gRPC server configuration.
+
+func DefaultConfig() Config
+
+Result: ✓ PASS
+- EnableRequestID bool field present in coordinator Config struct
+- Field is properly exported (capitalized)
+- Type is bool as specified
+
+Worker Config Verification
+--------------------------
+Command: go doc ./internal/worker/server Config
+
+Output:
+-------
+package server // import "github.com/h3nr1-d14z/hybridgrid/internal/worker/server"
+
+type Config struct {
+	Port            int
+	MaxConcurrent   int
+	DefaultTimeout  time.Duration
+	TLS             hgtls.Config
+	Tracing         tracing.Config
+	EnableRequestID bool
+}
+    Config holds the worker gRPC server configuration.
+
+func DefaultConfig() Config
+
+Result: ✓ PASS
+- EnableRequestID bool field present in worker Config struct
+- Field is properly exported (capitalized)
+- Type is bool as specified
+
+Conclusion: Both Config structs have been correctly modified with EnableRequestID bool field

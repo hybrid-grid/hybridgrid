@@ -1,0 +1,22 @@
+=== RUN   TestValidate_CoordinatorPortRange
+=== RUN   TestValidate_CoordinatorPortRange/valid_ports
+=== RUN   TestValidate_CoordinatorPortRange/grpc_port_1
+=== RUN   TestValidate_CoordinatorPortRange/grpc_port_65535
+=== RUN   TestValidate_CoordinatorPortRange/grpc_port_0
+=== RUN   TestValidate_CoordinatorPortRange/grpc_port_65536
+=== RUN   TestValidate_CoordinatorPortRange/grpc_port_negative
+=== RUN   TestValidate_CoordinatorPortRange/http_port_0
+=== RUN   TestValidate_CoordinatorPortRange/http_port_65536
+=== RUN   TestValidate_CoordinatorPortRange/ports_equal
+--- PASS: TestValidate_CoordinatorPortRange (0.00s)
+    --- PASS: TestValidate_CoordinatorPortRange/valid_ports (0.00s)
+    --- PASS: TestValidate_CoordinatorPortRange/grpc_port_1 (0.00s)
+    --- PASS: TestValidate_CoordinatorPortRange/grpc_port_65535 (0.00s)
+    --- PASS: TestValidate_CoordinatorPortRange/grpc_port_0 (0.00s)
+    --- PASS: TestValidate_CoordinatorPortRange/grpc_port_65536 (0.00s)
+    --- PASS: TestValidate_CoordinatorPortRange/grpc_port_negative (0.00s)
+    --- PASS: TestValidate_CoordinatorPortRange/http_port_0 (0.00s)
+    --- PASS: TestValidate_CoordinatorPortRange/http_port_65536 (0.00s)
+    --- PASS: TestValidate_CoordinatorPortRange/ports_equal (0.00s)
+PASS
+ok  	github.com/h3nr1-d14z/hybridgrid/internal/config	1.098s
