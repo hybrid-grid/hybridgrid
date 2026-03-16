@@ -131,3 +131,39 @@
 - Root cause: the runtime stage could enter a broken APT state while fetching `gcc-12`, and retries were not pre-healing dependencies before re-attempting package install.
 - Fix: updated `test/e2e/Dockerfile.worker` to run `apt-get install -y --fix-broken` before the main noninteractive install of `build-essential`, `gcc`, `g++`, `make`, `curl`, and `ca-certificates`.
 - Verification: unmet dependency errors (`g++`/`gcc-12` not installable) are resolved; remaining failures are intermittent upstream mirror connection resets during package download in this environment.
+
+## [2026-03-16] Task 4: Docker Cluster Verification
+
+### Cluster Startup
+- Command: `docker compose -f test/e2e/docker-compose.yml up -d`
+- Healthcheck timing: All 3 containers healthy within 4 seconds (2 iterations × 2s poll)
+- Container states: All healthy (coordinator-1, worker-1-1, worker-2-1)
+- Network created: e2e_hg-e2e-net
+
+### Worker Registration
+- Dashboard API response structure: `{"workers": [...], "count": N, "timestamp": T}`
+- Worker count: 2 workers registered
+- Worker IDs: `worker-worker-1`, `worker-worker-2`
+- Worker addresses: `worker-1:50052`, `worker-2:50052`
+- Worker architecture: ARCH_ARM64 (both workers running on macOS ARM64)
+- Worker resources: 8 CPU cores, ~7.65GB memory (both workers)
+- Circuit state: CLOSED (healthy, ready to accept tasks)
+
+### API Endpoints Verified
+- `/metrics`: Working — Prometheus text format with Go runtime metrics
+- `/api/v1/workers`: Working — Returns structured JSON with 2 workers, all fields populated correctly
+- `/api/v1/stats`: Working — Shows `total_workers: 2`, `healthy_workers: 2`, zero task activity (expected fresh cluster)
+
+### Evidence Files Created
+- `.sisyphus/evidence/task-4-cluster-ps.log` — All 3 containers healthy
+- `.sisyphus/evidence/task-4-coordinator-metrics.log` — Prometheus metrics endpoint
+- `.sisyphus/evidence/task-4-workers-api.log` — Worker registration JSON (2 workers)
+- `.sisyphus/evidence/task-4-stats-api.log` — Stats API JSON (2 workers healthy)
+- `.sisyphus/evidence/task-4-cluster-logs.log` — Full cluster logs (21 lines)
+
+### Key Observations
+- Worker IDs use pattern `worker-<hostname>` (e.g., `worker-worker-1` from hostname `worker-1`)
+- Workers advertise correct addresses (`worker-1:50052`, `worker-2:50052`) — `--advertise-address` flag working
+- `last_seen` timestamps show workers are actively heartbeating (both at unix timestamp 1773630491)
+- Zero task activity expected for fresh cluster (all task counters at 0)
+- Coordinator uptime: 30 seconds at stats query time

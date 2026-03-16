@@ -415,7 +415,7 @@ Max Concurrent: 5 (Wave 3)
   - Message: `test(e2e): add C test project and TLS cert generation`
   - Files: `test/e2e/gen-certs.sh`
 
-- [ ] 4. Verify Docker Cluster Startup + Worker Registration
+- [x] 4. Verify Docker Cluster Startup + Worker Registration
 
   **What to do**:
   - Start the E2E Docker cluster: `docker compose -f test/e2e/docker-compose.yml up -d --build`
