@@ -1,0 +1,14 @@
+Remaining unchecked plan items
+============================
+
+1. Prometheus metrics show correct task/cache counters
+   Status: NOT COMPLETE
+   Reason: `.sisyphus/evidence/task-7-prometheus-metrics.txt` shows the endpoint exists, but custom `hybridgrid_*` task/cache counters were not exported. This was documented as a finding and worked around via the Stats API.
+
+2. CPython stress test completes with distributed compilation
+   Status: NOT COMPLETE
+   Reason: `.sisyphus/evidence/task-12-stress-test.log` shows the stress script completed, but the distributed build did not successfully complete a real CPython distributed compilation. The script hid failures and produced invalid timing/speedup output. This was documented as a test infrastructure issue in `.sisyphus/findings.md`.
+
+3. All "Must Have" features verified with evidence
+   Status: NOT COMPLETE
+   Reason: This checklist item depends on the two items above. Since those two remain unmet, this aggregate checkbox must remain unchecked.

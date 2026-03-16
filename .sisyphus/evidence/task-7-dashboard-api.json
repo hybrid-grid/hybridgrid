@@ -1,0 +1,72 @@
+{
+  "verification_timestamp": "2026-03-16T04:59:51Z",
+  "stats_api": {
+    "endpoint": "http://localhost:8080/api/v1/stats",
+    "status": "WORKING",
+    "response": {
+      "total_tasks": 10,
+      "success_tasks": 5,
+      "failed_tasks": 5,
+      "active_tasks": 0,
+      "queued_tasks": 0,
+      "cache_hits": 14,
+      "cache_misses": 10,
+      "cache_hit_rate": 0.5833,
+      "total_workers": 2,
+      "healthy_workers": 2,
+      "uptime_seconds": 9632,
+      "timestamp": 1773645091
+    }
+  },
+  "workers_api": {
+    "endpoint": "http://localhost:8080/api/v1/workers",
+    "status": "WORKING",
+    "count": 2,
+    "structure": "object with 'workers' array (NOT bare array)",
+    "workers": [
+      {
+        "id": "worker-worker-1",
+        "address": "worker-1:50052",
+        "architecture": "ARCH_ARM64",
+        "healthy": true,
+        "total_tasks": 7,
+        "circuit_state": "CLOSED"
+      },
+      {
+        "id": "worker-worker-2",
+        "address": "worker-2:50052",
+        "architecture": "ARCH_ARM64",
+        "healthy": true,
+        "total_tasks": 3,
+        "circuit_state": "CLOSED"
+      }
+    ]
+  },
+  "events_api": {
+    "endpoint": "http://localhost:8080/api/v1/events",
+    "status": "NOT_IMPLEMENTED",
+    "note": "Returns 404 - endpoint not implemented"
+  },
+  "prometheus_metrics": {
+    "endpoint": "http://localhost:8080/metrics",
+    "status": "WORKING",
+    "total_lines": 128,
+    "hybridgrid_metrics_found": 4,
+    "key_metrics": [
+      "hybridgrid_tasks_total",
+      "hybridgrid_cache_hits_total",
+      "hybridgrid_cache_misses_total",
+      "hybridgrid_workers_total"
+    ],
+    "task_counter_value": 10,
+    "cache_hits_value": 14,
+    "cache_misses_value": 10
+  },
+  "dashboard_html": {
+    "endpoint": "http://localhost:8080/",
+    "status": "WORKING",
+    "http_code": 200,
+    "content_type": "HTML",
+    "title": "Hybrid-Grid Dashboard"
+  }
+}

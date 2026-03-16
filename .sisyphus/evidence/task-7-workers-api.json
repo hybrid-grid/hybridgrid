@@ -1,0 +1,38 @@
+{
+    "count": 2,
+    "timestamp": 1773645091,
+    "workers": [
+        {
+            "id": "worker-worker-1",
+            "host": "worker-1",
+            "address": "worker-1:50052",
+            "architecture": "ARCH_ARM64",
+            "cpu_cores": 8,
+            "memory_gb": 7.653781890869141,
+            "active_tasks": 0,
+            "total_tasks": 7,
+            "success_rate": 0.42857142857142855,
+            "avg_latency_ms": 36,
+            "circuit_state": "CLOSED",
+            "discovery_source": "",
+            "healthy": true,
+            "last_seen": 1773645064
+        },
+        {
+            "id": "worker-worker-2",
+            "host": "worker-2",
+            "address": "worker-2:50052",
+            "architecture": "ARCH_ARM64",
+            "cpu_cores": 8,
+            "memory_gb": 7.653781890869141,
+            "active_tasks": 0,
+            "total_tasks": 3,
+            "success_rate": 0.6666666666666666,
+            "avg_latency_ms": 63,
+            "circuit_state": "CLOSED",
+            "discovery_source": "",
+            "healthy": true,
+            "last_seen": 1773645064
+        }
+    ]
+}

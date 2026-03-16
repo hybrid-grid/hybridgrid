@@ -1,0 +1,276 @@
+{
+    "count": 20,
+    "events": [
+        {
+            "type": "task_started",
+            "timestamp": 1773633054,
+            "data": {
+                "id": "task-18d7b2081bafe03e-8551",
+                "build_type": "cpp",
+                "status": "running",
+                "worker_id": "worker-worker-1",
+                "started_at": 1773633054,
+                "from_cache": false
+            }
+        },
+        {
+            "type": "task_completed",
+            "timestamp": 1773633054,
+            "data": {
+                "id": "task-18d7b2081bafe03e-8551",
+                "build_type": "cpp",
+                "status": "completed",
+                "worker_id": "worker-worker-1",
+                "started_at": 1773633054,
+                "completed_at": 1773633054,
+                "duration_ms": 104,
+                "from_cache": false
+            }
+        },
+        {
+            "type": "task_started",
+            "timestamp": 1773633110,
+            "data": {
+                "id": "task-2857d7df083d745f-2299",
+                "build_type": "cpp",
+                "status": "running",
+                "worker_id": "worker-worker-2",
+                "started_at": 1773633110,
+                "from_cache": false
+            }
+        },
+        {
+            "type": "task_completed",
+            "timestamp": 1773633110,
+            "data": {
+                "id": "task-2857d7df083d745f-2299",
+                "build_type": "cpp",
+                "status": "failed",
+                "worker_id": "worker-worker-2",
+                "started_at": 1773633110,
+                "completed_at": 1773633110,
+                "duration_ms": 22,
+                "exit_code": 1,
+                "from_cache": false,
+                "error_message": "bad.c: In function 'main':\nbad.c:4:58: error: expected ')' before 'return'\nbad.c:6:14: error: expected ';' before '}' token\n"
+            }
+        },
+        {
+            "type": "task_started",
+            "timestamp": 1773633138,
+            "data": {
+                "id": "task-6e8910c918a6a658-6799",
+                "build_type": "cpp",
+                "status": "running",
+                "worker_id": "worker-worker-2",
+                "started_at": 1773633138,
+                "from_cache": false
+            }
+        },
+        {
+            "type": "task_completed",
+            "timestamp": 1773633138,
+            "data": {
+                "id": "task-6e8910c918a6a658-6799",
+                "build_type": "cpp",
+                "status": "completed",
+                "worker_id": "worker-worker-2",
+                "started_at": 1773633138,
+                "completed_at": 1773633138,
+                "duration_ms": 105,
+                "from_cache": false
+            }
+        },
+        {
+            "type": "task_started",
+            "timestamp": 1773633138,
+            "data": {
+                "id": "task-521a420a4855c265-965",
+                "build_type": "cpp",
+                "status": "running",
+                "worker_id": "worker-worker-1",
+                "started_at": 1773633138,
+                "from_cache": false
+            }
+        },
+        {
+            "type": "task_completed",
+            "timestamp": 1773633138,
+            "data": {
+                "id": "task-521a420a4855c265-965",
+                "build_type": "cpp",
+                "status": "completed",
+                "worker_id": "worker-worker-1",
+                "started_at": 1773633138,
+                "completed_at": 1773633138,
+                "duration_ms": 29,
+                "from_cache": false
+            }
+        },
+        {
+            "type": "task_started",
+            "timestamp": 1773633138,
+            "data": {
+                "id": "task-f77df860ef9792fc-3799",
+                "build_type": "cpp",
+                "status": "running",
+                "worker_id": "worker-worker-1",
+                "started_at": 1773633138,
+                "from_cache": false
+            }
+        },
+        {
+            "type": "task_completed",
+            "timestamp": 1773633139,
+            "data": {
+                "id": "task-f77df860ef9792fc-3799",
+                "build_type": "cpp",
+                "status": "completed",
+                "worker_id": "worker-worker-1",
+                "started_at": 1773633138,
+                "completed_at": 1773633139,
+                "duration_ms": 83,
+                "from_cache": false
+            }
+        },
+        {
+            "type": "task_started",
+            "timestamp": 1773633155,
+            "data": {
+                "id": "task-bd9f6c158f72b32f-4626",
+                "build_type": "cpp",
+                "status": "running",
+                "worker_id": "worker-worker-1",
+                "started_at": 1773633155,
+                "from_cache": false
+            }
+        },
+        {
+            "type": "task_completed",
+            "timestamp": 1773633155,
+            "data": {
+                "id": "task-bd9f6c158f72b32f-4626",
+                "build_type": "cpp",
+                "status": "failed",
+                "worker_id": "worker-worker-1",
+                "started_at": 1773633155,
+                "completed_at": 1773633155,
+                "duration_ms": 19,
+                "exit_code": 1,
+                "from_cache": false,
+                "error_message": "bad.c: In function 'main':\nbad.c:4:58: error: expected ')' before 'return'\nbad.c:6:14: error: expected ';' before '}' token\n"
+            }
+        },
+        {
+            "type": "task_started",
+            "timestamp": 1773633164,
+            "data": {
+                "id": "task-b7d509df3736d054-9255",
+                "build_type": "cpp",
+                "status": "running",
+                "worker_id": "worker-worker-1",
+                "started_at": 1773633164,
+                "from_cache": false
+            }
+        },
+        {
+            "type": "task_completed",
+            "timestamp": 1773633164,
+            "data": {
+                "id": "task-b7d509df3736d054-9255",
+                "build_type": "cpp",
+                "status": "failed",
+                "worker_id": "worker-worker-1",
+                "started_at": 1773633164,
+                "completed_at": 1773633164,
+                "duration_ms": 12,
+                "exit_code": 1,
+                "from_cache": false,
+                "error_message": "bad.c: In function 'main':\nbad.c:4:58: error: expected ')' before 'return'\nbad.c:6:14: error: expected ';' before '}' token\n"
+            }
+        },
+        {
+            "type": "task_started",
+            "timestamp": 1773633186,
+            "data": {
+                "id": "task-41e2cd52e7346e1a-1459",
+                "build_type": "cpp",
+                "status": "running",
+                "worker_id": "worker-worker-1",
+                "started_at": 1773633186,
+                "from_cache": false
+            }
+        },
+        {
+            "type": "task_completed",
+            "timestamp": 1773633186,
+            "data": {
+                "id": "task-41e2cd52e7346e1a-1459",
+                "build_type": "cpp",
+                "status": "failed",
+                "worker_id": "worker-worker-1",
+                "started_at": 1773633186,
+                "completed_at": 1773633186,
+                "duration_ms": 68,
+                "exit_code": 1,
+                "from_cache": false,
+                "error_message": "/tmp/hg-worker-task-41e2cd52e7346e1a-1459-1448899379/main.c:3:10: fatal error: math_utils.h: No such file or directory\n    3 | #include \"math_utils.h\"\n      |          ^~~~~~~~~~~~~~\ncompilation terminated.\n"
+            }
+        },
+        {
+            "type": "task_started",
+            "timestamp": 1773633204,
+            "data": {
+                "id": "task-9c186e0990628a07-6676",
+                "build_type": "cpp",
+                "status": "running",
+                "worker_id": "worker-worker-2",
+                "started_at": 1773633204,
+                "from_cache": false
+            }
+        },
+        {
+            "type": "task_completed",
+            "timestamp": 1773633204,
+            "data": {
+                "id": "task-9c186e0990628a07-6676",
+                "build_type": "cpp",
+                "status": "completed",
+                "worker_id": "worker-worker-2",
+                "started_at": 1773633204,
+                "completed_at": 1773633204,
+                "duration_ms": 28,
+                "from_cache": false
+            }
+        },
+        {
+            "type": "task_started",
+            "timestamp": 1773633218,
+            "data": {
+                "id": "task-79ba0454b20b1b8b-1960",
+                "build_type": "cpp",
+                "status": "running",
+                "worker_id": "worker-worker-1",
+                "started_at": 1773633218,
+                "from_cache": false
+            }
+        },
+        {
+            "type": "task_completed",
+            "timestamp": 1773633218,
+            "data": {
+                "id": "task-79ba0454b20b1b8b-1960",
+                "build_type": "cpp",
+                "status": "failed",
+                "worker_id": "worker-worker-1",
+                "started_at": 1773633218,
+                "completed_at": 1773633218,
+                "duration_ms": 30,
+                "exit_code": 1,
+                "from_cache": false,
+                "error_message": "bad.c: In function 'main':\nbad.c:4:58: error: expected ')' before 'return'\nbad.c:6:14: error: expected ';' before '}' token\n"
+            }
+        }
+    ],
+    "timestamp": 1773645092
+}

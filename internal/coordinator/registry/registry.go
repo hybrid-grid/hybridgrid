@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
+	"github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
 )
 
 // WorkerState represents the current state of a worker.
@@ -137,6 +138,7 @@ func (r *InMemoryRegistry) Add(worker *WorkerInfo) error {
 	worker.State = WorkerStateIdle
 	r.workers[worker.ID] = worker
 
+	r.updateWorkerMetrics()
 	return nil
 }
 
@@ -150,6 +152,7 @@ func (r *InMemoryRegistry) Remove(id string) error {
 	}
 
 	delete(r.workers, id)
+	r.updateWorkerMetrics()
 	return nil
 }
 
@@ -401,4 +404,18 @@ func (r *InMemoryRegistry) cleanupStaleWorkers() {
 // Stop stops the cleanup goroutine.
 func (r *InMemoryRegistry) Stop() {
 	close(r.stopCh)
+}
+
+// updateWorkerMetrics updates Prometheus worker count metrics.
+// Must be called with r.mu held (Lock or RLock).
+func (r *InMemoryRegistry) updateWorkerMetrics() {
+	m := metrics.Default()
+	activeCount := 0
+	for _, w := range r.workers {
+		if w.State == WorkerStateIdle || w.State == WorkerStateBusy {
+			activeCount++
+		}
+	}
+	m.SetWorkerCount("active", "grpc", float64(activeCount))
+	m.SetWorkerCount("total", "grpc", float64(len(r.workers)))
 }

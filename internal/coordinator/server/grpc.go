@@ -22,6 +22,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/resilience"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/scheduler"
 	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/interceptors"
+	"github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 	hgtls "github.com/h3nr1-d14z/hybridgrid/internal/security/tls"
 )
@@ -457,6 +458,17 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 
 	// Set queue time
 	resp.QueueTimeMs = int64(queueTime.Milliseconds())
+
+	// Record metrics
+	m := metrics.Default()
+	duration := totalDuration.Seconds()
+	buildType := "cpp"
+	if success {
+		m.RecordTaskComplete(metrics.TaskStatusSuccess, buildType, worker.ID, duration)
+	} else {
+		m.RecordTaskComplete(metrics.TaskStatusError, buildType, worker.ID, duration)
+	}
+	m.RecordQueueTime(buildType, queueTime.Seconds())
 
 	return resp, nil
 }

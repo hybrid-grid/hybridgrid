@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+
+	"github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
 )
 
 // windowsReservedNames are device names that cannot be used as filenames on Windows.
@@ -102,10 +104,12 @@ func NewStore(dir string, maxSizeMB int64, ttlHours int) (*Store, error) {
 
 // Get retrieves a cached item.
 func (s *Store) Get(key string) (io.ReadCloser, bool) {
+	m := metrics.Default()
 	s.mu.RLock()
 	entry, ok := s.entries[key]
 	if !ok {
 		s.mu.RUnlock()
+		m.RecordCacheMiss()
 		return nil, false
 	}
 
@@ -113,6 +117,7 @@ func (s *Store) Get(key string) (io.ReadCloser, bool) {
 	if time.Since(entry.CreatedAt) > s.ttl {
 		s.mu.RUnlock()
 		s.Delete(key)
+		m.RecordCacheMiss()
 		return nil, false
 	}
 
@@ -121,6 +126,7 @@ func (s *Store) Get(key string) (io.ReadCloser, bool) {
 	s.mu.RUnlock()
 	if err != nil {
 		s.Delete(key)
+		m.RecordCacheMiss()
 		return nil, false
 	}
 
@@ -132,6 +138,7 @@ func (s *Store) Get(key string) (io.ReadCloser, bool) {
 	}
 	s.mu.Unlock()
 
+	m.RecordCacheHit()
 	return f, true
 }
 

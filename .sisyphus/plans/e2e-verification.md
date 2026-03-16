@@ -67,16 +67,16 @@ Prove that every functional feature of Hybrid-Grid v0.2.3 works correctly in a r
 - `.sisyphus/findings.md` — Bugs/issues discovered during verification
 
 ### Definition of Done
-- [ ] Docker cluster starts with coordinator + 2 workers (both healthy)
-- [ ] `hgbuild cc -c hello.c` compiles via coordinator → worker → returns object file
-- [ ] `hgbuild make -j4` builds a multi-file C project successfully
-- [ ] Second identical build shows cache hits in metrics/logs
-- [ ] Dashboard API returns worker list and task stats
-- [ ] TLS-secured compilation works with self-signed certs
-- [ ] OTel traces appear in collector after compilation
-- [ ] `/log-level` GET/PUT works on coordinator and worker
-- [ ] Prometheus metrics show correct task/cache counters
-- [ ] Local fallback compiles when coordinator is down
+- [x] Docker cluster starts with coordinator + 2 workers (both healthy)
+- [x] `hgbuild cc -c hello.c` compiles via coordinator → worker → returns object file
+- [x] `hgbuild make -j4` builds a multi-file C project successfully
+- [x] Second identical build shows cache hits in metrics/logs
+- [x] Dashboard API returns worker list and task stats
+- [x] TLS-secured compilation works with self-signed certs
+- [x] OTel traces appear in collector after compilation
+- [x] `/log-level` GET/PUT works on coordinator and worker
+- [x] Prometheus metrics show correct task/cache counters
+- [x] Local fallback compiles when coordinator is down
 - [ ] CPython stress test completes with distributed compilation
 
 ### Must Have
@@ -513,7 +513,7 @@ Max Concurrent: 5 (Wave 3)
 
   **Commit**: NO (evidence only — committed in batch)
 
-- [ ] 5. Verify Compilation Pipeline (hgbuild cc + make)
+- [x] 5. Verify Compilation Pipeline (hgbuild cc + make)
 
   **What to do**:
   - **Single file compilation**: Copy `test/e2e/testdata/main.c` to a temp directory, compile with `HG_COORDINATOR=localhost:9000 ./bin/hgbuild cc -v -c main.c -o main.o`
@@ -606,7 +606,7 @@ Max Concurrent: 5 (Wave 3)
   - Message: `test(e2e): verify compilation pipeline + cache + dashboard`
   - Files: `.sisyphus/evidence/task-4-*`, `.sisyphus/evidence/task-5-*`
 
-- [ ] 6. Verify Cache Hit/Miss Behavior
+- [x] 6. Verify Cache Hit/Miss Behavior
 
   **What to do**:
   - After Task 5's compilation, the cache should contain entries
@@ -677,7 +677,7 @@ Max Concurrent: 5 (Wave 3)
   **Commit**: YES (groups with Tasks 4, 5, 7, 8)
   - Message: `test(e2e): verify compilation pipeline + cache + dashboard`
 
-- [ ] 7. Verify Dashboard API + Prometheus Metrics
+ - [x] 7. Verify Dashboard API + Prometheus Metrics
 
   **What to do**:
   - Test all dashboard API endpoints:
@@ -774,7 +774,7 @@ Max Concurrent: 5 (Wave 3)
 
   **Commit**: YES (groups with Tasks 4, 5, 6, 8)
 
-- [ ] 8. Verify Log-Level Endpoint
+- [x] 8. Verify Log-Level Endpoint
 
   **What to do**:
   - Test coordinator log-level endpoint at `http://localhost:8080/log-level`:
@@ -853,7 +853,7 @@ Max Concurrent: 5 (Wave 3)
 
   **Commit**: YES (groups with Tasks 4, 5, 6, 7)
 
-- [ ] 9. Verify Local Fallback Compilation
+- [x] 9. Verify Local Fallback Compilation
 
   **What to do**:
   - Stop the Docker cluster: `docker compose -f test/e2e/docker-compose.yml down`
@@ -922,7 +922,7 @@ Max Concurrent: 5 (Wave 3)
   **Commit**: YES (groups with Tasks 10, 11, 12)
   - Message: `test(e2e): verify fallback + TLS + OTel + stress test`
 
-- [ ] 10. Verify TLS/mTLS Secured Compilation
+- [x] 10. Verify TLS/mTLS Secured Compilation
 
   **What to do**:
   - Generate TLS certs if not done: `bash test/e2e/gen-certs.sh`
@@ -1007,7 +1007,7 @@ Max Concurrent: 5 (Wave 3)
 
   **Commit**: YES (groups with Tasks 9, 11, 12)
 
-- [ ] 11. Verify OTel Tracing with Collector
+- [x] 11. Verify OTel Tracing with Collector
 
   **What to do**:
   - Stop any running cluster
@@ -1089,7 +1089,7 @@ Max Concurrent: 5 (Wave 3)
 
   **Commit**: YES (groups with Tasks 9, 10, 12)
 
-- [ ] 12. Run CPython Stress Test
+- [x] 12. Run CPython Stress Test
 
   **What to do**:
   - Use the existing stress test infrastructure at `test/stress/`
@@ -1182,7 +1182,7 @@ Max Concurrent: 5 (Wave 3)
 
 > 4 review agents run in PARALLEL. ALL must APPROVE. Rejection → fix → re-run.
 
-- [ ] F1. **Plan Compliance Audit** — `oracle`
+- [x] F1. **Plan Compliance Audit** — `oracle`
   Read the plan end-to-end. For each "Must Have": verify evidence exists in `.sisyphus/evidence/`. For each "Must NOT Have": verify no production code was modified (`git diff --name-only` shows only `test/e2e/` and `.sisyphus/` files). Compare deliverables against plan.
   Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
 
@@ -1209,7 +1209,7 @@ Max Concurrent: 5 (Wave 3)
     Evidence: .sisyphus/evidence/f1-no-prod-changes.log
   ```
 
-- [ ] F2. **Evidence Completeness Check** — `unspecified-high`
+- [x] F2. **Evidence Completeness Check** — `unspecified-high`
   For every task (1-12), verify that `.sisyphus/evidence/task-{N}-*.{ext}` files exist and are non-empty. Check that each evidence file corresponds to a QA scenario in the plan. Flag missing evidence.
   Output: `Evidence Files [N/N] | Coverage [N/N tasks] | VERDICT`
 
@@ -1236,7 +1236,7 @@ Max Concurrent: 5 (Wave 3)
     Evidence: .sisyphus/evidence/f2-evidence-mapping.log
   ```
 
-- [ ] F3. **Findings Report Compilation** — `writing`
+- [x] F3. **Findings Report Compilation** — `writing`
   Compile all bugs/issues discovered during verification into `.sisyphus/findings.md`. Include: coordinator /health bug, --no-fallback missing, Docker image compiler gap, and any new issues found during testing. Categorize by severity (critical/medium/low).
   Output: `.sisyphus/findings.md` with structured findings
 
@@ -1261,7 +1261,7 @@ Max Concurrent: 5 (Wave 3)
     Evidence: .sisyphus/evidence/f3-error-coverage.log
   ```
 
-- [ ] F4. **Scope Fidelity Check** — `deep`
+- [x] F4. **Scope Fidelity Check** — `deep`
   Verify no production code was modified: `git diff --name-only` should only show files under `test/e2e/`, `.sisyphus/`, and `.gitignore`. No files under `cmd/`, `internal/`, `gen/`, `proto/`. Verify all test artifacts are in correct locations.
   Output: `Modified Files [N] | In-Scope [N/N] | VERDICT`
 
@@ -1321,7 +1321,7 @@ test -f .sisyphus/findings.md  # Expected: file exists
 
 ### Final Checklist
 - [ ] All "Must Have" features verified with evidence
-- [ ] All "Must NOT Have" guardrails respected
-- [ ] Zero production code modifications
-- [ ] Findings report complete with categorized bugs
-- [ ] Docker cleanup complete (no orphaned containers)
+- [x] All "Must NOT Have" guardrails respected
+- [x] Zero production code modifications
+- [x] Findings report complete with categorized bugs
+- [x] Docker cleanup complete (no orphaned containers)

@@ -17,6 +17,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
 	"github.com/h3nr1-d14z/hybridgrid/internal/logging"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/dashboard"
+	observabilitymetrics "github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 )
 
@@ -167,6 +168,10 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			} else {
 				log.Debug().Msg("TLS disabled")
 			}
+
+			// Initialize Prometheus metrics
+			_ = observabilitymetrics.Default()
+			log.Info().Msg("Prometheus metrics initialized")
 
 			srv := coordserver.New(cfg)
 

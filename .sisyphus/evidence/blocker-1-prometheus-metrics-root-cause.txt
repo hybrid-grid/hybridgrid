@@ -1,0 +1,162 @@
+=============================================================================
+ROOT CAUSE ANALYSIS: Missing Prometheus Custom Metrics (BLOCKER 1)
+=============================================================================
+
+SYMPTOM:
+--------
+- Prometheus endpoint exists: http://localhost:8080/metrics returns 200 OK
+- Only Go runtime metrics present: go_gc_*, go_memstats_*, go_goroutines
+- Missing ALL custom application metrics with hybridgrid_* prefix:
+  * hybridgrid_tasks_total
+  * hybridgrid_task_duration_seconds
+  * hybridgrid_cache_hits_total
+  * hybridgrid_cache_misses_total
+  * hybridgrid_workers_total
+  * hybridgrid_circuit_state
+
+EVIDENCE:
+---------
+- .sisyphus/evidence/task-7-prometheus-metrics.txt (128 lines of metrics output)
+- curl http://localhost:8080/metrics shows only Go runtime metrics
+- Stats API workaround successful: /api/v1/stats returns correct counters
+
+ROOT CAUSE:
+-----------
+**Metrics are DEFINED but NEVER INITIALIZED in the coordinator.**
+
+Code Analysis:
+--------------
+
+1. METRICS FULLY DEFINED (internal/observability/metrics/metrics.go):
+   - Lines 14-34: Struct defines all 12 metrics (counters, gauges, histograms)
+   - Lines 54-157: New() creates metrics with correct namespace="hybridgrid"
+   - Lines 160-176: Register() method correctly registers all metrics
+   - Lines 193-255: Helper methods (RecordTaskComplete, RecordCacheHit, etc.)
+
+2. SINGLETON PATTERN EXISTS (metrics.go:41-48):
+   ```go
+   func Default() *Metrics {
+       once.Do(func() {
+           defaultMetrics = New()
+           defaultMetrics.Register(prometheus.DefaultRegisterer)
+       })
+       return defaultMetrics
+   }
+   ```
+   This would initialize metrics on first call.
+
+3. COORDINATOR NEVER CALLS metrics.Default():
+   
+   Search results:
+   ```bash
+   $ grep -r "metrics\.Default\|metrics\.New\|metrics\.Record" cmd/hg-coord/ internal/coordinator/
+   internal/coordinator/scheduler/scheduler.go:  lt = metrics.NewLatencyTracker()
+   ```
+   
+   ONLY ONE MATCH — and it's NOT the observability metrics package!
+   It's a different "metrics" (likely a local latency tracker).
+
+4. DASHBOARD USES promhttp.Handler() DIRECTLY (dashboard/server.go:63):
+   ```go
+   mux.Handle("/metrics", promhttp.Handler())
+   ```
+   
+   This serves prometheus.DefaultRegisterer, but since metrics.Default() was
+   never called, the custom metrics were NEVER registered.
+
+5. COORDINATOR NEVER RECORDS METRICS:
+   ```bash
+   $ grep -rn "RecordTask\|RecordCache\|SetWorker" internal/coordinator/
+   (no results)
+   ```
+   
+   Even if metrics were initialized, the coordinator doesn't call any
+   RecordTaskComplete(), RecordCacheHit(), SetWorkerCount(), etc.
+
+CLASSIFICATION:
+---------------
+**Production Bug** — Missing initialization + missing instrumentation
+
+Impact:
+- HIGH: Observability severely degraded
+- Users cannot monitor task throughput, cache efficiency, or worker health
+- Dashboard WebSocket/REST APIs work as workaround, but Prometheus integration broken
+
+RECOMMENDED FIX:
+----------------
+
+**Option A: Initialize metrics in coordinator main() (SIMPLEST)**
+
+File: cmd/hg-coord/main.go
+Location: After line 170 (after config setup, before srv := coordserver.New(cfg))
+
+Add:
+```go
+// Initialize Prometheus metrics
+_ = observabilitymetrics.Default()
+log.Info().Msg("Prometheus metrics initialized")
+```
+
+This ensures metrics are registered with prometheus.DefaultRegisterer before
+the HTTP server starts serving /metrics.
+
+**Option B: Initialize in coordinator.New() (MORE ROBUST)**
+
+File: internal/coordinator/server/server.go (or wherever New() is defined)
+Add metrics.Default() call during server initialization.
+
+**Option C: Instrument coordinator operations (COMPLETE FIX)**
+
+After initializing metrics, add instrumentation:
+
+In Compile() handler:
+```go
+m := metrics.Default()
+startTime := time.Now()
+// ... compilation logic ...
+m.RecordTaskComplete(metrics.TaskStatusSuccess, req.BuildType, workerID, time.Since(startTime).Seconds())
+```
+
+In cache code:
+```go
+m := metrics.Default()
+if hit { m.RecordCacheHit() } else { m.RecordCacheMiss() }
+```
+
+In registry:
+```go
+m := metrics.Default()
+m.SetWorkerCount("active", "grpc", float64(len(workers)))
+```
+
+VERIFICATION:
+-------------
+After fix, verify:
+
+1. Start coordinator with fix applied
+2. curl http://localhost:8080/metrics | grep hybridgrid_
+3. Should see:
+   ```
+   # HELP hybridgrid_tasks_total Total number of build tasks processed
+   # TYPE hybridgrid_tasks_total counter
+   hybridgrid_tasks_total{build_type="cc",status="success",worker="worker-1"} 0
+   
+   # HELP hybridgrid_cache_hits_total Total number of cache hits
+   # TYPE hybridgrid_cache_hits_total counter
+   hybridgrid_cache_hits_total 0
+   
+   ... (all 12 metrics with 0 initial values)
+   ```
+4. Run a compilation, verify counters increment
+
+TIMELINE:
+---------
+- v0.2.2 release: Metrics package fully defined (262 lines)
+- v0.2.3 release: Still not wired up in coordinator
+- E2E verification: Discovered missing initialization (2025-03-16)
+
+SEVERITY: MEDIUM
+- Feature exists, documented in README, but non-functional
+- Workaround exists (Stats API)
+- No data loss, no correctness issue
+- Breaks Prometheus monitoring integration

@@ -1,0 +1,209 @@
+{
+  "data": [
+    {
+      "traceID": "a17b58a3236b5c7900172d21b304a15f",
+      "spans": [
+        {
+          "traceID": "a17b58a3236b5c7900172d21b304a15f",
+          "spanID": "fee181c44b24fcb5",
+          "operationName": "hybridgrid.v1.BuildService/Compile",
+          "references": [],
+          "startTime": 1773646543600731,
+          "duration": 12253,
+          "tags": [
+            {
+              "key": "otel.library.name",
+              "type": "string",
+              "value": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+            },
+            {
+              "key": "otel.library.version",
+              "type": "string",
+              "value": "0.64.0"
+            },
+            {
+              "key": "rpc.service",
+              "type": "string",
+              "value": "hybridgrid.v1.BuildService"
+            },
+            {
+              "key": "rpc.method",
+              "type": "string",
+              "value": "Compile"
+            },
+            {
+              "key": "rpc.system",
+              "type": "string",
+              "value": "grpc"
+            },
+            {
+              "key": "server.address",
+              "type": "string",
+              "value": "192.168.65.1"
+            },
+            {
+              "key": "server.port",
+              "type": "int64",
+              "value": 30163
+            },
+            {
+              "key": "rpc.grpc.status_code",
+              "type": "int64",
+              "value": 0
+            },
+            {
+              "key": "span.kind",
+              "type": "string",
+              "value": "server"
+            },
+            {
+              "key": "internal.span.format",
+              "type": "string",
+              "value": "otlp"
+            }
+          ],
+          "logs": [],
+          "processID": "p1",
+          "warnings": null
+        },
+        {
+          "traceID": "a17b58a3236b5c7900172d21b304a15f",
+          "spanID": "726c306187186217",
+          "operationName": "coordinator.Compile",
+          "references": [
+            {
+              "refType": "CHILD_OF",
+              "traceID": "a17b58a3236b5c7900172d21b304a15f",
+              "spanID": "fee181c44b24fcb5"
+            }
+          ],
+          "startTime": 1773646543612513,
+          "duration": 282,
+          "tags": [
+            {
+              "key": "otel.library.name",
+              "type": "string",
+              "value": "hybridgrid-coordinator"
+            },
+            {
+              "key": "hybridgrid.task_id",
+              "type": "string",
+              "value": "task-5c083d5968dde51e-4000"
+            },
+            {
+              "key": "hybridgrid.compiler",
+              "type": "string",
+              "value": "gcc"
+            },
+            {
+              "key": "hybridgrid.target_arch",
+              "type": "string",
+              "value": "ARCH_ARM64"
+            },
+            {
+              "key": "hybridgrid.source_size",
+              "type": "int64",
+              "value": 71943
+            },
+            {
+              "key": "span.kind",
+              "type": "string",
+              "value": "internal"
+            },
+            {
+              "key": "otel.status_code",
+              "type": "string",
+              "value": "ERROR"
+            },
+            {
+              "key": "error",
+              "type": "bool",
+              "value": true
+            },
+            {
+              "key": "otel.status_description",
+              "type": "string",
+              "value": "no worker available"
+            },
+            {
+              "key": "internal.span.format",
+              "type": "string",
+              "value": "otlp"
+            }
+          ],
+          "logs": [
+            {
+              "timestamp": 1773646543612551,
+              "fields": [
+                {
+                  "key": "event",
+                  "type": "string",
+                  "value": "scheduler.select.start"
+                }
+              ]
+            },
+            {
+              "timestamp": 1773646543612754,
+              "fields": [
+                {
+                  "key": "event",
+                  "type": "string",
+                  "value": "exception"
+                },
+                {
+                  "key": "exception.message",
+                  "type": "string",
+                  "value": "no workers match requirements"
+                },
+                {
+                  "key": "exception.type",
+                  "type": "string",
+                  "value": "*errors.errorString"
+                }
+              ]
+            }
+          ],
+          "processID": "p1",
+          "warnings": null
+        }
+      ],
+      "processes": {
+        "p1": {
+          "serviceName": "hybridgrid-coordinator",
+          "tags": [
+            {
+              "key": "environment",
+              "type": "string",
+              "value": "production"
+            },
+            {
+              "key": "service.version",
+              "type": "string",
+              "value": "0.1.0"
+            },
+            {
+              "key": "telemetry.sdk.language",
+              "type": "string",
+              "value": "go"
+            },
+            {
+              "key": "telemetry.sdk.name",
+              "type": "string",
+              "value": "opentelemetry"
+            },
+            {
+              "key": "telemetry.sdk.version",
+              "type": "string",
+              "value": "1.40.0"
+            }
+          ]
+        }
+      },
+      "warnings": null
+    }
+  ],
+  "total": 0,
+  "limit": 0,
+  "offset": 0,
+  "errors": null
+}
