@@ -132,13 +132,14 @@ type Server struct {
 	eventNotifier  EventNotifier
 	workerConns    *connPool
 
-	activeTasks  int64
-	queuedTasks  int64
-	totalTasks   int64
-	successTasks int64
-	failedTasks  int64
-	cacheHits    int64
-	cacheMisses  int64
+	activeTasks         int64
+	queuedTasks         int64
+	totalTasks          int64
+	successTasks        int64
+	failedTasks         int64
+	cacheHits           int64
+	cacheMisses         int64
+	activeTasksByWorker sync.Map
 }
 
 // New creates a new coordinator gRPC server.
@@ -146,6 +147,20 @@ func New(cfg Config) *Server {
 	reg := registry.NewInMemoryRegistry(cfg.HeartbeatTTL)
 	sched := scheduler.NewLeastLoadedScheduler(reg)
 	circuitMgr := resilience.NewCircuitManager(resilience.DefaultCircuitConfig())
+
+	m := metrics.Default()
+	circuitMgr.OnStateChange(func(workerID string, from, to resilience.CircuitState) {
+		var stateValue metrics.CircuitStateValue
+		switch to {
+		case resilience.CircuitClosed:
+			stateValue = metrics.CircuitStateClosed
+		case resilience.CircuitHalfOpen:
+			stateValue = metrics.CircuitStateHalfOpen
+		case resilience.CircuitOpen:
+			stateValue = metrics.CircuitStateOpen
+		}
+		m.SetCircuitState(workerID, stateValue)
+	})
 
 	// Build dial options for worker connections
 	var dialOpts []grpc.DialOption
@@ -368,8 +383,17 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	atomic.AddInt64(&s.activeTasks, 1)
 	atomic.AddInt64(&s.totalTasks, 1)
 
+	m := metrics.Default()
+	val, _ := s.activeTasksByWorker.LoadOrStore(worker.ID, new(int64))
+	count := atomic.AddInt64(val.(*int64), 1)
+	m.SetActiveTaskCount(worker.ID, float64(count))
+
 	defer func() {
 		atomic.AddInt64(&s.activeTasks, -1)
+		if val, ok := s.activeTasksByWorker.Load(worker.ID); ok {
+			count := atomic.AddInt64(val.(*int64), -1)
+			m.SetActiveTaskCount(worker.ID, float64(count))
+		}
 	}()
 
 	queueTime := time.Since(start)
@@ -393,10 +417,22 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 		})
 	}
 
-	// Forward to worker
+	uploadBytes := len(req.PreprocessedSource)
+	if len(req.RawSource) > 0 {
+		uploadBytes = len(req.RawSource)
+	}
+	m.RecordTransfer("upload", float64(uploadBytes))
+
 	tracing.AddEvent(ctx, "forward.start")
+	workerCallStart := time.Now()
 	resp, err := s.forwardCompile(ctx, worker, req)
+	workerLatency := time.Since(workerCallStart)
+	m.RecordWorkerLatency(worker.ID, float64(workerLatency.Milliseconds()))
 	tracing.AddEvent(ctx, "forward.done")
+
+	if resp != nil && len(resp.ObjectFile) > 0 {
+		m.RecordTransfer("download", float64(len(resp.ObjectFile)))
+	}
 
 	// Track completion
 	success := err == nil && resp != nil && resp.Status == pb.TaskStatus_STATUS_COMPLETED
@@ -459,8 +495,6 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	// Set queue time
 	resp.QueueTimeMs = int64(queueTime.Milliseconds())
 
-	// Record metrics
-	m := metrics.Default()
 	duration := totalDuration.Seconds()
 	buildType := "cpp"
 	if success {

@@ -18,6 +18,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/fallback"
 	"github.com/h3nr1-d14z/hybridgrid/internal/compiler"
 	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/client"
+	"github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
 )
 
 // Service handles distributed compilation with preprocessing and caching.
@@ -241,6 +242,9 @@ func (s *Service) Build(ctx context.Context, req *Request) (*Result, error) {
 	if !s.fallback.IsEnabled() {
 		return nil, fmt.Errorf("remote compilation failed and local fallback is disabled")
 	}
+
+	m := metrics.Default()
+	m.RecordFallback(result.FallbackReason)
 
 	// For local fallback, we need to preprocess first
 	prepResult, err := s.preprocessor.Preprocess(ctx, req.Args, req.SourceFile)
