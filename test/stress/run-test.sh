@@ -80,7 +80,15 @@ print_header "Test 1: Local Build (baseline)"
 print_step "Building with local gcc -j4..."
 
 LOCAL_START=$(date +%s.%N)
-make -j4 2>&1 | tail -10
+TMPLOG=$(mktemp)
+make -j4 > "$TMPLOG" 2>&1
+LOCAL_EXIT_CODE=$?
+tail -10 "$TMPLOG"
+rm "$TMPLOG"
+if [ $LOCAL_EXIT_CODE -ne 0 ]; then
+    print_error "Local build failed with exit code $LOCAL_EXIT_CODE"
+    exit $LOCAL_EXIT_CODE
+fi
 LOCAL_END=$(date +%s.%N)
 LOCAL_TIME=$(echo "$LOCAL_END - $LOCAL_START" | bc)
 
@@ -96,7 +104,15 @@ if [ "$DISTRIBUTED_AVAILABLE" = true ]; then
     print_step "Building with hgbuild make -j8..."
 
     DIST_START=$(date +%s.%N)
-    hgbuild --coordinator=${COORDINATOR} -v make -j8 2>&1 | tail -20
+    TMPLOG=$(mktemp)
+    hgbuild --coordinator=${COORDINATOR} -v make -j8 > "$TMPLOG" 2>&1
+    DIST_EXIT_CODE=$?
+    tail -20 "$TMPLOG"
+    rm "$TMPLOG"
+    if [ $DIST_EXIT_CODE -ne 0 ]; then
+        print_error "Distributed build failed with exit code $DIST_EXIT_CODE"
+        exit $DIST_EXIT_CODE
+    fi
     DIST_END=$(date +%s.%N)
     DIST_TIME=$(echo "$DIST_END - $DIST_START" | bc)
 
@@ -141,7 +157,15 @@ if [ "$DISTRIBUTED_AVAILABLE" = true ]; then
     touch Modules/main.c  # Touch one file to trigger partial rebuild
 
     CACHE_START=$(date +%s.%N)
-    hgbuild --coordinator=${COORDINATOR} -v make -j8 2>&1 | grep -E '\[cache\]|\[remote\]|\[local\]' | head -20
+    TMPLOG=$(mktemp)
+    hgbuild --coordinator=${COORDINATOR} -v make -j8 > "$TMPLOG" 2>&1
+    CACHE_EXIT_CODE=$?
+    grep -E '\[cache\]|\[remote\]|\[local\]' "$TMPLOG" | head -20
+    rm "$TMPLOG"
+    if [ $CACHE_EXIT_CODE -ne 0 ]; then
+        print_error "Cache rebuild failed with exit code $CACHE_EXIT_CODE"
+        exit $CACHE_EXIT_CODE
+    fi
     CACHE_END=$(date +%s.%N)
     CACHE_TIME=$(echo "$CACHE_END - $CACHE_START" | bc)
 
