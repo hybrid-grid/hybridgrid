@@ -68,6 +68,8 @@ services:
         BUILD_TIME: ${BUILD_TIME:-unknown}
     hostname: worker-2
     command: hg-worker serve --coordinator=coordinator:9000 --port=50052 --http-port=9090 --advertise-address=worker-2:50052 --max-parallel=4
+    ports:
+      - "9092:9090"
     volumes:
       - ./testdata:/testdata:ro
     healthcheck:
