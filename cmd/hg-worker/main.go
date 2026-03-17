@@ -23,6 +23,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
 	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/client"
 	"github.com/h3nr1-d14z/hybridgrid/internal/logging"
+	observabilitymetrics "github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 	workerserver "github.com/h3nr1-d14z/hybridgrid/internal/worker/server"
 )
@@ -128,6 +129,9 @@ It executes build tasks received from the coordinator.`,
 				Int("max_parallel", maxParallel).
 				Str("version", version).
 				Msg("Starting Hybrid-Grid Worker")
+
+			_ = observabilitymetrics.Default()
+			log.Info().Msg("Prometheus metrics initialized")
 
 			if tracingEnable {
 				tracingCfg := config.TracingToLibConfig(config.TracingConfig{
