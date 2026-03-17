@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +35,7 @@ var (
 	cfgFile           string
 	coordinator       string
 	insecure          bool
+	noFallback        bool
 	timeout           time.Duration
 	verbose           bool
 	tlsCert           string
@@ -48,6 +50,7 @@ var (
 const (
 	wrapperCCEnv  = "HG_WRAP_CC_MODE"
 	wrapperCXXEnv = "HG_WRAP_CXX_MODE"
+	noFallbackEnv = "HG_NO_FALLBACK"
 )
 
 func main() {
@@ -159,6 +162,7 @@ Environment:
 	// Global flags
 	rootCmd.PersistentFlags().StringVarP(&coordinator, "coordinator", "C", "", "coordinator address (auto-discover if empty)")
 	rootCmd.PersistentFlags().BoolVar(&insecure, "insecure", true, "use insecure connection")
+	rootCmd.PersistentFlags().BoolVar(&noFallback, "no-fallback", false, "disable local fallback when coordinator is unavailable")
 	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 2*time.Minute, "connection timeout")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().StringVar(&tlsCert, "tls-cert", "", "Path to TLS certificate file (PEM format)")
@@ -773,6 +777,9 @@ func filterHgbuildFlags(args []string) []string {
 			continue
 		case arg == "--insecure":
 			continue
+		case arg == "--no-fallback":
+			noFallback = true
+			continue
 		case arg == "--verbose" || arg == "-v":
 			// Set verbose flag and skip
 			verbose = true
@@ -821,6 +828,10 @@ func runCompiler(defaultCompiler, envVar string, args []string) error {
 	// Get coordinator address (auto-discover if not specified)
 	coordAddr := getCoordinatorAddress()
 	if coordAddr == "" {
+		if !fallbackEnabled() {
+			return fmt.Errorf("coordinator unavailable and fallback disabled")
+		}
+
 		// No coordinator available, run locally
 		if verbose {
 			fmt.Fprintf(os.Stderr, "[local] No coordinator available\n")
@@ -835,7 +846,7 @@ func runCompiler(defaultCompiler, envVar string, args []string) error {
 	cfg.CoordinatorAddr = coordAddr
 	cfg.Insecure = insecure
 	cfg.Timeout = 5 * time.Minute
-	cfg.FallbackEnabled = true
+	cfg.FallbackEnabled = fallbackEnabled()
 	cfg.Verbose = verbose
 
 	svc, err := build.New(cfg)
@@ -848,6 +859,10 @@ func runCompiler(defaultCompiler, envVar string, args []string) error {
 	clientCfg := newClientConfig(coordAddr, timeout)
 	c, err := client.New(clientCfg)
 	if err != nil {
+		if !fallbackEnabled() {
+			return fmt.Errorf("coordinator unavailable and fallback disabled: %w", err)
+		}
+
 		// Fallback to local
 		if verbose {
 			fmt.Fprintf(os.Stderr, "[local] Connection failed: %v\n", err)
@@ -1091,7 +1106,7 @@ Examples:
 		DisableFlagParsing: true,
 		SilenceUsage:       true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return wrapBuildCommand("make", args)
+			return wrapBuildCommand("make", filterHgbuildWrapperFlags(args))
 		},
 	}
 }
@@ -1108,7 +1123,7 @@ Examples:
 		DisableFlagParsing: true,
 		SilenceUsage:       true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return wrapBuildCommand("ninja", args)
+			return wrapBuildCommand("ninja", filterHgbuildWrapperFlags(args))
 		},
 	}
 }
@@ -1126,12 +1141,37 @@ Examples:
 		DisableFlagParsing: true,
 		SilenceUsage:       true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
+			filteredArgs := filterHgbuildWrapperFlags(args)
+			if len(filteredArgs) == 0 {
 				return fmt.Errorf("no command specified")
 			}
-			return wrapBuildCommand(args[0], args[1:])
+			return wrapBuildCommand(filteredArgs[0], filteredArgs[1:])
 		},
 	}
+}
+
+func filterHgbuildWrapperFlags(args []string) []string {
+	filtered := make([]string, 0, len(args))
+
+	for _, arg := range args {
+		switch {
+		case arg == "--no-fallback":
+			noFallback = true
+			continue
+		case strings.HasPrefix(arg, "--no-fallback="):
+			value := strings.TrimSpace(strings.TrimPrefix(arg, "--no-fallback="))
+			if parsed, err := strconv.ParseBool(value); err == nil {
+				if parsed {
+					noFallback = true
+				}
+				continue
+			}
+		}
+
+		filtered = append(filtered, arg)
+	}
+
+	return filtered
 }
 
 // wrapBuildCommand wraps a build command with CC/CXX set to hgbuild.
@@ -1168,6 +1208,10 @@ func wrapBuildCommand(command string, args []string) error {
 	// Pass through coordinator address if specified
 	if coordinator != "" {
 		env = setEnv(env, "HG_COORDINATOR", coordinator)
+	}
+
+	if !fallbackEnabled() {
+		env = setEnv(env, noFallbackEnv, "1")
 	}
 
 	// Pass through verbose flag
@@ -1238,6 +1282,15 @@ func setEnv(env []string, key, value string) []string {
 		}
 	}
 	return append(env, prefix+value)
+}
+
+func fallbackEnabled() bool {
+	if noFallback {
+		return false
+	}
+
+	value := strings.TrimSpace(os.Getenv(noFallbackEnv))
+	return value == ""
 }
 
 func newClientConfig(address string, requestTimeout time.Duration) client.Config {
