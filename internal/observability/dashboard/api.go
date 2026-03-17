@@ -24,20 +24,27 @@ type Stats struct {
 
 // WorkerInfo represents worker information for the dashboard.
 type WorkerInfo struct {
-	ID              string  `json:"id"`
-	Host            string  `json:"host"`
-	Address         string  `json:"address"`
-	Architecture    string  `json:"architecture"`
-	CPUCores        int32   `json:"cpu_cores"`
-	MemoryGB        float64 `json:"memory_gb"`
-	ActiveTasks     int32   `json:"active_tasks"`
-	TotalTasks      int64   `json:"total_tasks"`
-	SuccessRate     float64 `json:"success_rate"`
-	AvgLatencyMs    float64 `json:"avg_latency_ms"`
-	CircuitState    string  `json:"circuit_state"`
-	DiscoverySource string  `json:"discovery_source"`
-	Healthy         bool    `json:"healthy"`
-	LastSeen        int64   `json:"last_seen"`
+	ID               string   `json:"id"`
+	Host             string   `json:"host"`
+	Address          string   `json:"address"`
+	OS               string   `json:"os"`
+	Architecture     string   `json:"architecture"`
+	Architectures    []string `json:"architectures"`
+	CPUCores         int32    `json:"cpu_cores"`
+	MemoryGB         float64  `json:"memory_gb"`
+	MaxParallelTasks int32    `json:"max_parallel_tasks"`
+	ActiveTasks      int32    `json:"active_tasks"`
+	TotalTasks       int64    `json:"total_tasks"`
+	SuccessRate      float64  `json:"success_rate"`
+	AvgLatencyMs     float64  `json:"avg_latency_ms"`
+	CircuitState     string   `json:"circuit_state"`
+	DiscoverySource  string   `json:"discovery_source"`
+	Version          string   `json:"version"`
+	DockerAvailable  bool     `json:"docker_available"`
+	Compilers        []string `json:"compilers"`
+	BuildTypes       []string `json:"build_types"`
+	Healthy          bool     `json:"healthy"`
+	LastSeen         int64    `json:"last_seen"`
 }
 
 // TaskInfo represents task information for the dashboard.

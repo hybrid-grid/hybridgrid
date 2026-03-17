@@ -4,6 +4,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/dashboard"
 )
 
@@ -77,25 +78,88 @@ func (p *statsProvider) GetWorkers() []*dashboard.WorkerInfo {
 		}
 
 		caps := workerCapabilitiesOrDefault(w)
+		cppCaps := caps.GetCpp()
+		compilers := make([]string, 0)
+		if cppCaps != nil {
+			compilers = append(compilers, cppCaps.GetCompilers()...)
+		}
 
 		info := &dashboard.WorkerInfo{
-			ID:              w.ID,
-			Host:            caps.Hostname,
-			Address:         w.Address,
-			Architecture:    caps.NativeArch.String(),
-			CPUCores:        caps.CpuCores,
-			MemoryGB:        float64(caps.MemoryBytes) / (1024 * 1024 * 1024),
-			ActiveTasks:     w.ActiveTasks,
-			TotalTasks:      w.TotalTasks,
-			SuccessRate:     successRate,
-			AvgLatencyMs:    float64(w.AvgCompileTime.Milliseconds()),
-			CircuitState:    circuitState,
-			DiscoverySource: w.DiscoverySource,
-			Healthy:         w.IsHealthy(p.server.config.HeartbeatTTL),
-			LastSeen:        w.LastHeartbeat.Unix(),
+			ID:               w.ID,
+			Host:             caps.Hostname,
+			Address:          w.Address,
+			OS:               caps.Os,
+			Architecture:     caps.NativeArch.String(),
+			Architectures:    supportedArchitectures(caps),
+			CPUCores:         caps.CpuCores,
+			MemoryGB:         float64(caps.MemoryBytes) / (1024 * 1024 * 1024),
+			MaxParallelTasks: caps.MaxParallelTasks,
+			ActiveTasks:      w.ActiveTasks,
+			TotalTasks:       w.TotalTasks,
+			SuccessRate:      successRate,
+			AvgLatencyMs:     float64(w.AvgCompileTime.Milliseconds()),
+			CircuitState:     circuitState,
+			DiscoverySource:  w.DiscoverySource,
+			Version:          caps.Version,
+			DockerAvailable:  caps.DockerAvailable,
+			Compilers:        compilers,
+			BuildTypes:       supportedBuildTypes(caps),
+			Healthy:          w.IsHealthy(p.server.config.HeartbeatTTL),
+			LastSeen:         w.LastHeartbeat.Unix(),
 		}
 		result = append(result, info)
 	}
 
 	return result
+}
+
+func supportedArchitectures(caps *pb.WorkerCapabilities) []string {
+	architectures := make([]string, 0, 1)
+	seen := make(map[string]struct{})
+
+	add := func(value string) {
+		if value == "" {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		architectures = append(architectures, value)
+	}
+
+	add(caps.NativeArch.String())
+
+	if cppCaps := caps.GetCpp(); cppCaps != nil {
+		for _, arch := range cppCaps.GetMsvcArchitectures() {
+			add(arch)
+		}
+	}
+
+	return architectures
+}
+
+func supportedBuildTypes(caps *pb.WorkerCapabilities) []string {
+	buildTypes := make([]string, 0, 6)
+
+	if caps.GetCpp() != nil {
+		buildTypes = append(buildTypes, pb.BuildType_BUILD_TYPE_CPP.String())
+	}
+	if caps.GetFlutter() != nil {
+		buildTypes = append(buildTypes, pb.BuildType_BUILD_TYPE_FLUTTER.String())
+	}
+	if caps.GetUnity() != nil {
+		buildTypes = append(buildTypes, pb.BuildType_BUILD_TYPE_UNITY.String())
+	}
+	if caps.GetRust() != nil {
+		buildTypes = append(buildTypes, pb.BuildType_BUILD_TYPE_RUST.String())
+	}
+	if caps.GetGo() != nil {
+		buildTypes = append(buildTypes, pb.BuildType_BUILD_TYPE_GO.String())
+	}
+	if caps.GetNodejs() != nil {
+		buildTypes = append(buildTypes, pb.BuildType_BUILD_TYPE_NODEJS.String())
+	}
+
+	return buildTypes
 }

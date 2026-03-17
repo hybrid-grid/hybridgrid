@@ -140,6 +140,24 @@ func TestServer_HandleWorkers(t *testing.T) {
 	if len(workers) != 2 {
 		t.Errorf("Workers count = %d, want 2", len(workers))
 	}
+
+	firstWorker, ok := workers[0].(map[string]interface{})
+	if !ok {
+		t.Fatal("first worker should decode as object")
+	}
+
+	if _, ok := firstWorker["architectures"]; !ok {
+		t.Fatal("worker response missing architectures field")
+	}
+	if _, ok := firstWorker["compilers"]; !ok {
+		t.Fatal("worker response missing compilers field")
+	}
+	if _, ok := firstWorker["build_types"]; !ok {
+		t.Fatal("worker response missing build_types field")
+	}
+	if _, ok := firstWorker["docker_available"]; !ok {
+		t.Fatal("worker response missing docker_available field")
+	}
 }
 
 func TestServer_HandleWorkers_NilProvider(t *testing.T) {
