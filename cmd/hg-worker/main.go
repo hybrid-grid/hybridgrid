@@ -270,12 +270,12 @@ It executes build tasks received from the coordinator.`,
 
 			// Start metrics HTTP server
 			metricsMux := http.NewServeMux()
-			metricsMux.Handle("/metrics", promhttp.Handler())
-			metricsMux.Handle("/log-level", logging.NewLogLevelHandler())
 			metricsMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("OK"))
+				w.Write([]byte("OK\n"))
 			})
+			metricsMux.Handle("/metrics", promhttp.Handler())
+			metricsMux.Handle("/log-level", logging.NewLogLevelHandler())
 			metricsServer := &http.Server{
 				Addr:    fmt.Sprintf(":%d", httpPort),
 				Handler: metricsMux,

@@ -11,8 +11,10 @@ services:
     ports:
       - "9000:9000"
       - "8080:8080"
+    volumes:
+      - ./testdata:/testdata:ro
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8080/metrics"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -37,6 +39,8 @@ services:
     command: hg-worker serve --coordinator=coordinator:9000 --port=50052 --http-port=9090 --advertise-address=worker-1:50052 --max-parallel=4
     ports:
       - "9091:9090"
+    volumes:
+      - ./testdata:/testdata:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:9090/health"]
       interval: 10s
@@ -64,6 +68,8 @@ services:
         BUILD_TIME: ${BUILD_TIME:-unknown}
     hostname: worker-2
     command: hg-worker serve --coordinator=coordinator:9000 --port=50052 --http-port=9090 --advertise-address=worker-2:50052 --max-parallel=4
+    volumes:
+      - ./testdata:/testdata:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:9090/health"]
       interval: 10s
