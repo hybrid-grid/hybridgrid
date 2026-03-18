@@ -1,0 +1,10 @@
+# Flutter Android Docker image — .dockerignore
+#
+# Exclude everything except the Dockerfile itself.
+# This image is built from the cirruslabs Flutter base; no local sources needed.
+
+# Ignore everything at the build context root
+**
+
+# Re-include only the Dockerfile (required for docker build -f)
+!Dockerfile
