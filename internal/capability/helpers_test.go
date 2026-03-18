@@ -54,6 +54,10 @@ func TestDetectMemoryWindows_ParseWmic(t *testing.T) {
 }
 
 func TestDetectCpp_NoCompilersPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows MSVC detection uses registry, not PATH")
+	}
+
 	origPath := os.Getenv("PATH")
 	defer os.Setenv("PATH", origPath)
 
@@ -481,6 +485,10 @@ func TestDetectCpp_PathModification(t *testing.T) {
 }
 
 func TestDetectCpp_PathModification_DeduplicatedOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows MSVC detection uses registry, not PATH")
+	}
+
 	origPath := os.Getenv("PATH")
 	defer os.Setenv("PATH", origPath)
 

@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/schollz/progressbar/v3"
+	"golang.org/x/term"
 )
 
 // ProgressBar wraps a progress bar with build-specific functionality.
@@ -19,6 +20,16 @@ type ProgressConfig struct {
 	Description string
 	Verbose     bool
 	Writer      io.Writer
+}
+
+// isTerminalWriter returns true when w is a real TTY.
+// Only os.File descriptors can be checked; all other writers (bytes.Buffer,
+// pipes, test writers) are treated as non-terminal.
+func isTerminalWriter(w io.Writer) bool {
+	if f, ok := w.(*os.File); ok {
+		return term.IsTerminal(int(f.Fd()))
+	}
+	return false
 }
 
 // NewBuildProgress creates a progress bar for build operations.
@@ -36,6 +47,8 @@ func NewProgress(cfg ProgressConfig) *ProgressBar {
 		writer = os.Stderr
 	}
 
+	useANSI := isTerminalWriter(writer)
+
 	bar := progressbar.NewOptions(cfg.Total,
 		progressbar.OptionSetDescription(cfg.Description),
 		progressbar.OptionSetWriter(writer),
@@ -52,10 +65,10 @@ func NewProgress(cfg ProgressConfig) *ProgressBar {
 			BarStart:      "[",
 			BarEnd:        "]",
 		}),
-		progressbar.OptionEnableColorCodes(true),
+		progressbar.OptionEnableColorCodes(useANSI),
 		progressbar.OptionSetWidth(40),
 		progressbar.OptionThrottle(100),
-		progressbar.OptionUseANSICodes(true),
+		progressbar.OptionUseANSICodes(useANSI),
 	)
 
 	return &ProgressBar{

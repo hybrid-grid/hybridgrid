@@ -223,6 +223,10 @@ func TestManager_SelectForRequest_UsesDockerForCrossOSRawSource(t *testing.T) {
 
 // TestManager_SelectForCompiler tests compiler-based executor selection
 func TestManager_SelectForCompiler(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("MSVC executor is always present on Windows; cl.exe cases require a non-MSVC environment")
+	}
+
 	tests := []struct {
 		name         string
 		compiler     string
