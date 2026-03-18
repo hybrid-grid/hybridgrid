@@ -4,7 +4,7 @@ A distributed multi-platform build system for C/C++, Flutter, Unity, and more.
 
 Hybrid-Grid distributes compilation tasks across multiple machines on your LAN (via mDNS auto-discovery) or WAN, dramatically reducing build times for large projects.
 
-## v0.2.4 Release Status
+## v0.3.0 Release Status
 
 ### ✅ Production Ready Features
 | Feature | Status | Notes |
@@ -13,35 +13,40 @@ Hybrid-Grid distributes compilation tasks across multiple machines on your LAN (
 | **MSVC Flag Translation** | ✅ Working | GCC/Clang to MSVC flag mapping |
 | **mDNS Auto-Discovery** | ✅ Working | Zero-config LAN discovery |
 | **Local Cache** | ✅ Working | ~10x speedup on cache hits |
-| **Web Dashboard** | ✅ Working | Real-time worker/task/cache stats |
+| **Web Dashboard** | ✅ Working | Real-time worker/task/cache stats + full capabilities |
 | **`hgbuild make/ninja`** | ✅ Working | Wraps build tools with distributed CC |
 | **`hgbuild cc/c++`** | ✅ Working | Drop-in gcc/g++ replacement |
 | **`hgbuild graph`** | ✅ Working | Build dependency visualization |
-| **Local Fallback** | ✅ Working | Auto-fallback when coordinator unavailable |
+| **Local Fallback** | ✅ Working | Auto-fallback when coordinator unavailable; `--no-fallback` to disable |
 | **P2C Scheduler** | ✅ Working | Smart worker selection with scoring |
 | **Circuit Breaker** | ✅ Working | Per-worker fault tolerance |
 | **Docker Cross-Compile** | ✅ Working | dockcross integration |
 | **Colored CLI Output** | ✅ Working | Progress bars and status tags |
-| **Prometheus Metrics** | ✅ Production Ready | Custom hybridgrid_* metrics for monitoring |
-| **OpenTelemetry Tracing** | ✅ Implemented | Library, gRPC interceptors, per-RPC spans; needs startup wiring |
-| **TLS/mTLS** | ✅ Implemented | Cert loading, mTLS, token auth; needs CLI flags to enable |
+| **Prometheus Metrics** | ✅ Production Ready | 12/12 custom `hybridgrid_*` metrics on coordinator + workers |
+| **OpenTelemetry Tracing** | ✅ Production Ready | CLI flags on both binaries, Jaeger/Zipkin compatible |
+| **TLS/mTLS** | ✅ Production Ready | Full CLI flags on both binaries, certificate-based auth |
+| **Worker Capabilities API** | ✅ Working | `/api/v1/workers` exposes compilers, arch, build types, Docker |
+| **Health Endpoints** | ✅ Working | `/health` on coordinator (`:8080`) and workers (`:9090`) |
 
 ### ⏳ Planned Features
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Flutter builds | ❌ Planned | v0.3.0 |
-| Unity builds | ❌ Planned | v0.3.0 |
+| Flutter builds | ❌ Planned | v0.4.0 |
+| Unity builds | ❌ Planned | v0.4.0 |
 | Rust/Go/Node builds | ❌ Planned | v0.4.0 |
-| OTel/TLS startup wiring | ⏳ Next | Connect tracing.Init() and TLS config in main() |
 | WAN Registry | ❌ Planned | Currently LAN-only |
 | Config Validation | ❌ Planned | Runtime config checks |
 
-### What's New in v0.2.4
-- **Prometheus Metrics**: Custom `hybridgrid_*` metrics now exported at `/metrics` endpoint
-- **Observability**: Task counts, compilation duration, queue metrics, worker tracking
-- **7 metrics working**: tasks_total, task_duration, queue_time, workers_total, queue_depth, cache hits/misses
-- **E2E Verified**: Full Docker cluster testing with real compilation workload
-- **Full changelog**: [v0.2.3...v0.2.4](https://github.com/hybrid-grid/hybridgrid/compare/v0.2.3...v0.2.4)
+### What's New in v0.3.0
+- **12/12 Prometheus metrics**: All metrics now instrumented — added `fallbacks_total`, `active_tasks`, `network_transfer_bytes`, `worker_latency_ms`, `circuit_state`
+- **OpenTelemetry CLI flags**: `--tracing-enable`, `--tracing-endpoint`, `--tracing-service-name` on coordinator and worker
+- **TLS/mTLS CLI flags**: `--tls-cert`, `--tls-key`, `--tls-ca`, `--tls-require-client-cert` on coordinator and worker
+- **`--no-fallback` flag**: Fail fast when coordinator unavailable instead of silently compiling locally
+- **Worker capabilities API**: `/api/v1/workers` now returns compilers, architectures, build types, Docker availability, version
+- **Worker metrics**: Workers expose `/metrics` and `/health` at `:9090`
+- **Health endpoints**: Both binaries expose `/health` for Docker/K8s healthchecks
+- **Stress test fix**: Exit codes now correctly propagated through `make`/`ninja` wrappers
+- **Full changelog**: [v0.2.4...v0.3.0](https://github.com/hybrid-grid/hybridgrid/compare/v0.2.4...v0.3.0)
 
 ### Tested Configurations
 - **macOS** (ARM64/x86_64) → Coordinator + Worker ✅
@@ -349,23 +354,117 @@ hgbuild cache clear
 ### Web Dashboard
 
 Access at `http://coordinator:8080/` for:
-- Real-time worker status
-- Task statistics
+- Real-time worker status with full capabilities (compilers, architectures, build types, Docker)
+- Task statistics and latency histograms
 - Cache hit rates
 - Circuit breaker states
+
+### Health Endpoints
+
+```bash
+curl http://coordinator:8080/health   # → "OK"
+curl http://worker:9090/health        # → "OK"
+```
+
+Suitable for Docker/Kubernetes healthchecks.
 
 ### Prometheus Metrics
 
 Scrape endpoints:
 - Coordinator: `http://coordinator:8080/metrics`
-- Workers: `http://worker:9090/metrics`
+- Workers: `http://worker-1:9090/metrics`, `http://worker-2:9090/metrics`
 
-Key metrics:
-- `hybridgrid_tasks_total` - Total compilation tasks
-- `hybridgrid_task_duration_seconds` - Compilation latency
-- `hybridgrid_cache_hits_total` / `cache_misses_total` - Cache efficiency
-- `hybridgrid_workers_total` - Connected workers
-- `hybridgrid_circuit_state` - Circuit breaker status
+Example Prometheus scrape config:
+```yaml
+scrape_configs:
+  - job_name: 'hg-coord'
+    static_configs:
+      - targets: ['coordinator:8080']
+  - job_name: 'hg-workers'
+    static_configs:
+      - targets: ['worker-1:9090', 'worker-2:9090']
+```
+
+All 12 metrics (prefix: `hybridgrid_`):
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `tasks_total` | Counter | Total compilation tasks by status/type/worker |
+| `task_duration_seconds` | Histogram | End-to-end compilation latency |
+| `queue_time_seconds` | Histogram | Time waiting in queue before dispatch |
+| `cache_hits_total` | Counter | Cache hit count |
+| `cache_misses_total` | Counter | Cache miss count |
+| `workers_total` | Gauge | Connected workers by state and source |
+| `queue_depth` | Gauge | Tasks currently waiting |
+| `active_tasks` | Gauge | Tasks in-flight per worker |
+| `fallbacks_total` | Counter | Local fallback compilations by reason |
+| `network_transfer_bytes` | Histogram | Upload/download bytes per task |
+| `worker_latency_ms` | Histogram | gRPC round-trip latency per worker |
+| `circuit_state` | Gauge | Circuit breaker state (0=closed, 1=half-open, 2=open) |
+
+### Worker Capabilities API
+
+```bash
+curl http://coordinator:8080/api/v1/workers | jq
+```
+
+Returns full worker capabilities including:
+- `compilers` — detected compilers (gcc, clang, cl.exe, …)
+- `architectures` — supported target architectures
+- `build_types` — supported build types (C++, Rust, Go, Flutter, …)
+- `docker_available` — whether Docker cross-compilation is available
+- `max_parallel_tasks`, `cpu_cores`, `memory_gb`, `os`, `version`
+
+### OpenTelemetry Tracing
+
+Both coordinator and worker support OTLP gRPC export (Jaeger, Zipkin, etc.):
+
+```bash
+# Start Jaeger (or any OpenTelemetry collector)
+docker run -d -p 16686:16686 -p 4317:4317 jaegertracing/all-in-one
+
+# Start coordinator with tracing enabled
+hg-coord serve \
+  --tracing-enable \
+  --tracing-endpoint=localhost:4317 \
+  --tracing-service-name=hg-coord \
+  --tracing-insecure
+
+# Start worker with tracing enabled
+hg-worker serve --coordinator=localhost:9000 \
+  --tracing-enable \
+  --tracing-endpoint=localhost:4317 \
+  --tracing-service-name=hg-worker \
+  --tracing-insecure
+
+# View traces at http://localhost:16686
+```
+
+### TLS / mTLS
+
+```bash
+# Generate self-signed certs (for testing)
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
+
+# Start coordinator with TLS
+hg-coord serve \
+  --tls-cert=cert.pem \
+  --tls-key=key.pem
+
+# Start coordinator with mTLS (requires client certs)
+hg-coord serve \
+  --tls-cert=cert.pem \
+  --tls-key=key.pem \
+  --tls-ca=ca.pem \
+  --tls-require-client-cert
+
+# Worker connecting with TLS
+hg-worker serve \
+  --coordinator=coordinator:9000 \
+  --tls-cert=client.pem \
+  --tls-key=client-key.pem \
+  --tls-ca=ca.pem
+```
 
 ## Development
 
