@@ -53,6 +53,9 @@ dist/
 # Test/E2E certificates (generated, not source-controlled)
 test/e2e/certs/
 
+# Distributed demo generated binaries
+test/distributed/binaries/
+
 #Ignore vscode AI rules
 .github/instructions/codacy.instructions.md
 
