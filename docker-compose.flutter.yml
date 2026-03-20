@@ -10,7 +10,7 @@
 services:
   flutter-worker:
     build:
-      context: ../..
+      context: .
       dockerfile: build/docker/flutter/Dockerfile
       args:
         FLUTTER_VERSION: "3.19.6"
@@ -23,13 +23,13 @@ services:
       - FLUTTER_ROOT=/opt/flutter
       - ANDROID_SDK_ROOT=/opt/flutter/bin/cache/android-sdk
       - ANDROID_HOME=/opt/flutter/bin/cache/android-sdk
-      - JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+      - JAVA_HOME=/usr/lib/jvm/java-17-openjdk-arm64
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:9090/health || wget -q --spider http://localhost:9090/health || exit 1"]
+      test: ["CMD-SHELL", "flutter --version"]
       interval: 15s
-      timeout: 5s
+      timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 60s
     networks:
       - hybridgrid
     restart: unless-stopped

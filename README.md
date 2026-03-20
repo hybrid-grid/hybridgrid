@@ -4,7 +4,7 @@ A distributed multi-platform build system for C/C++, Flutter, Unity, and more.
 
 Hybrid-Grid distributes compilation tasks across multiple machines on your LAN (via mDNS auto-discovery) or WAN, dramatically reducing build times for large projects.
 
-## v0.3.0 Release Status
+## v0.4.0 Release Status
 
 ### ✅ Production Ready Features
 | Feature | Status | Notes |
@@ -31,13 +31,20 @@ Hybrid-Grid distributes compilation tasks across multiple machines on your LAN (
 ### ⏳ Planned Features
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Flutter builds | ❌ Planned | v0.4.0 |
+| Flutter builds | ✅ Working | Android-only for v0.4.0 |
 | Unity builds | ❌ Planned | v0.4.0 |
 | Rust/Go/Node builds | ❌ Planned | v0.4.0 |
 | WAN Registry | ❌ Planned | Currently LAN-only |
 | Config Validation | ❌ Planned | Runtime config checks |
 
-### What's New in v0.3.0
+### What's New in v0.4.0
+- **Flutter builds**: Distributed Flutter Android compilation via `hgbuild flutter build apk` and `hgbuild flutter build appbundle`
+- **Docker-based Flutter workers**: Pre-built Docker image `hybridgrid/flutter-android` with Android SDK and Gradle
+- **First build cache miss**: Flutter builds always run on first build (no cache available)
+- **Subsequent build cache hits**: Identical Flutter builds return cached artifacts on second run
+- **Full changelog**: [v0.3.0...v0.4.0](https://github.com/hybrid-grid/hybridgrid/compare/v0.3.0...v0.4.0)
+
+### Previously in v0.3.0
 - **12/12 Prometheus metrics**: All metrics now instrumented — added `fallbacks_total`, `active_tasks`, `network_transfer_bytes`, `worker_latency_ms`, `circuit_state`
 - **OpenTelemetry CLI flags**: `--tracing-enable`, `--tracing-endpoint`, `--tracing-service-name` on coordinator and worker
 - **TLS/mTLS CLI flags**: `--tls-cert`, `--tls-key`, `--tls-ca`, `--tls-require-client-cert` on coordinator and worker
@@ -236,6 +243,71 @@ To disable fallback (fail if no coordinator):
 hgbuild --no-fallback make
 ```
 
+## Flutter Builds
+
+### Quick Start
+
+Flutter builds distribute compilation of Android APKs and App Bundles across your worker nodes.
+
+```bash
+# Build debug APK (requires coordinator + Flutter worker)
+hgbuild flutter build apk --project /path/to/flutter/project
+
+# Build release APK with flavor
+hgbuild flutter build apk --project /path/to/flutter/project --build-mode release --flavor staging
+
+# Build Android App Bundle
+hgbuild flutter build appbundle --project /path/to/flutter/project --build-mode profile
+```
+
+### How It Works
+
+```
+hgbuild flutter build apk
+    │
+    ├─► 1. Archives project source and sends to coordinator
+    ├─► 2. Coordinator schedules task to Flutter worker
+    ├─► 3. Worker runs flutter pub get + flutter build
+    ├─► 4. APK artifact returned and cached locally
+    └─► 5. Second identical build returns cached artifact
+```
+
+### Build Modes
+
+| Mode | Description |
+|------|-------------|
+| `debug` | Debug build with debugging symbols |
+| `profile` | Profile build with optimizations and tracing |
+| `release` | Release build with full optimizations (default) |
+
+### Docker Image
+
+Use the pre-built Flutter Android image for worker nodes:
+
+```bash
+# Start a Flutter worker
+docker compose -f docker-compose.flutter.yml up -d
+
+# Or build custom image
+docker build -f build/docker/flutter/Dockerfile --build-arg FLUTTER_VERSION=3.19.6 -t my-flutter-worker .
+```
+
+The Docker image includes:
+- Flutter SDK (3.19.6 by default)
+- Android SDK at `/opt/flutter/bin/cache/android-sdk`
+- Gradle 8.5
+- Java 17
+
+Note: iOS builds are not supported. No signing keys are included.
+
+### Cache Behavior
+
+Flutter builds cache at the artifact level:
+
+1. **First build**: Always compiles (cache miss) — `flutter pub get` runs, then `flutter build`
+2. **Second build**: If source archive hash matches, returns cached APK/AAB (cache hit)
+3. **Source change**: New source hash invalidates cache, rebuild required
+
 ## Installation
 
 ### Pre-built Binaries
@@ -253,6 +325,7 @@ sudo mv hg-* hgbuild /usr/local/bin/
 ```bash
 docker pull ghcr.io/h3nr1-d14z/hybridgrid/hg-coord:latest
 docker pull ghcr.io/h3nr1-d14z/hybridgrid/hg-worker:latest
+docker pull ghcr.io/h3nr1-d14z/hybridgrid/flutter-android:3.19.6
 ```
 
 ### From Source

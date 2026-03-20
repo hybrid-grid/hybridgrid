@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
+	"github.com/h3nr1-d14z/hybridgrid/internal/cache"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/registry"
 )
 
@@ -52,6 +53,61 @@ func setupTestServer(t *testing.T, cfg Config) (*Server, pb.BuildServiceClient, 
 	}
 
 	return s, client, cleanup
+}
+
+type mockWorkerBuildService struct {
+	pb.UnimplementedBuildServiceServer
+	buildFn func(context.Context, *pb.BuildRequest) (*pb.BuildResponse, error)
+}
+
+func (m *mockWorkerBuildService) Build(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+	if m.buildFn != nil {
+		return m.buildFn(ctx, req)
+	}
+	return &pb.BuildResponse{
+		Status:   pb.TaskStatus_STATUS_FAILED,
+		ExitCode: 1,
+		Stderr:   "mock build not configured",
+	}, nil
+}
+
+func setupTestWorker(t *testing.T, buildFn func(context.Context, *pb.BuildRequest) (*pb.BuildResponse, error)) (string, func()) {
+	t.Helper()
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	srv := grpc.NewServer()
+	pb.RegisterBuildServiceServer(srv, &mockWorkerBuildService{buildFn: buildFn})
+
+	go func() {
+		if err := srv.Serve(lis); err != nil {
+			t.Logf("Worker server exited: %v", err)
+		}
+	}()
+
+	cleanup := func() {
+		srv.Stop()
+		lis.Close()
+	}
+
+	return lis.Addr().String(), cleanup
+}
+
+func newFlutterBuildRequest(taskID, sourceHash string) *pb.BuildRequest {
+	return &pb.BuildRequest{
+		TaskId:         taskID,
+		BuildType:      pb.BuildType_BUILD_TYPE_FLUTTER,
+		TargetPlatform: pb.TargetPlatform_PLATFORM_ANDROID,
+		SourceHash:     sourceHash,
+		SourceArchive:  []byte("flutter-archive"),
+		Config: &pb.BuildRequest_FlutterConfig{
+			FlutterConfig: &pb.FlutterConfig{
+				FlutterVersion: "3.10.0",
+				BuildMode:      "release",
+			},
+		},
+	}
 }
 
 // --- DefaultConfig ---
@@ -357,6 +413,109 @@ func TestBuild_NotImplemented(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, pb.TaskStatus_STATUS_FAILED, resp.Status)
 	assert.Contains(t, resp.Stderr, "not implemented")
+}
+
+func TestBuild_Flutter_NoWorker(t *testing.T) {
+	_, client, cleanup := setupTestServer(t, Config{Port: 0, HeartbeatTTL: 30 * time.Second})
+	defer cleanup()
+
+	resp, err := client.Build(context.Background(), newFlutterBuildRequest("flutter-no-worker", "aabbccdd"))
+	require.NoError(t, err)
+	assert.Equal(t, pb.TaskStatus_STATUS_FAILED, resp.Status)
+	assert.Contains(t, resp.Stderr, "no worker available")
+}
+
+func TestBuild_Flutter_CacheHit(t *testing.T) {
+	s, client, cleanup := setupTestServer(t, Config{Port: 0, HeartbeatTTL: 30 * time.Second})
+	defer cleanup()
+
+	req := newFlutterBuildRequest("flutter-cache-hit", "11223344")
+	flutterConfig := req.GetFlutterConfig()
+	cacheKey := cache.FlutterCacheKey(flutterConfig, req.SourceHash, flutterConfig.GetFlutterVersion())
+
+	s.setFlutterCache(cacheKey, &pb.BuildResponse{
+		Status:      pb.TaskStatus_STATUS_COMPLETED,
+		ExitCode:    0,
+		Stdout:      "cached build",
+		Stderr:      "",
+		Artifacts:   []byte("apk-bytes"),
+		BuildTimeMs: 123,
+		ArtifactList: []*pb.ArtifactInfo{
+			{Name: "app-release.apk", SizeBytes: int64(len("apk-bytes"))},
+		},
+	})
+
+	resp, err := client.Build(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, pb.TaskStatus_STATUS_COMPLETED, resp.Status)
+	assert.True(t, resp.FromCache)
+	assert.Equal(t, "cached build", resp.Stdout)
+	assert.Equal(t, []byte("apk-bytes"), resp.Artifacts)
+	assert.Len(t, resp.ArtifactList, 1)
+	assert.Equal(t, "app-release.apk", resp.ArtifactList[0].Name)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&s.cacheHits))
+}
+
+func TestBuild_Flutter_CacheMissForwardsAndCaches(t *testing.T) {
+	s, client, cleanup := setupTestServer(t, Config{Port: 0, HeartbeatTTL: 30 * time.Second, RequestTimeout: 2 * time.Second})
+	defer cleanup()
+
+	var buildCalls int64
+	workerResp := &pb.BuildResponse{
+		Status:      pb.TaskStatus_STATUS_COMPLETED,
+		ExitCode:    0,
+		Stdout:      "worker build",
+		Stderr:      "",
+		Artifacts:   []byte("worker-apk"),
+		BuildTimeMs: 250,
+		ArtifactList: []*pb.ArtifactInfo{
+			{Name: "app-release.apk", SizeBytes: int64(len("worker-apk"))},
+		},
+	}
+
+	addr, workerCleanup := setupTestWorker(t, func(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+		atomic.AddInt64(&buildCalls, 1)
+		return workerResp, nil
+	})
+	defer workerCleanup()
+
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "flutter-worker-1",
+		Address: addr,
+		Capabilities: &pb.WorkerCapabilities{
+			WorkerId:    "flutter-worker-1",
+			Hostname:    "flutter-host",
+			CpuCores:    4,
+			MemoryBytes: 8 * 1024 * 1024 * 1024,
+			NativeArch:  pb.Architecture_ARCH_X86_64,
+			Flutter: &pb.FlutterCapability{
+				SdkVersion: "3.10.0",
+				Platforms:  []pb.TargetPlatform{pb.TargetPlatform_PLATFORM_ANDROID},
+				AndroidSdk: true,
+			},
+		},
+		MaxParallel: 4,
+	}))
+
+	req := newFlutterBuildRequest("flutter-cache-miss", "99aabbcc")
+	resp, err := client.Build(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, pb.TaskStatus_STATUS_COMPLETED, resp.Status)
+	assert.False(t, resp.FromCache)
+	assert.Equal(t, "worker build", resp.Stdout)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&buildCalls))
+
+	cacheKey := cache.FlutterCacheKey(req.GetFlutterConfig(), req.SourceHash, req.GetFlutterConfig().GetFlutterVersion())
+	cached := s.getFlutterCache(cacheKey)
+	require.NotNil(t, cached)
+	assert.Equal(t, "worker build", cached.stdout)
+	assert.Equal(t, []byte("worker-apk"), cached.artifacts)
+
+	req.TaskId = "flutter-cache-miss-2"
+	resp, err = client.Build(context.Background(), req)
+	require.NoError(t, err)
+	assert.True(t, resp.FromCache)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&buildCalls))
 }
 
 // --- StreamBuild ---

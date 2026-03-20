@@ -19,6 +19,7 @@ import (
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cache"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/build"
+	"github.com/h3nr1-d14z/hybridgrid/internal/cli/flutter"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/output"
 	"github.com/h3nr1-d14z/hybridgrid/internal/compiler"
 	"github.com/h3nr1-d14z/hybridgrid/internal/config"
@@ -178,6 +179,7 @@ Environment:
 		newStatusCmd(),
 		newWorkersCmd(),
 		newBuildCmd(),
+		newFlutterCmd(),
 		newConfigCmd(),
 		newCacheCmd(),
 		newGraphCmd(),
@@ -423,6 +425,20 @@ Examples:
 	cmd.Flags().StringVar(&targetArch, "arch", "", "target architecture (x86_64, arm64)")
 
 	return cmd
+}
+
+func newFlutterCmd() *cobra.Command {
+	deps := flutter.Dependencies{
+		CoordinatorAddr: getCoordinatorAddress,
+		NewClient: func(address string, requestTimeout time.Duration) (flutter.BuildClient, error) {
+			cfg := newClientConfig(address, requestTimeout)
+			return client.New(cfg)
+		},
+		RequestTimeout: 25 * time.Minute,
+		BuildTimeout:   20 * time.Minute,
+	}
+
+	return flutter.NewCommand(deps)
 }
 
 // detectCompiler returns an appropriate compiler based on file extension.

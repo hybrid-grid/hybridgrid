@@ -75,6 +75,7 @@ func New(cfg Config, provider StatsProvider) *Server {
 	mux.HandleFunc("/api/v1/stats", s.handleStats)
 	mux.HandleFunc("/api/v1/workers", s.handleWorkers)
 	mux.HandleFunc("/api/v1/events", s.handleEvents)
+	mux.HandleFunc("/api/v1/tasks", s.handleTasks)
 
 	// WebSocket endpoint
 	mux.HandleFunc("/ws", s.handleWebSocket)

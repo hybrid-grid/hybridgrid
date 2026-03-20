@@ -178,6 +178,48 @@ func TestManager_Select(t *testing.T) {
 	}
 }
 
+func TestManager_SelectForRequest_Flutter(t *testing.T) {
+	m := NewManager(pb.Architecture_ARCH_X86_64, false)
+
+	req := &Request{
+		TaskID:        "test-flutter-001",
+		BuildType:     pb.BuildType_BUILD_TYPE_FLUTTER,
+		FlutterConfig: &pb.FlutterConfig{BuildMode: "release"},
+	}
+
+	e := m.SelectForRequest(req)
+	if e.Name() != "flutter" {
+		t.Errorf("Expected flutter executor for BUILD_TYPE_FLUTTER, got %s", e.Name())
+	}
+}
+
+func TestManager_SelectForRequest_FlutterPreservesNonFlutter(t *testing.T) {
+	m := NewManager(pb.Architecture_ARCH_X86_64, false)
+
+	req := &Request{
+		TaskID:     "test-cpp-001",
+		BuildType:  pb.BuildType_BUILD_TYPE_CPP,
+		TargetArch: pb.Architecture_ARCH_X86_64,
+	}
+
+	e := m.SelectForRequest(req)
+	if e.Name() != "native" {
+		t.Errorf("Expected native executor for BUILD_TYPE_CPP on matching arch, got %s", e.Name())
+	}
+}
+
+func TestManager_GetFlutter(t *testing.T) {
+	m := NewManager(pb.Architecture_ARCH_X86_64, false)
+
+	e := m.GetFlutter()
+	if e == nil {
+		t.Fatal("GetFlutter returned nil")
+	}
+	if e.Name() != "flutter" {
+		t.Errorf("Expected flutter executor, got %s", e.Name())
+	}
+}
+
 func TestBuildArgs(t *testing.T) {
 	e := NewNativeExecutor()
 

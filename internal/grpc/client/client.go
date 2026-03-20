@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	defaultTimeout   = 30 * time.Second
-	defaultChunkSize = 64 * 1024 // 64KB chunks for streaming
+	defaultTimeout    = 30 * time.Second
+	defaultChunkSize  = 64 * 1024 // 64KB chunks for streaming
+	defaultMaxMsgSize = 512 * 1024 * 1024
 )
 
 // Config holds the gRPC client configuration.
@@ -43,6 +44,10 @@ func New(cfg Config) (*Client, error) {
 	}
 
 	opts := []grpc.DialOption{}
+	opts = append(opts, grpc.WithDefaultCallOptions(
+		grpc.MaxCallRecvMsgSize(defaultMaxMsgSize),
+		grpc.MaxCallSendMsgSize(defaultMaxMsgSize),
+	))
 
 	// Configure transport credentials: TLS takes priority over Insecure
 	if cfg.TLS.Enabled {

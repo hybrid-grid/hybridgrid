@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/cespare/xxhash/v2"
+	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 )
 
 // KeyBuilder builds cache keys from various inputs.
@@ -149,4 +150,33 @@ func NormalizePath(path string) string {
 	// Normalize separators
 	path = strings.ReplaceAll(path, "\\", "/")
 	return path
+}
+
+// FlutterCacheKey generates a deterministic cache key for a Flutter build.
+// It incorporates the pubspec.yaml hash, build mode, flavor, Dart defines
+// (sorted for determinism), and Flutter SDK version.
+func FlutterCacheKey(config *pb.FlutterConfig, pubspecHash string, flutterVersion string) string {
+	kb := NewKeyBuilder()
+
+	kb.AddString(pubspecHash)
+
+	if config != nil {
+		kb.AddString(config.GetBuildMode())
+		kb.AddString(config.GetFlavor())
+		keys := make([]string, 0, len(config.GetDartDefines()))
+		for k := range config.GetDartDefines() {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			kb.AddString(k)
+			kb.AddString(config.GetDartDefines()[k])
+		}
+	} else {
+		kb.AddString("")
+		kb.AddString("")
+	}
+	kb.AddString(flutterVersion)
+
+	return kb.Sum()
 }

@@ -364,33 +364,13 @@ func detectFlutter() *pb.FlutterCapability {
 		}
 	}
 
-	// Check for Android SDK
-	if os.Getenv("ANDROID_HOME") != "" || os.Getenv("ANDROID_SDK_ROOT") != "" {
-		cap.AndroidSdk = true
-		cap.Platforms = append(cap.Platforms, pb.TargetPlatform_PLATFORM_ANDROID)
+	// Check for Android SDK — Flutter capability is Android-only for v0.4.0
+	if os.Getenv("ANDROID_HOME") == "" && os.Getenv("ANDROID_SDK_ROOT") == "" {
+		return nil
 	}
 
-	// Check for Xcode (macOS)
-	if runtime.GOOS == "darwin" {
-		if _, err := exec.LookPath("xcodebuild"); err == nil {
-			cap.XcodeAvailable = true
-			cap.Platforms = append(cap.Platforms, pb.TargetPlatform_PLATFORM_IOS)
-			cap.Platforms = append(cap.Platforms, pb.TargetPlatform_PLATFORM_MACOS)
-		}
-	}
-
-	// Web is always available
-	cap.Platforms = append(cap.Platforms, pb.TargetPlatform_PLATFORM_WEB)
-
-	// Linux desktop
-	if runtime.GOOS == "linux" {
-		cap.Platforms = append(cap.Platforms, pb.TargetPlatform_PLATFORM_LINUX)
-	}
-
-	// Windows desktop
-	if runtime.GOOS == "windows" {
-		cap.Platforms = append(cap.Platforms, pb.TargetPlatform_PLATFORM_WINDOWS)
-	}
+	cap.AndroidSdk = true
+	cap.Platforms = append(cap.Platforms, pb.TargetPlatform_PLATFORM_ANDROID)
 
 	return cap
 }

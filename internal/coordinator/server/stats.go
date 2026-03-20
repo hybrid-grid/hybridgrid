@@ -33,7 +33,6 @@ func (p *statsProvider) GetStats() *dashboard.Stats {
 		}
 	}
 
-	// Calculate cache hit rate
 	cacheHits := atomic.LoadInt64(&p.server.cacheHits)
 	cacheMisses := atomic.LoadInt64(&p.server.cacheMisses)
 	cacheTotal := cacheHits + cacheMisses
@@ -42,19 +41,31 @@ func (p *statsProvider) GetStats() *dashboard.Stats {
 		cacheHitRate = float64(cacheHits) / float64(cacheTotal)
 	}
 
+	flutterCacheHits := atomic.LoadInt64(&p.server.flutterCacheHits)
+	flutterCacheMisses := atomic.LoadInt64(&p.server.flutterCacheMisses)
+	flutterCacheTotal := flutterCacheHits + flutterCacheMisses
+	flutterCacheHitRate := 0.0
+	if flutterCacheTotal > 0 {
+		flutterCacheHitRate = float64(flutterCacheHits) / float64(flutterCacheTotal)
+	}
+
 	return &dashboard.Stats{
-		TotalTasks:     atomic.LoadInt64(&p.server.totalTasks),
-		SuccessTasks:   atomic.LoadInt64(&p.server.successTasks),
-		FailedTasks:    atomic.LoadInt64(&p.server.failedTasks),
-		ActiveTasks:    atomic.LoadInt64(&p.server.activeTasks),
-		QueuedTasks:    atomic.LoadInt64(&p.server.queuedTasks),
-		CacheHits:      cacheHits,
-		CacheMisses:    cacheMisses,
-		CacheHitRate:   cacheHitRate,
-		TotalWorkers:   len(workers),
-		HealthyWorkers: healthyCount,
-		UptimeSeconds:  int64(time.Since(p.startTime).Seconds()),
-		Timestamp:      time.Now().Unix(),
+		TotalTasks:          atomic.LoadInt64(&p.server.totalTasks),
+		SuccessTasks:        atomic.LoadInt64(&p.server.successTasks),
+		FailedTasks:         atomic.LoadInt64(&p.server.failedTasks),
+		ActiveTasks:         atomic.LoadInt64(&p.server.activeTasks),
+		QueuedTasks:         atomic.LoadInt64(&p.server.queuedTasks),
+		CacheHits:           cacheHits,
+		CacheMisses:         cacheMisses,
+		CacheHitRate:        cacheHitRate,
+		FlutterBuilds:       atomic.LoadInt64(&p.server.flutterBuilds),
+		FlutterCacheHits:    flutterCacheHits,
+		FlutterCacheMisses:  flutterCacheMisses,
+		FlutterCacheHitRate: flutterCacheHitRate,
+		TotalWorkers:        len(workers),
+		HealthyWorkers:      healthyCount,
+		UptimeSeconds:       int64(time.Since(p.startTime).Seconds()),
+		Timestamp:           time.Now().Unix(),
 	}
 }
 
@@ -85,27 +96,30 @@ func (p *statsProvider) GetWorkers() []*dashboard.WorkerInfo {
 		}
 
 		info := &dashboard.WorkerInfo{
-			ID:               w.ID,
-			Host:             caps.Hostname,
-			Address:          w.Address,
-			OS:               caps.Os,
-			Architecture:     caps.NativeArch.String(),
-			Architectures:    supportedArchitectures(caps),
-			CPUCores:         caps.CpuCores,
-			MemoryGB:         float64(caps.MemoryBytes) / (1024 * 1024 * 1024),
-			MaxParallelTasks: caps.MaxParallelTasks,
-			ActiveTasks:      w.ActiveTasks,
-			TotalTasks:       w.TotalTasks,
-			SuccessRate:      successRate,
-			AvgLatencyMs:     float64(w.AvgCompileTime.Milliseconds()),
-			CircuitState:     circuitState,
-			DiscoverySource:  w.DiscoverySource,
-			Version:          caps.Version,
-			DockerAvailable:  caps.DockerAvailable,
-			Compilers:        compilers,
-			BuildTypes:       supportedBuildTypes(caps),
-			Healthy:          w.IsHealthy(p.server.config.HeartbeatTTL),
-			LastSeen:         w.LastHeartbeat.Unix(),
+			ID:                w.ID,
+			Host:              caps.Hostname,
+			Address:           w.Address,
+			OS:                caps.Os,
+			Architecture:      caps.NativeArch.String(),
+			Architectures:     supportedArchitectures(caps),
+			CPUCores:          caps.CpuCores,
+			MemoryGB:          float64(caps.MemoryBytes) / (1024 * 1024 * 1024),
+			MaxParallelTasks:  caps.MaxParallelTasks,
+			ActiveTasks:       w.ActiveTasks,
+			TotalTasks:        w.TotalTasks,
+			SuccessRate:       successRate,
+			AvgLatencyMs:      float64(w.AvgCompileTime.Milliseconds()),
+			CircuitState:      circuitState,
+			DiscoverySource:   w.DiscoverySource,
+			Version:           caps.Version,
+			DockerAvailable:   caps.DockerAvailable,
+			FlutterAvailable:  caps.GetFlutter() != nil,
+			FlutterSDKVersion: flutterSDKVersion(caps),
+			FlutterPlatforms:  flutterPlatforms(caps),
+			Compilers:         compilers,
+			BuildTypes:        supportedBuildTypes(caps),
+			Healthy:           w.IsHealthy(p.server.config.HeartbeatTTL),
+			LastSeen:          w.LastHeartbeat.Unix(),
 		}
 		result = append(result, info)
 	}
@@ -162,4 +176,23 @@ func supportedBuildTypes(caps *pb.WorkerCapabilities) []string {
 	}
 
 	return buildTypes
+}
+
+func flutterSDKVersion(caps *pb.WorkerCapabilities) string {
+	if caps.GetFlutter() != nil {
+		return caps.GetFlutter().GetSdkVersion()
+	}
+	return ""
+}
+
+func flutterPlatforms(caps *pb.WorkerCapabilities) []string {
+	if caps.GetFlutter() == nil {
+		return nil
+	}
+	platforms := caps.GetFlutter().GetPlatforms()
+	result := make([]string, len(platforms))
+	for i, p := range platforms {
+		result[i] = p.String()
+	}
+	return result
 }

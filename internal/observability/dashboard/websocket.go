@@ -144,6 +144,59 @@ func (h *Hub) GetRecentEvents() []json.RawMessage {
 	return events
 }
 
+func (h *Hub) GetTasks() []*TaskInfo {
+	h.eventsMu.RLock()
+	defer h.eventsMu.RUnlock()
+
+	tasks := make([]*TaskInfo, 0, len(h.recentEvents))
+	for _, data := range h.recentEvents {
+		var msg Message
+		if err := json.Unmarshal(data, &msg); err != nil {
+			continue
+		}
+		if msg.Type != MessageTypeTaskStarted && msg.Type != MessageTypeTaskComplete {
+			continue
+		}
+		dataMap, ok := msg.Data.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		task := &TaskInfo{}
+		if id, ok := dataMap["id"].(string); ok {
+			task.ID = id
+		}
+		if bt, ok := dataMap["build_type"].(string); ok {
+			task.BuildType = bt
+		}
+		if st, ok := dataMap["status"].(string); ok {
+			task.Status = st
+		}
+		if wid, ok := dataMap["worker_id"].(string); ok {
+			task.WorkerID = wid
+		}
+		if startedAt, ok := dataMap["started_at"].(float64); ok {
+			task.StartedAt = int64(startedAt)
+		}
+		if completedAt, ok := dataMap["completed_at"].(float64); ok {
+			task.CompletedAt = int64(completedAt)
+		}
+		if durationMs, ok := dataMap["duration_ms"].(float64); ok {
+			task.DurationMs = int64(durationMs)
+		}
+		if exitCode, ok := dataMap["exit_code"].(float64); ok {
+			task.ExitCode = int32(exitCode)
+		}
+		if fromCache, ok := dataMap["from_cache"].(bool); ok {
+			task.FromCache = fromCache
+		}
+		if errMsg, ok := dataMap["error_message"].(string); ok {
+			task.ErrorMessage = errMsg
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks
+}
+
 // Broadcast sends a message to all connected clients.
 func (h *Hub) Broadcast(msg *Message) {
 	msg.Timestamp = time.Now().Unix()

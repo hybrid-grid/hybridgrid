@@ -46,6 +46,8 @@ temp/
 
 # Build artifacts
 dist/
+# Exception: Flutter Docker images (Task 2, v0.4.0) — must be re-included after /build/
+!build/docker/flutter/
 /build/
 
 # Test/E2E certificates (generated, not source-controlled)

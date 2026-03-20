@@ -250,9 +250,79 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	return resp, nil
 }
 
-// Build is not implemented for workers (coordinator handles it).
 func (s *Server) Build(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "use Compile for compilation tasks")
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "build request required")
+	}
+	if req.TaskId == "" {
+		return nil, status.Error(codes.InvalidArgument, "task_id required")
+	}
+
+	if req.BuildType != pb.BuildType_BUILD_TYPE_FLUTTER {
+		return nil, status.Error(codes.Unimplemented, "use Compile for compilation tasks")
+	}
+
+	if req.GetFlutterConfig() == nil {
+		return nil, status.Error(codes.InvalidArgument, "flutter_config required")
+	}
+
+	active := atomic.AddInt64(&s.activeTasks, 1)
+	defer atomic.AddInt64(&s.activeTasks, -1)
+
+	if active > int64(s.config.MaxConcurrent) {
+		return nil, status.Error(codes.ResourceExhausted, "too many concurrent tasks")
+	}
+
+	atomic.AddInt64(&s.totalTasks, 1)
+
+	timeout := s.config.DefaultTimeout
+	if req.TimeoutSeconds > 0 {
+		timeout = time.Duration(req.TimeoutSeconds) * time.Second
+	}
+
+	execCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	start := time.Now()
+	result, err := s.executor.Execute(execCtx, &executor.Request{
+		TaskID:         req.TaskId,
+		BuildType:      req.BuildType,
+		TargetPlatform: req.TargetPlatform,
+		FlutterConfig:  req.GetFlutterConfig(),
+		SourceArchive:  req.SourceArchive,
+		TimeoutSeconds: req.TimeoutSeconds,
+		Timeout:        timeout,
+	})
+	if err != nil {
+		atomic.AddInt64(&s.failedTasks, 1)
+		return &pb.BuildResponse{
+			Status:   pb.TaskStatus_STATUS_FAILED,
+			ExitCode: 1,
+			Stderr:   fmt.Sprintf("execution error: %v", err),
+		}, nil
+	}
+
+	buildTime := time.Since(start)
+	atomic.AddInt64(&s.totalTimeMs, buildTime.Milliseconds())
+
+	resp := &pb.BuildResponse{
+		Status:       pb.TaskStatus_STATUS_FAILED,
+		Artifacts:    result.ArtifactArchive,
+		ArtifactList: result.Artifacts,
+		ExitCode:     result.ExitCode,
+		Stdout:       result.Stdout,
+		Stderr:       result.Stderr,
+		BuildTimeMs:  buildTime.Milliseconds(),
+	}
+
+	if result.Success {
+		resp.Status = pb.TaskStatus_STATUS_COMPLETED
+		atomic.AddInt64(&s.successTasks, 1)
+	} else {
+		atomic.AddInt64(&s.failedTasks, 1)
+	}
+
+	return resp, nil
 }
 
 // StreamBuild is not implemented for workers.

@@ -8,43 +8,50 @@ import (
 
 // Stats represents cluster statistics.
 type Stats struct {
-	TotalTasks     int64   `json:"total_tasks"`
-	SuccessTasks   int64   `json:"success_tasks"`
-	FailedTasks    int64   `json:"failed_tasks"`
-	ActiveTasks    int64   `json:"active_tasks"`
-	QueuedTasks    int64   `json:"queued_tasks"`
-	CacheHits      int64   `json:"cache_hits"`
-	CacheMisses    int64   `json:"cache_misses"`
-	CacheHitRate   float64 `json:"cache_hit_rate"`
-	TotalWorkers   int     `json:"total_workers"`
-	HealthyWorkers int     `json:"healthy_workers"`
-	UptimeSeconds  int64   `json:"uptime_seconds"`
-	Timestamp      int64   `json:"timestamp"`
+	TotalTasks          int64   `json:"total_tasks"`
+	SuccessTasks        int64   `json:"success_tasks"`
+	FailedTasks         int64   `json:"failed_tasks"`
+	ActiveTasks         int64   `json:"active_tasks"`
+	QueuedTasks         int64   `json:"queued_tasks"`
+	CacheHits           int64   `json:"cache_hits"`
+	CacheMisses         int64   `json:"cache_misses"`
+	CacheHitRate        float64 `json:"cache_hit_rate"`
+	FlutterBuilds       int64   `json:"flutter_builds"`
+	FlutterCacheHits    int64   `json:"flutter_cache_hits"`
+	FlutterCacheMisses  int64   `json:"flutter_cache_misses"`
+	FlutterCacheHitRate float64 `json:"flutter_cache_hit_rate"`
+	TotalWorkers        int     `json:"total_workers"`
+	HealthyWorkers      int     `json:"healthy_workers"`
+	UptimeSeconds       int64   `json:"uptime_seconds"`
+	Timestamp           int64   `json:"timestamp"`
 }
 
 // WorkerInfo represents worker information for the dashboard.
 type WorkerInfo struct {
-	ID               string   `json:"id"`
-	Host             string   `json:"host"`
-	Address          string   `json:"address"`
-	OS               string   `json:"os"`
-	Architecture     string   `json:"architecture"`
-	Architectures    []string `json:"architectures"`
-	CPUCores         int32    `json:"cpu_cores"`
-	MemoryGB         float64  `json:"memory_gb"`
-	MaxParallelTasks int32    `json:"max_parallel_tasks"`
-	ActiveTasks      int32    `json:"active_tasks"`
-	TotalTasks       int64    `json:"total_tasks"`
-	SuccessRate      float64  `json:"success_rate"`
-	AvgLatencyMs     float64  `json:"avg_latency_ms"`
-	CircuitState     string   `json:"circuit_state"`
-	DiscoverySource  string   `json:"discovery_source"`
-	Version          string   `json:"version"`
-	DockerAvailable  bool     `json:"docker_available"`
-	Compilers        []string `json:"compilers"`
-	BuildTypes       []string `json:"build_types"`
-	Healthy          bool     `json:"healthy"`
-	LastSeen         int64    `json:"last_seen"`
+	ID                string   `json:"id"`
+	Host              string   `json:"host"`
+	Address           string   `json:"address"`
+	OS                string   `json:"os"`
+	Architecture      string   `json:"architecture"`
+	Architectures     []string `json:"architectures"`
+	CPUCores          int32    `json:"cpu_cores"`
+	MemoryGB          float64  `json:"memory_gb"`
+	MaxParallelTasks  int32    `json:"max_parallel_tasks"`
+	ActiveTasks       int32    `json:"active_tasks"`
+	TotalTasks        int64    `json:"total_tasks"`
+	SuccessRate       float64  `json:"success_rate"`
+	AvgLatencyMs      float64  `json:"avg_latency_ms"`
+	CircuitState      string   `json:"circuit_state"`
+	DiscoverySource   string   `json:"discovery_source"`
+	Version           string   `json:"version"`
+	DockerAvailable   bool     `json:"docker_available"`
+	FlutterAvailable  bool     `json:"flutter_available"`
+	FlutterSDKVersion string   `json:"flutter_sdk_version"`
+	FlutterPlatforms  []string `json:"flutter_platforms"`
+	Compilers         []string `json:"compilers"`
+	BuildTypes        []string `json:"build_types"`
+	Healthy           bool     `json:"healthy"`
+	LastSeen          int64    `json:"last_seen"`
 }
 
 // TaskInfo represents task information for the dashboard.
@@ -116,6 +123,23 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"events":    events,
 		"count":     len(events),
+		"timestamp": time.Now().Unix(),
+	})
+}
+
+// handleTasks returns recent task information.
+func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	tasks := s.hub.GetTasks()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"tasks":     tasks,
+		"count":     len(tasks),
 		"timestamp": time.Now().Unix(),
 	})
 }

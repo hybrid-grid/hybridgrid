@@ -21,6 +21,11 @@ type Result struct {
 	Stderr          string
 	ExitCode        int32
 	CompilationTime time.Duration
+
+	// Flutter artifact fields (optional, used by FlutterExecutor)
+	Artifacts       []*pb.ArtifactInfo
+	ArtifactArchive []byte
+	ArtifactPath    string
 }
 
 // Request represents a compilation request to an executor.
@@ -40,6 +45,13 @@ type Request struct {
 
 	// Client info for OS-aware executor selection
 	ClientOs string // OS where the build was initiated (e.g., "linux", "darwin", "windows")
+
+	// Flutter build fields (optional, used by FlutterExecutor)
+	FlutterConfig  *pb.FlutterConfig // Flutter-specific configuration
+	SourceArchive  []byte            // Tar archive of Flutter project source
+	TargetPlatform pb.TargetPlatform // Target platform (e.g., PLATFORM_ANDROID)
+	BuildType      pb.BuildType      // Build type (e.g., BUILD_TYPE_FLUTTER)
+	TimeoutSeconds int32             // Timeout in seconds for Flutter builds
 }
 
 // Executor defines the interface for compilation executors.
@@ -59,6 +71,7 @@ type Manager struct {
 	native     Executor
 	docker     Executor
 	msvc       Executor
+	flutter    Executor
 	nativeArch pb.Architecture
 }
 
@@ -81,6 +94,9 @@ func NewManager(nativeArch pb.Architecture, dockerAvailable bool) *Manager {
 	if err == nil {
 		m.msvc = msvc
 	}
+
+	// Initialize Flutter executor
+	m.flutter = NewFlutterExecutor()
 
 	return m
 }
@@ -105,6 +121,11 @@ func (m *Manager) Select(targetArch pb.Architecture) Executor {
 // If the client OS differs from this worker's OS and raw source is provided,
 // use Docker to compile in a matching environment.
 func (m *Manager) SelectForRequest(req *Request) Executor {
+	// Route Flutter build requests to FlutterExecutor
+	if req.BuildType == pb.BuildType_BUILD_TYPE_FLUTTER {
+		return m.flutter
+	}
+
 	// If client OS is set and differs from this worker's OS,
 	// raw source needs Docker for cross-OS compilation
 	if req.ClientOs != "" && req.ClientOs != runtime.GOOS && len(req.RawSource) > 0 {
@@ -145,6 +166,11 @@ func (m *Manager) Close() error {
 // GetMSVC returns the MSVC executor if available.
 func (m *Manager) GetMSVC() Executor {
 	return m.msvc
+}
+
+// GetFlutter returns the Flutter executor.
+func (m *Manager) GetFlutter() Executor {
+	return m.flutter
 }
 
 // isMSVCCompiler checks if the compiler is MSVC.

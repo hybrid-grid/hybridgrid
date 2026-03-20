@@ -781,3 +781,315 @@ func TestWorkerInfo_AllFields(t *testing.T) {
 		}
 	}
 }
+
+func TestStats_FlutterFields(t *testing.T) {
+	stats := &Stats{
+		TotalTasks:          100,
+		SuccessTasks:        80,
+		FailedTasks:         20,
+		ActiveTasks:         5,
+		QueuedTasks:         10,
+		CacheHits:           60,
+		CacheMisses:         40,
+		CacheHitRate:        0.6,
+		FlutterBuilds:       30,
+		FlutterCacheHits:    20,
+		FlutterCacheMisses:  10,
+		FlutterCacheHitRate: 0.67,
+		TotalWorkers:        4,
+		HealthyWorkers:      3,
+		UptimeSeconds:       7200,
+		Timestamp:           1234567890,
+	}
+
+	data, err := json.Marshal(stats)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+
+	str := string(data)
+	fields := []string{
+		"flutter_builds", "flutter_cache_hits",
+		"flutter_cache_misses", "flutter_cache_hit_rate",
+	}
+	for _, f := range fields {
+		if !strings.Contains(str, f) {
+			t.Errorf("JSON missing Flutter field: %s", f)
+		}
+	}
+
+	var decoded Stats
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if decoded.FlutterBuilds != 30 {
+		t.Errorf("FlutterBuilds = %d, want 30", decoded.FlutterBuilds)
+	}
+	if decoded.FlutterCacheHits != 20 {
+		t.Errorf("FlutterCacheHits = %d, want 20", decoded.FlutterCacheHits)
+	}
+	if decoded.FlutterCacheMisses != 10 {
+		t.Errorf("FlutterCacheMisses = %d, want 10", decoded.FlutterCacheMisses)
+	}
+	if decoded.FlutterCacheHitRate != 0.67 {
+		t.Errorf("FlutterCacheHitRate = %f, want 0.67", decoded.FlutterCacheHitRate)
+	}
+}
+
+func TestWorkerInfo_FlutterFields(t *testing.T) {
+	worker := &WorkerInfo{
+		ID:                "w1",
+		Host:              "host",
+		Address:           "addr",
+		Architecture:      "arm64",
+		CPUCores:          4,
+		MemoryGB:          8.0,
+		ActiveTasks:       1,
+		TotalTasks:        50,
+		SuccessRate:       0.9,
+		AvgLatencyMs:      15.0,
+		CircuitState:      "CLOSED",
+		DiscoverySource:   "mdns",
+		Healthy:           true,
+		LastSeen:          123456,
+		FlutterAvailable:  true,
+		FlutterSDKVersion: "3.19.6",
+		FlutterPlatforms:  []string{"TARGET_PLATFORM_ANDROID", "TARGET_PLATFORM_LINUX"},
+		Compilers:         []string{"gcc", "g++"},
+		BuildTypes:        []string{"BUILD_TYPE_CPP", "BUILD_TYPE_FLUTTER"},
+	}
+
+	data, err := json.Marshal(worker)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+
+	str := string(data)
+	fields := []string{
+		"flutter_available", "flutter_sdk_version", "flutter_platforms",
+	}
+	for _, f := range fields {
+		if !strings.Contains(str, f) {
+			t.Errorf("JSON missing Flutter field: %s", f)
+		}
+	}
+
+	var decoded WorkerInfo
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if !decoded.FlutterAvailable {
+		t.Error("FlutterAvailable = false, want true")
+	}
+	if decoded.FlutterSDKVersion != "3.19.6" {
+		t.Errorf("FlutterSDKVersion = %s, want 3.19.6", decoded.FlutterSDKVersion)
+	}
+	if len(decoded.FlutterPlatforms) != 2 {
+		t.Errorf("FlutterPlatforms len = %d, want 2", len(decoded.FlutterPlatforms))
+	}
+}
+
+func TestServer_HandleTasks(t *testing.T) {
+	cfg := DefaultConfig()
+	s := New(cfg, &mockProvider{})
+
+	go s.hub.Run()
+	defer s.hub.Stop()
+
+	s.hub.BroadcastTaskStarted(&TaskInfo{
+		ID:        "task-flutter-1",
+		BuildType: "flutter",
+		Status:    "running",
+		WorkerID:  "worker-1",
+		StartedAt: 1234567890,
+	})
+	s.hub.BroadcastTaskCompleted(&TaskInfo{
+		ID:          "task-flutter-2",
+		BuildType:   "flutter",
+		Status:      "completed",
+		WorkerID:    "worker-1",
+		StartedAt:   1234567891,
+		CompletedAt: 1234567900,
+		DurationMs:  9000,
+		ExitCode:    0,
+		FromCache:   false,
+	})
+
+	time.Sleep(20 * time.Millisecond)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks", nil)
+	rec := httptest.NewRecorder()
+
+	s.handleTasks(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Status = %d, want 200", rec.Code)
+	}
+
+	var response map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	tasks, ok := response["tasks"].([]interface{})
+	if !ok {
+		t.Fatal("Response missing tasks array")
+	}
+	if len(tasks) != 2 {
+		t.Errorf("Tasks count = %d, want 2", len(tasks))
+	}
+
+	firstTask, ok := tasks[0].(map[string]interface{})
+	if !ok {
+		t.Fatal("first task should decode as object")
+	}
+	if firstTask["build_type"] != "flutter" {
+		t.Errorf("build_type = %v, want flutter", firstTask["build_type"])
+	}
+}
+
+func TestServer_HandleTasks_MethodNotAllowed(t *testing.T) {
+	cfg := DefaultConfig()
+	s := New(cfg, &mockProvider{})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", nil)
+	rec := httptest.NewRecorder()
+
+	s.handleTasks(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("Status = %d, want 405", rec.Code)
+	}
+}
+
+func TestHub_GetTasks(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	hub.BroadcastTaskStarted(&TaskInfo{
+		ID:        "task-cpp-1",
+		BuildType: "cpp",
+		Status:    "running",
+		WorkerID:  "w1",
+		StartedAt: 1000000,
+	})
+	hub.BroadcastTaskCompleted(&TaskInfo{
+		ID:          "task-flutter-1",
+		BuildType:   "flutter",
+		Status:      "completed",
+		WorkerID:    "w2",
+		StartedAt:   1000001,
+		CompletedAt: 1000010,
+		DurationMs:  9000,
+		ExitCode:    0,
+		FromCache:   false,
+	})
+	hub.BroadcastStats(&Stats{TotalTasks: 10})
+
+	time.Sleep(20 * time.Millisecond)
+
+	tasks := hub.GetTasks()
+	if len(tasks) != 2 {
+		t.Errorf("GetTasks len = %d, want 2", len(tasks))
+	}
+
+	var hasFlutter bool
+	for _, task := range tasks {
+		if task.BuildType == "flutter" {
+			hasFlutter = true
+			if task.Status != "completed" {
+				t.Errorf("Flutter task status = %s, want completed", task.Status)
+			}
+			if task.DurationMs != 9000 {
+				t.Errorf("Flutter task DurationMs = %d, want 9000", task.DurationMs)
+			}
+		}
+	}
+	if !hasFlutter {
+		t.Error("Expected at least one Flutter task")
+	}
+}
+
+func TestHub_GetTasks_Empty(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	tasks := hub.GetTasks()
+	if tasks == nil {
+		t.Error("GetTasks should return empty slice, not nil")
+	}
+	if len(tasks) != 0 {
+		t.Errorf("GetTasks len = %d, want 0", len(tasks))
+	}
+}
+
+func TestServer_APIEndpoints_Tasks(t *testing.T) {
+	cfg := DefaultConfig()
+	s := New(cfg, &mockProvider{})
+
+	go s.hub.Run()
+	defer s.hub.Stop()
+
+	tests := []struct {
+		path       string
+		method     string
+		wantStatus int
+	}{
+		{"/api/v1/tasks", http.MethodGet, http.StatusOK},
+		{"/api/v1/tasks", http.MethodPost, http.StatusMethodNotAllowed},
+		{"/api/v1/tasks", http.MethodDelete, http.StatusMethodNotAllowed},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			rec := httptest.NewRecorder()
+			s.server.Handler.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("Status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestWorkerInfo_AllFields_Flutter(t *testing.T) {
+	worker := &WorkerInfo{
+		ID:                "w1",
+		Host:              "host",
+		Address:           "addr",
+		Architecture:      "x86_64",
+		CPUCores:          4,
+		MemoryGB:          8.0,
+		ActiveTasks:       1,
+		TotalTasks:        50,
+		SuccessRate:       0.9,
+		AvgLatencyMs:      15.0,
+		CircuitState:      "CLOSED",
+		DiscoverySource:   "mdns",
+		Healthy:           true,
+		LastSeen:          123456,
+		FlutterAvailable:  true,
+		FlutterSDKVersion: "3.19.6",
+		FlutterPlatforms:  []string{"TARGET_PLATFORM_ANDROID"},
+		Compilers:         []string{"gcc", "g++"},
+		BuildTypes:        []string{"BUILD_TYPE_CPP", "BUILD_TYPE_FLUTTER"},
+	}
+
+	data, err := json.Marshal(worker)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+
+	str := string(data)
+	fields := []string{
+		"flutter_available", "flutter_sdk_version", "flutter_platforms",
+	}
+	for _, f := range fields {
+		if !strings.Contains(str, f) {
+			t.Errorf("JSON missing Flutter field: %s", f)
+		}
+	}
+}

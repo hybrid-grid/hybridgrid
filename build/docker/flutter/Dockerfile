@@ -1,60 +1,49 @@
-# Flutter Android base image for hybridgrid worker nodes
-# Base: ghcr.io/cirruslabs/flutter (NOT cirrusci/flutter which is deprecated)
-# Android SDK is bundled in the cirruslabs Flutter images on non-macOS hosts
+# Flutter Android base image for hybridgrid worker nodes.
+# Base: ghcr.io/cirruslabs/flutter (cirrusci/flutter on Docker Hub is deprecated).
+# Android SDK is pre-bundled at /opt/flutter/bin/cache/android-sdk.
 #
 # Build args:
 #   FLUTTER_VERSION  - Flutter SDK version (default: 3.19.6)
-#   ANDROID_SDK_TAG - Android SDK component tag (default: 11076708)
 #
 # Exposes:
-#   FLUTTER_ROOT, ANDROID_SDK_ROOT, JAVA_HOME, PATH (Flutter/Dart bins)
+#   FLUTTER_ROOT, ANDROID_SDK_ROOT, JAVA_HOME, PATH (Flutter/Dart/Android/Gradle bins).
 #
 # No iOS toolchain, no Xcode, no signing keys.
 
 ARG FLUTTER_VERSION=3.19.6
 
-# Flutter SDK with Android tooling pre-bundled (debian variant has best toolchain support)
-FROM ghcr.io/cirruslabs/flutter:${FLUTTER_VERSION} AS base
+# Stage 1: accept Android licenses
+FROM ghcr.io/cirruslabs/flutter:${FLUTTER_VERSION} AS licenses
 
-# Prevent interactive prompts during apt operations
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ---- Stage 1: Accept Android licenses ----
-FROM base AS licenses
+# Accept Android SDK licenses non-interactively; || true so build succeeds
+# even if licenses are already accepted.
+RUN yes | flutter doctor --android-licenses > /dev/null 2>&1 || true
 
-# Accept all Android SDK licenses non-interactively
-RUN yes | ${FLUTTER_ROOT}/bin/flutter doctor --android-licenses 2>/dev/null || true
+# Stage 2: final image
+FROM ghcr.io/cirruslabs/flutter:${FLUTTER_VERSION}
 
-# ---- Stage 2: Final image ----
-FROM base AS builder
-
-# Copy accepted licenses from licenses stage
+# Copy accepted licenses from stage 1
 COPY --from=licenses /root/.android /root/.android
-COPY --from=licenses /root/.android /home/flutter/.android
 
-# Additional Android SDK components can be installed here if needed:
-# RUN ${FLUTTER_ROOT}/bin/flutter config --android-sdk /opt/android-sdk && \
-#     sdkmanager --install "platform-tools" "build-tools;34.0.0" "platforms;android-34"
-
-# ---- Final image ----
-FROM base
-
-# Copy accepted licenses into final image
-COPY --from=licenses /root/.android /root/.android
-COPY --from=licenses /root/.android /home/flutter/.android
-
-# Environment variables
 ENV FLUTTER_ROOT=/opt/flutter
-ENV ANDROID_SDK_ROOT=${FLUTTER_ROOT}/bin/cache/android-sdk
-ENV ANDROID_HOME=${ANDROID_SDK_ROOT}
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ENV ANDROID_SDK_ROOT=/opt/flutter/bin/cache/android-sdk
+ENV ANDROID_HOME=/opt/flutter/bin/cache/android-sdk
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-arm64
 
-# Ensure Flutter and Dart binaries are on PATH
-ENV PATH="${FLUTTER_ROOT}/bin:${FLUTTER_ROOT}/bin/cache/dart-sdk/bin:${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROOT}/platform-tools:${JAVA_HOME}/bin:${PATH}"
+ARG GRADLE_VERSION=8.5
+RUN curl -sSL "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" -o /tmp/gradle.zip && \
+    unzip -q /tmp/gradle.zip -d /opt && \
+    mv /opt/gradle-${GRADLE_VERSION} /opt/gradle && \
+    rm /tmp/gradle.zip
+ENV PATH="${FLUTTER_ROOT}/bin:${FLUTTER_ROOT}/bin/cache/dart-sdk/bin:${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROOT}/platform-tools:${JAVA_HOME}/bin:/opt/gradle/bin:${PATH}"
 
-RUN flutter --version && \
-    echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}" && \
-    flutter doctor
+WORKDIR /workspace
 
-# Default command: keep container alive with a simple no-op
+LABEL org.opencontainers.image.source="https://github.com/h3nr1-d14z/hybridgrid" \
+      org.opencontainers.image.description="Flutter Android build environment for hybridgrid workers" \
+      flutter.version="${FLUTTER_VERSION}"
+
+# Keep container alive — actual worker integration in later tasks.
 CMD ["tail", "-f", "/dev/null"]
