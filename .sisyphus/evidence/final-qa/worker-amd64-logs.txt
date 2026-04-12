@@ -1,0 +1,10 @@
+[90m1:13AM[0m [32mINF[0m [1mStarting Hybrid-Grid Worker[0m [36mcoordinator=[0mhost.docker.internal:9000 [36mhostname=[0m00fd338adb62 [36mmax_parallel=[0m8 [36mport=[0m50052 [36mversion=[0mv0.0.0-dev
+[90m1:13AM[0m [32mINF[0m [1mPrometheus metrics initialized[0m
+[90m1:13AM[0m [32mINF[0m [1mWorker registered successfully[0m [36mheartbeat_interval=[0m30 [36mworker_id=[0mworker-00fd338adb62
+[90m1:13AM[0m [32mINF[0m [1mWorker metrics server started[0m [36mport=[0m9090
+[90m1:13AM[0m [32mINF[0m [1mRequest ID interceptor enabled for worker gRPC server[0m
+[90m1:13AM[0m [32mINF[0m [1mWorker gRPC server starting[0m [36mport=[0m50052
+[90m1:18AM[0m [32mINF[0m [1mRequest ID extracted/generated[0m [36mrequest_id=[0m7bf1902dbe014c6e188ba6f35422c324
+[90m1:20AM[0m [32mINF[0m [1mRequest ID extracted/generated[0m [36mrequest_id=[0mb079bddb80f3522a6761edf83c68bce4
+[90m1:23AM[0m [32mINF[0m [1mRequest ID extracted/generated[0m [36mrequest_id=[0m9a4ecae8bf4c5fe5926cbac118f428a4
+[90m1:26AM[0m [32mINF[0m [1mRequest ID extracted/generated[0m [36mrequest_id=[0m801665bf25631f761b0e5450c92d3e38

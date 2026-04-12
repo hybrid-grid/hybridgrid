@@ -1,0 +1,27 @@
+Doctor summary (to see all details, run flutter doctor -v):
+[!] Flutter (Channel [user-branch], 3.19.6, on Ubuntu 22.04.4 LTS 6.11.11-linuxkit, locale en_US.UTF-8)
+    ! Flutter version 3.19.6 on channel [user-branch] at /sdks/flutter
+      Currently on an unknown channel. Run `flutter channel` to switch to an official channel.
+      If that doesn't fix the issue, reinstall Flutter by following instructions at https://flutter.dev/docs/get-started/install.
+    ! Upstream repository unknown source is not a standard remote.
+      Set environment variable "FLUTTER_GIT_URL" to unknown source to dismiss this error.
+[!] Android toolchain - develop for Android devices (Android SDK version 34.0.0)
+    ✗ Cannot execute /usr/lib/jvm/java-17-openjdk-amd64/bin/java to determine the version
+[✗] Chrome - develop for the web (Cannot find Chrome executable at google-chrome)
+    ! Cannot find Chrome. Try setting CHROME_EXECUTABLE to a Chrome executable.
+[✗] Linux toolchain - develop for Linux desktop
+    ✗ clang++ is required for Linux development.
+      It is likely available from your distribution (e.g.: apt install clang), or can be downloaded from https://releases.llvm.org/
+    ✗ CMake is required for Linux development.
+      It is likely available from your distribution (e.g.: apt install cmake), or can be downloaded from https://cmake.org/download/
+    ✗ ninja is required for Linux development.
+      It is likely available from your distribution (e.g.: apt install ninja-build), or can be downloaded from https://github.com/ninja-build/ninja/releases
+    ✗ pkg-config is required for Linux development.
+      It is likely available from your distribution (e.g.: apt install pkg-config), or can be downloaded from https://www.freedesktop.org/wiki/Software/pkg-config/
+[!] Android Studio (not installed)
+[☠] Connected device (the doctor check crashed)
+    ✗ Due to an error, the doctor check did not complete. If the error message below is not helpful, please let us know about this issue at https://github.com/flutter/flutter/issues.
+    ✗ Error: Unable to run "adb", check your Android SDK installation and ANDROID_HOME environment variable: /opt/android-sdk-linux/platform-tools/adb
+[✓] Network resources
+
+! Doctor found issues in 6 categories.

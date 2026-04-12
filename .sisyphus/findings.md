@@ -76,7 +76,7 @@ Metrics registration in `internal/observability/metrics` was correctly implement
 
 ---
 
-## [LOW] --no-fallback Flag Documented but Missing
+## [LOW] --no-fallback Flag Documented but Missing → ✅ RESOLVED
 
 ### Symptom
 CLI help text and documentation mention a `--no-fallback` flag to disable local compilation on remote failure, but the flag is not recognized by the parser or implemented in the logic.
@@ -86,34 +86,55 @@ CLI help text and documentation mention a `--no-fallback` flag to disable local 
 - Relevant logs: `internal/config/config.go` shows `FallbackEnabled: true` is hardcoded.
 
 ### Root Cause
-Mismatch between documentation intent and actual implementation.
+~~Mismatch between documentation intent and actual implementation.~~
+
+**UPDATE (2026-03-18)**: Flag was already implemented but finding was incorrect.
+
+### Resolution (2026-03-18)
+**Finding Invalidated**: The `--no-fallback` flag was already implemented:
+1. `cmd/hgbuild/main.go:165` - Flag definition: `rootCmd.PersistentFlags().BoolVar(&noFallback, "no-fallback", false, "disable local fallback when coordinator is unavailable")`
+2. `cmd/hgbuild/main.go:1288-1292` - Flag logic: Returns error "coordinator unavailable and fallback disabled" when flag is set
+
+**Verification Results**:
+- ✅ Without `--no-fallback`: Falls back to local compilation with warning
+- ✅ With `--no-fallback`: Fails fast with error message
 
 ### Classification
-**Documentation**: Inconsistency between CLI help/README and code.
+~~**Documentation**: Inconsistency between CLI help/README and code.~~ **RESOLVED**
 
 ### Impact
-- Users cannot force a "distributed only" build; the system always falls back to local execution.
+- ✅ FIXED: Users CAN force a "distributed only" build with `--no-fallback` flag.
 
 ---
 
-## [LOW] Coordinator Healthcheck Bug
+## [LOW] Coordinator Healthcheck Bug → ✅ RESOLVED
 
 ### Symptom
 `test/stress/docker-compose.yml` uses `/health` for the coordinator healthcheck, which results in healthcheck failures or retries because the endpoint doesn't exist.
 
 ### Evidence
 - Evidence file: `test/stress/docker-compose.yml` line 22.
-- Relevant logs: `curl -sf http://localhost:8080/health` returns 404.
+- ~~Relevant logs: `curl -sf http://localhost:8080/health` returns 404.~~
 
 ### Root Cause
-The coordinator implementation uses `/metrics` or `/api/v1/stats` but does not provide a dedicated `/health` endpoint as expected by the stress test configuration.
+~~The coordinator implementation uses `/metrics` or `/api/v1/stats` but does not provide a dedicated `/health` endpoint as expected by the stress test configuration.~~
+
+**UPDATE (2026-03-18)**: Endpoint was already implemented but finding was incorrect.
+
+### Resolution (2026-03-18)
+**Finding Invalidated**: The `/health` endpoint was already implemented:
+1. `internal/observability/dashboard/server.go:63-66` - Coordinator `/health` at `:8080`
+2. `internal/worker/server/http.go` - Worker `/health` at `:9090`
+
+**Verification Results**:
+- ✅ `curl http://localhost:8080/health` returns "OK"
+- ✅ `curl http://localhost:9090/health` returns "OK"
 
 ### Classification
-**Test Infrastructure**: Bug in the stress test setup, not production code.
+~~**Test Infrastructure**: Bug in the stress test setup, not production code.~~ **RESOLVED**
 
 ### Impact
-- Docker Compose reports coordinator as "unhealthy" or takes longer to stabilize.
-- Workaround: Polling `/metrics` instead.
+- ✅ FIXED: Docker Compose healthchecks work correctly.
 
 ---
 
@@ -138,7 +159,7 @@ The script pipes `make` output to `tail`, which masks the exit code. It also use
 
 ---
 
-## [LOW] Dashboard API Capabilities Missing
+## [LOW] Dashboard API Capabilities Missing → ✅ RESOLVED
 
 ### Symptom
 The `/api/v1/workers` endpoint returns worker metadata but lacks detailed capability information (e.g., specific C++ compilers detected).
@@ -147,14 +168,48 @@ The `/api/v1/workers` endpoint returns worker metadata but lacks detailed capabi
 - Evidence file: `.sisyphus/evidence/task-7-workers-api.json`
 
 ### Root Cause
-The JSON marshaling for the worker struct in the registry does not include the nested `Capabilities` protobuf message in a user-friendly format.
+~~The JSON marshaling for the worker struct in the registry does not include the nested `Capabilities` protobuf message in a user-friendly format.~~
+
+**UPDATE (2026-03-18)**: Capabilities were already implemented but finding was incorrect.
+
+### Resolution (2026-03-18)
+**Finding Invalidated**: Worker capabilities were already implemented:
+1. `internal/observability/dashboard/api.go:44-45` - `WorkerInfo` struct with `Compilers`, `BuildTypes` fields
+2. `internal/coordinator/server/stats.go:80-106` - `GetWorkers()` populates capabilities from registry
+
+**Verification Results**:
+```bash
+curl http://localhost:8080/api/v1/workers | jq '.workers[] | {compilers, build_types, architectures}'
+```
+Returns:
+```json
+{
+  "compilers": ["gcc", "g++", "clang", "clang++"],
+  "build_types": ["BUILD_TYPE_CPP", "BUILD_TYPE_FLUTTER", ...],
+  "architectures": ["ARCH_ARM64"]
+}
+```
 
 ### Classification
-**Production Bug** (Minor): Reduced visibility for remote debugging.
+~~**Production Bug** (Minor): Reduced visibility for remote debugging.~~ **RESOLVED**
 
 ### Impact
-- Difficult to diagnose "no workers match requirements" errors via the dashboard.
+- ✅ FIXED: Full worker capabilities visible in dashboard API.
 
 ---
 
-**Total Findings [6] | Critical [1] | Medium [1] | Low [4] | VERDICT: APPROVE**
+**Total Findings [6] | Critical [1] | Medium [1 RESOLVED] | Low [4, 3 RESOLVED] | VERDICT: APPROVE**
+
+### Summary of Resolved Issues (v0.3.0)
+| Finding | Status | Resolution Date |
+|---------|--------|-----------------|
+| Custom Prometheus Metrics | ✅ RESOLVED | 2026-03-16 |
+| --no-fallback Flag | ✅ RESOLVED | 2026-03-18 (was already implemented) |
+| /health Endpoint | ✅ RESOLVED | 2026-03-18 (was already implemented) |
+| Dashboard API Capabilities | ✅ RESOLVED | 2026-03-18 (was already implemented) |
+
+### Remaining Issues
+| Finding | Severity | Status |
+|---------|----------|--------|
+| OS Mismatch (macOS→Linux) | CRITICAL | Documented as design limitation |
+| Stress Test Script Errors | LOW | Infrastructure only, optional fix |

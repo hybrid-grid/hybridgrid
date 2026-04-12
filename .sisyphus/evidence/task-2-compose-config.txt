@@ -1,0 +1,36 @@
+name: hybridgrid
+services:
+  flutter-worker:
+    build:
+      context: /Users/h3nr1.d14z/Projects/HieuLD/doantotnghiep/hybridgrid
+      dockerfile: build/docker/flutter/Dockerfile
+      args:
+        FLUTTER_VERSION: 3.19.6
+    command:
+      - tail
+      - -f
+      - /dev/null
+    container_name: hg-flutter-worker
+    environment:
+      ANDROID_HOME: /opt/flutter/bin/cache/android-sdk
+      ANDROID_SDK_ROOT: /opt/flutter/bin/cache/android-sdk
+      FLUTTER_ROOT: /opt/flutter
+      HG_LOG_LEVEL: debug
+      JAVA_HOME: /usr/lib/jvm/java-17-openjdk-arm64
+    hostname: hg-flutter-worker
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - flutter --version
+      timeout: 10s
+      interval: 15s
+      retries: 3
+      start_period: 1m0s
+    image: hybridgrid/flutter-android:3.19.6
+    networks:
+      hybridgrid: null
+    restart: unless-stopped
+networks:
+  hybridgrid:
+    name: hybridgrid
+    external: true

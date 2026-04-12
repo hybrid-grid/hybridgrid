@@ -1,0 +1,74 @@
+=== Task 1: detectFlutter() Function Evidence ===
+
+=== detectFlutter() called in DetectAll() ===
+39:	caps.Flutter = detectFlutter()
+
+=== detectFlutter() function signature and implementation ===
+342:func detectFlutter() *pb.FlutterCapability {
+343:	cmd := exec.Command("flutter", "--version", "--machine")
+344:	out, err := cmd.Output()
+345:	if err != nil {
+346:		return nil
+347:	}
+348:
+349:	// Basic detection - just check if Flutter is available
+350:	cap := &pb.FlutterCapability{
+351:		Platforms: make([]pb.TargetPlatform, 0),
+352:	}
+353:
+354:	// Parse version from output
+355:	lines := strings.Split(string(out), "\n")
+356:	for _, line := range lines {
+357:		if strings.Contains(line, "frameworkVersion") {
+358:			// Simple extraction
+359:			parts := strings.Split(line, ":")
+360:			if len(parts) >= 2 {
+361:				ver := strings.Trim(parts[1], ` ",`)
+362:				cap.SdkVersion = ver
+363:			}
+364:		}
+365:	}
+366:
+367:	// Check for Android SDK
+368:	if os.Getenv("ANDROID_HOME") != "" || os.Getenv("ANDROID_SDK_ROOT") != "" {
+369:		cap.AndroidSdk = true
+370:		cap.Platforms = append(cap.Platforms, pb.TargetPlatform_PLATFORM_ANDROID)
+371:	}
+372:
+373:	// Check for Xcode (macOS)
+374:	if runtime.GOOS == "darwin" {
+375:		if _, err := exec.LookPath("xcodebuild"); err == nil {
+376:			cap.XcodeAvailable = true
+377:			cap.Platforms = append(cap.Platforms, pb.TargetPlatform_PLATFORM_IOS)
+378:			cap.Platforms = append(cap.Platforms, pb.TargetPlatform_PLATFORM_MACOS)
+379:		}
+380:	}
+381:
+382:	// Web is always available
+383:	cap.Platforms = append(cap.Platforms, pb.TargetPlatform_PLATFORM_WEB)
+384:
+385:	// Linux desktop
+386:	if runtime.GOOS == "linux" {
+387:		cap.Platforms = append(cap.Platforms, pb.TargetPlatform_PLATFORM_LINUX)
+388:	}
+389:
+390:	// Windows desktop
+391:	if runtime.GOOS == "windows" {
+392:		cap.Platforms = append(cap.Platforms, pb.TargetPlatform_PLATFORM_WINDOWS)
+393:	}
+394:
+395:	return cap
+396:}
+
+=== Flutter capability routing in registry ===
+internal/coordinator/registry/registry.go:276:	case pb.BuildType_BUILD_TYPE_FLUTTER:
+
+=== Flutter Build RPC routing in gRPC server ===
+internal/grpc/server/server.go:223:	case pb.BuildType_BUILD_TYPE_FLUTTER:
+
+=== Flutter validation in request security ===
+internal/security/validation/request.go:232:	case pb.BuildType_BUILD_TYPE_FLUTTER:
+internal/security/validation/request.go:233:		if req.GetFlutterConfig() == nil {
+
+=== Flutter stats in coordinator stats ===
+internal/coordinator/server/stats.go:149:	buildTypes = append(buildTypes, pb.BuildType_BUILD_TYPE_FLUTTER.String())

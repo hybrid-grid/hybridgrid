@@ -1,0 +1,20 @@
+=== RUN   TestFlutterCacheKey_Deterministic
+--- PASS: TestFlutterCacheKey_Deterministic (0.00s)
+=== RUN   TestFlutterCacheKey_DifferentPubspecHash
+--- PASS: TestFlutterCacheKey_DifferentPubspecHash (0.00s)
+=== RUN   TestFlutterCacheKey_DifferentBuildMode
+--- PASS: TestFlutterCacheKey_DifferentBuildMode (0.00s)
+=== RUN   TestFlutterCacheKey_DifferentFlavor
+--- PASS: TestFlutterCacheKey_DifferentFlavor (0.00s)
+=== RUN   TestFlutterCacheKey_DifferentFlutterVersion
+--- PASS: TestFlutterCacheKey_DifferentFlutterVersion (0.00s)
+=== RUN   TestFlutterCacheKey_DifferentDartDefines
+--- PASS: TestFlutterCacheKey_DifferentDartDefines (0.00s)
+=== RUN   TestFlutterCacheKey_EmptyFlavorAndDefines
+--- PASS: TestFlutterCacheKey_EmptyFlavorAndDefines (0.00s)
+=== RUN   TestFlutterCacheKey_NilConfig
+--- PASS: TestFlutterCacheKey_NilConfig (0.00s)
+=== RUN   TestFlutterCacheKey_DartDefinesDeterminism
+--- PASS: TestFlutterCacheKey_DartDefinesDeterminism (0.00s)
+PASS
+ok  	github.com/h3nr1-d14z/hybridgrid/internal/cache	(cached)

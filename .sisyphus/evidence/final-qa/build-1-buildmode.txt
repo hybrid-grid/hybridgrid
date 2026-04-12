@@ -1,0 +1,69 @@
+[90m8:05AM[0m [32mINF[0m [1mDiscovered coordinator via mDNS[0m [36maddress=[0m172.11.32.75:9000 [36minstance=[0mhg-coord-172-11-32-75.lightspeed.mmphtn.sbcglobal.net
+Error: build failed with status STATUS_FAILED (exit 1): Target android_aot_release_android-arm failed: ProcessException: Failed to find "/sdks/flutter/bin/cache/artifacts/engine/android-arm-release/linux-arm64/gen_snapshot" in the search path.
+  Command: /sdks/flutter/bin/cache/artifacts/engine/android-arm-release/linux-arm64/gen_snapshot 
+Target android_aot_release_android-arm64 failed: ProcessException: Failed to find "/sdks/flutter/bin/cache/artifacts/engine/android-arm64-release/linux-arm64/gen_snapshot" in the search path.
+  Command: /sdks/flutter/bin/cache/artifacts/engine/android-arm64-release/linux-arm64/gen_snapshot 
+Target android_aot_release_android-x64 failed: ProcessException: Failed to find "/sdks/flutter/bin/cache/artifacts/engine/android-x64-release/linux-arm64/gen_snapshot" in the search path.
+  Command: /sdks/flutter/bin/cache/artifacts/engine/android-x64-release/linux-arm64/gen_snapshot 
+
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileFlutterBuildRelease'.
+> Process 'command '/sdks/flutter/bin/flutter'' finished with non-zero exit value 1
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+
+* Get more help at https://help.gradle.org
+
+BUILD FAILED in 1m 2s
+Gradle task assembleRelease failed with exit code 1
+Usage:
+  hgbuild flutter build apk [flags]
+
+Flags:
+      --build-mode string   build mode (debug, profile, release) (default "release")
+      --flavor string       build flavor
+  -h, --help                help for apk
+      --project string      path to Flutter project
+
+Global Flags:
+  -C, --coordinator string          coordinator address (auto-discover if empty)
+      --insecure                    use insecure connection (default true)
+      --no-fallback                 disable local fallback when coordinator is unavailable
+      --timeout duration            connection timeout (default 2m0s)
+      --tls-ca string               Path to CA certificate for server verification
+      --tls-cert string             Path to TLS certificate file (PEM format)
+      --tls-key string              Path to TLS private key file (PEM format)
+      --tracing-enable              Enable OpenTelemetry tracing
+      --tracing-endpoint string     OTLP gRPC endpoint (default "localhost:4317")
+      --tracing-sample-rate float   Tracing sample rate (0.0-1.0) (default 0.01)
+  -v, --verbose                     verbose output
+
+build failed with status STATUS_FAILED (exit 1): Target android_aot_release_android-arm failed: ProcessException: Failed to find "/sdks/flutter/bin/cache/artifacts/engine/android-arm-release/linux-arm64/gen_snapshot" in the search path.
+  Command: /sdks/flutter/bin/cache/artifacts/engine/android-arm-release/linux-arm64/gen_snapshot 
+Target android_aot_release_android-arm64 failed: ProcessException: Failed to find "/sdks/flutter/bin/cache/artifacts/engine/android-arm64-release/linux-arm64/gen_snapshot" in the search path.
+  Command: /sdks/flutter/bin/cache/artifacts/engine/android-arm64-release/linux-arm64/gen_snapshot 
+Target android_aot_release_android-x64 failed: ProcessException: Failed to find "/sdks/flutter/bin/cache/artifacts/engine/android-x64-release/linux-arm64/gen_snapshot" in the search path.
+  Command: /sdks/flutter/bin/cache/artifacts/engine/android-x64-release/linux-arm64/gen_snapshot 
+
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileFlutterBuildRelease'.
+> Process 'command '/sdks/flutter/bin/flutter'' finished with non-zero exit value 1
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+
+* Get more help at https://help.gradle.org
+
+BUILD FAILED in 1m 2s
+Gradle task assembleRelease failed with exit code 1

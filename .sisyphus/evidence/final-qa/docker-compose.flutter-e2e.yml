@@ -1,0 +1,35 @@
+services:
+  coordinator:
+    build:
+      context: /Users/h3nr1.d14z/Projects/HieuLD/doantotnghiep/hybridgrid
+      dockerfile: test/e2e/Dockerfile.worker
+      args:
+        VERSION: dev
+        COMMIT: local
+        BUILD_TIME: final-qa
+    command: hg-coord serve --grpc-port=9000 --http-port=8080
+    ports:
+      - "19090:9000"
+      - "18080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  flutter-worker:
+    platform: linux/amd64
+    image: hybridgrid/flutter-android:3.19.6
+    command: /bin/sh -lc "flutter precache --android --android_gen_snapshot && /usr/local/bin/hg-worker serve --coordinator=coordinator:9000 --port=50052 --http-port=9090 --advertise-address=flutter-worker:50052 --max-parallel=1"
+    environment:
+      - FLUTTER_ROOT=/sdks/flutter
+      - ANDROID_SDK_ROOT=/opt/android-sdk-linux
+      - ANDROID_HOME=/opt/android-sdk-linux
+      - JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+      - GRADLE_OPTS=-Dorg.gradle.vfs.watch=false
+    volumes:
+      - /Users/h3nr1.d14z/Projects/HieuLD/doantotnghiep/hybridgrid/.sisyphus/evidence/final-qa/hg-worker-linux-amd64:/usr/local/bin/hg-worker:ro
+    depends_on:
+      coordinator:
+        condition: service_healthy

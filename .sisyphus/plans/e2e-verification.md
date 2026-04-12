@@ -77,7 +77,7 @@ Prove that every functional feature of Hybrid-Grid v0.2.3 works correctly in a r
 - [x] `/log-level` GET/PUT works on coordinator and worker
 - [x] Prometheus metrics show correct task/cache counters
 - [x] Local fallback compiles when coordinator is down
-- [ ] CPython stress test completes with distributed compilation
+- [x] CPython stress test completes with distributed compilation
 
 ### Must Have
 - Actual C/C++ compilation through the full pipeline (not just gRPC flow)
@@ -1320,7 +1320,7 @@ test -f .sisyphus/findings.md  # Expected: file exists
 ```
 
 ### Final Checklist
-- [ ] All "Must Have" features verified with evidence
+- [x] All "Must Have" features verified with evidence
 - [x] All "Must NOT Have" guardrails respected
 - [x] Zero production code modifications
 - [x] Findings report complete with categorized bugs

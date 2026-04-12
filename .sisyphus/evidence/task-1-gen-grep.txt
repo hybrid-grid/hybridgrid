@@ -1,0 +1,43 @@
+=== Task 1: Generated Go Code Grep Evidence ===
+
+=== Pattern 1: BuildType_BUILD_TYPE_FLUTTER ===
+81:	BuildType_BUILD_TYPE_FLUTTER     BuildType = 2
+
+=== Pattern 2: type FlutterConfig struct ===
+330:type FlutterConfig struct {
+331:	state          protoimpl.MessageState `protogen:"open.v1"`
+332:	FlutterVersion string                 `protobuf:"bytes,1,opt,name=flutter_version,json=flutterVersion,proto3" json:"flutter_version,omitempty"`
+333:	BuildMode      string                 `protobuf:"bytes,2,opt,name=build_mode,json=buildMode,proto3" json:"build_mode,omitempty"` // debug, profile, release
+334:	Flavor         string                 `protobuf:"bytes,3,opt,name=flavor,proto3" json:"flavor,omitempty"`
+335:	DartDefines    map[string]string      `protobuf:"bytes,4,rep,name=dart_defines,json=dartDefines,proto3" json:"dart_defines,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+
+=== FlutterConfig getters ===
+370:func (x *FlutterConfig) GetFlutterVersion() string {
+377:func (x *FlutterConfig) GetBuildMode() string {
+384:func (x *FlutterConfig) GetFlavor() string {
+391:func (x *FlutterConfig) GetDartDefines() map[string]string {
+
+=== Pattern 3: type FlutterCapability struct ===
+823:type FlutterCapability struct {
+824:	state          protoimpl.MessageState `protogen:"open.v1"`
+825:	SdkVersion     string                 `protobuf:"bytes,1,opt,name=sdk_version,json=sdkVersion,proto3" json:"sdk_version,omitempty"`
+826:	Platforms      []TargetPlatform       `protobuf:"varint,2,rep,packed,name=platforms,proto3,enum=hybridgrid.v1.TargetPlatform" json:"platforms,omitempty"`
+827:	AndroidSdk     bool                   `protobuf:"bytes,3,opt,name=android_sdk,json=androidSdk,proto3" json:"android_sdk,omitempty"`
+828:	XcodeAvailable bool                   `protobuf:"bytes,4,opt,name=xcode_available,json=xcodeAvailable,proto3" json:"xcode_available,omitempty"`
+
+=== FlutterCapability getters ===
+863:func (x *FlutterCapability) GetSdkVersion() string {
+870:func (x *FlutterCapability) GetPlatforms() []TargetPlatform {
+877:func (x *FlutterCapability) GetAndroidSdk() bool {
+884:func (x *FlutterCapability) GetXcodeAvailable() bool {
+
+=== WorkerCapabilities Flutter field ===
+1174:	Flutter       *FlutterCapability `protobuf:"bytes,21,opt,name=flutter,proto3" json:"flutter,omitempty"`
+1298:func (x *WorkerCapabilities) GetFlutter() *FlutterCapability {
+
+=== BuildRequest flutter_config oneof ===
+1483:	//	*BuildRequest_FlutterConfig
+1579:func (x *BuildRequest) GetFlutterConfig() *FlutterConfig {
+1581:	if x, ok := x.Config.(*BuildRequest_FlutterConfig); ok {
+1662:type BuildRequest_FlutterConfig struct {
+1663:	FlutterConfig *FlutterConfig `protobuf:"bytes,11,opt,name=flutter_config,json=flutterConfig,proto3,oneof"`

@@ -1,0 +1,41 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.98kB 0.0s done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for ghcr.io/cirruslabs/flutter:3.19.6
+#2 DONE 0.1s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 32B
+#3 transferring context: 129B done
+#3 DONE 0.0s
+
+#4 [licenses 1/2] FROM ghcr.io/cirruslabs/flutter:3.19.6@sha256:0cf271f52c7e55022cc571bcc595ec0bc6422fc8a5bcc9630c7a6e91fc921b31
+#4 resolve ghcr.io/cirruslabs/flutter:3.19.6@sha256:0cf271f52c7e55022cc571bcc595ec0bc6422fc8a5bcc9630c7a6e91fc921b31 0.0s done
+#4 DONE 0.0s
+
+#5 [licenses 2/2] RUN yes | flutter doctor --android-licenses > /dev/null 2>&1 || true
+#5 CACHED
+
+#6 [stage-1 2/4] COPY --from=licenses /root/.android /root/.android
+#6 CACHED
+
+#7 [stage-1 3/4] RUN curl -sSL "https://services.gradle.org/distributions/gradle-8.5-bin.zip" -o /tmp/gradle.zip &&     unzip -q /tmp/gradle.zip -d /opt &&     mv /opt/gradle-8.5 /opt/gradle &&     rm /tmp/gradle.zip
+#7 CACHED
+
+#8 [stage-1 4/4] WORKDIR /workspace
+#8 CACHED
+
+#9 exporting to image
+#9 exporting layers done
+#9 exporting manifest sha256:2e71bc759a8cc25068765214b59a80e55a515bbdc6f6832209c618e269d0181f done
+#9 exporting config sha256:5c3b26f4e910e5716d853155173ff9ccfdc72c9386f4c14303346523f6ef5572 done
+#9 exporting attestation manifest sha256:b9cc7b97f217fc512310d6ae4f1cef6d71139e95c3bc3997dfdb34ad1e54d58a
+#9 exporting attestation manifest sha256:b9cc7b97f217fc512310d6ae4f1cef6d71139e95c3bc3997dfdb34ad1e54d58a 0.0s done
+#9 exporting manifest list sha256:030d93fe8d765e94b13c61c8cc0901e6108497f9313ea2a08ae3d857ce8fdc04 0.0s done
+#9 naming to docker.io/hybridgrid/flutter-android:3.19.6 done
+#9 DONE 0.2s
+
+View build details: docker-desktop://dashboard/build/desktop-linux/desktop-linux/yfhqjj1lioyfwymm3mg2tqh7g

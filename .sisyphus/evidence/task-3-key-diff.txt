@@ -1,0 +1,10 @@
+# Task 3: Different configs produce different keys
+# Verified via go test -run TestFlutterCacheKey_DifferentBuildMode
+# Verified via go test -run TestFlutterCacheKey_DifferentFlavor
+# Verified via go test -run TestFlutterCacheKey_DifferentPubspecHash
+# Verified via go test -run TestFlutterCacheKey_DifferentFlutterVersion
+# Verified via go test -run TestFlutterCacheKey_DifferentDartDefines
+#
+# All 6 key-variation tests assert key1 != key2 for different inputs
+# and key1 == key2 for same inputs (TestFlutterCacheKey_Deterministic).
+# See task-3-cache-test.txt for full test output.

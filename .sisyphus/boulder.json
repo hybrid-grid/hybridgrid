@@ -1,9 +1,13 @@
 {
-  "active_plan": "/Users/h3nr1.d14z/Projects/HieuLD/doantotnghiep/hybridgrid/.sisyphus/plans/e2e-verification.md",
-  "started_at": "2026-03-15T21:46:33.298Z",
-  "session_ids": [
-    "ses_3197f7971ffey7l7nHqP1lLVkv"
-  ],
-  "plan_name": "e2e-verification",
-  "agent": "atlas"
+  "active_plan": "/Users/h3nr1.d14z/Projects/HieuLD/doantotnghiep/hybridgrid/.sisyphus/plans/v1.0.0-major-release.md",
+  "started_at": "2026-03-30T08:30:00.000Z",
+  "session_ids": [],
+  "plan_name": "v1.0.0-major-release",
+  "agent": "atlas",
+  "prerequisites": {
+    "v0.5.0-unity": {
+      "status": "in_progress",
+      "remaining_tasks": ["P1", "P2", "F1-F4"]
+    }
+  }
 }

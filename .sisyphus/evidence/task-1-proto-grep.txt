@@ -1,0 +1,57 @@
+=== Task 1: Proto Grep Evidence ===
+
+=== Pattern 1: BUILD_TYPE_FLUTTER ===
+21:  BUILD_TYPE_FLUTTER = 2;
+
+=== Pattern 2: FlutterConfig ===
+60:message FlutterConfig {
+208:    FlutterConfig flutter_config = 11;
+
+=== Pattern 3: FlutterCapability ===
+116:message FlutterCapability {
+164:  FlutterCapability flutter = 21;
+
+=== Pattern 4: FlutterConfig fields ===
+61:  string flutter_version = 1;
+62:  string build_mode = 2;            // debug, profile, release
+63:  string flavor = 3;
+64:  map<string, string> dart_defines = 4;
+76:  string build_mode = 2;            // debug, release  (CocosConfig)
+
+=== Pattern 5: FlutterCapability fields ===
+117:  string sdk_version = 1;
+118:  repeated TargetPlatform platforms = 2;
+119:  bool android_sdk = 3;
+120:  bool xcode_available = 4;
+
+=== BuildType enum ===
+18:enum BuildType {
+19:  BUILD_TYPE_UNSPECIFIED = 0;
+20:  BUILD_TYPE_CPP = 1;
+21:  BUILD_TYPE_FLUTTER = 2;
+22:  BUILD_TYPE_UNITY = 3;
+23:  BUILD_TYPE_COCOS = 4;
+24:  BUILD_TYPE_RUST = 5;
+25:  BUILD_TYPE_GO = 6;
+26:  BUILD_TYPE_NODEJS = 7;
+
+=== BuildRequest config oneof ===
+206:  oneof config {
+207:    CppConfig cpp_config = 10;
+208:    FlutterConfig flutter_config = 11;
+
+=== FlutterConfig message ===
+60:message FlutterConfig {
+61:  string flutter_version = 1;
+62:  string build_mode = 2;            // debug, profile, release
+63:  string flavor = 3;
+64:  map<string, string> dart_defines = 4;
+65:}
+
+=== FlutterCapability message ===
+116:message FlutterCapability {
+117:  string sdk_version = 1;
+118:  repeated TargetPlatform platforms = 2;
+119:  bool android_sdk = 3;
+120:  bool xcode_available = 4;
+121:}

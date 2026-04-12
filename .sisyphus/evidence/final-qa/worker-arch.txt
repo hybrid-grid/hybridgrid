@@ -1,0 +1,396 @@
+Worker container diagnostics
+
+docker ps
+CONTAINER ID   IMAGE                               COMMAND                  CREATED          STATUS          PORTS                                                                                          NAMES
+ca14cb7ad0a6   ghcr.io/cirruslabs/flutter:3.19.6   "/usr/local/bin/hg-w…"   18 minutes ago   Up 18 minutes   0.0.0.0:9090->9090/tcp, [::]:9090->9090/tcp, 0.0.0.0:50052->50052/tcp, [::]:50052->50052/tcp   hg-flutter-worker
+
+docker inspect ca14cb7ad0a6
+[
+    {
+        "Id": "ca14cb7ad0a6da1ab28b0ac1f4a43d94800ca77ab6b1ab82b8021cf4916f03af",
+        "Created": "2026-03-20T00:49:49.219980423Z",
+        "Path": "/usr/local/bin/hg-worker",
+        "Args": [
+            "serve",
+            "--coordinator=host.docker.internal:9000",
+            "--port=50052",
+            "--http-port=9090",
+            "--advertise-address=localhost:50052"
+        ],
+        "State": {
+            "Status": "running",
+            "Running": true,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 33294,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-03-20T00:49:49.589297798Z",
+            "FinishedAt": "0001-01-01T00:00:00Z"
+        },
+        "Image": "sha256:0cf271f52c7e55022cc571bcc595ec0bc6422fc8a5bcc9630c7a6e91fc921b31",
+        "ResolvConfPath": "/var/lib/docker/containers/ca14cb7ad0a6da1ab28b0ac1f4a43d94800ca77ab6b1ab82b8021cf4916f03af/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/ca14cb7ad0a6da1ab28b0ac1f4a43d94800ca77ab6b1ab82b8021cf4916f03af/hostname",
+        "HostsPath": "/var/lib/docker/containers/ca14cb7ad0a6da1ab28b0ac1f4a43d94800ca77ab6b1ab82b8021cf4916f03af/hosts",
+        "LogPath": "/var/lib/docker/containers/ca14cb7ad0a6da1ab28b0ac1f4a43d94800ca77ab6b1ab82b8021cf4916f03af/ca14cb7ad0a6da1ab28b0ac1f4a43d94800ca77ab6b1ab82b8021cf4916f03af-json.log",
+        "Name": "/hg-flutter-worker",
+        "RestartCount": 0,
+        "Driver": "overlayfs",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": [
+                "/Users/h3nr1.d14z/Projects/HieuLD/doantotnghiep/hybridgrid/.sisyphus/evidence/final-qa/hg-worker-linux-amd64:/usr/local/bin/hg-worker:ro"
+            ],
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {}
+            },
+            "NetworkMode": "bridge",
+            "PortBindings": {
+                "50052/tcp": [
+                    {
+                        "HostIp": "",
+                        "HostPort": "50052"
+                    }
+                ],
+                "9090/tcp": [
+                    {
+                        "HostIp": "",
+                        "HostPort": "9090"
+                    }
+                ]
+            },
+            "RestartPolicy": {
+                "Name": "no",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": null,
+            "CgroupnsMode": "private",
+            "Dns": [],
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 67108864,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 0,
+            "NanoCpus": 0,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": [],
+            "BlkioDeviceReadBps": [],
+            "BlkioDeviceWriteBps": [],
+            "BlkioDeviceReadIOps": [],
+            "BlkioDeviceWriteIOps": [],
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 0,
+            "MemorySwappiness": null,
+            "OomKillDisable": null,
+            "PidsLimit": null,
+            "Ulimits": [],
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "MaskedPaths": [
+                "/proc/asound",
+                "/proc/acpi",
+                "/proc/interrupts",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/sys/firmware",
+                "/sys/devices/virtual/powercap"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "GraphDriver": {
+            "Data": null,
+            "Name": "overlayfs"
+        },
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/Users/h3nr1.d14z/Projects/HieuLD/doantotnghiep/hybridgrid/.sisyphus/evidence/final-qa/hg-worker-linux-amd64",
+                "Destination": "/usr/local/bin/hg-worker",
+                "Mode": "ro",
+                "RW": false,
+                "Propagation": "rprivate"
+            }
+        ],
+        "Config": {
+            "Hostname": "ca14cb7ad0a6",
+            "Domainname": "",
+            "User": "root",
+            "AttachStdin": false,
+            "AttachStdout": false,
+            "AttachStderr": false,
+            "ExposedPorts": {
+                "50052/tcp": {},
+                "9090/tcp": {}
+            },
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "HG_LOG_LEVEL=debug",
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/android-sdk-linux/cmdline-tools/latest/bin:/opt/android-sdk-linux/platform-tools:/opt/android-sdk-linux/emulator:/sdks/flutter/bin:/sdks/flutter/bin/cache/dart-sdk/bin",
+                "ANDROID_HOME=/opt/android-sdk-linux",
+                "LANG=en_US.UTF-8",
+                "LC_ALL=en_US.UTF-8",
+                "LANGUAGE=en_US:en",
+                "ANDROID_SDK_ROOT=/opt/android-sdk-linux",
+                "ANDROID_SDK_TOOLS_VERSION=10406996",
+                "ANDROID_PLATFORM_VERSION=34",
+                "ANDROID_BUILD_TOOLS_VERSION=34.0.0",
+                "FLUTTER_HOME=/sdks/flutter",
+                "FLUTTER_VERSION=3.19.6",
+                "FLUTTER_ROOT=/sdks/flutter"
+            ],
+            "Cmd": [
+                "/usr/local/bin/hg-worker",
+                "serve",
+                "--coordinator=host.docker.internal:9000",
+                "--port=50052",
+                "--http-port=9090",
+                "--advertise-address=localhost:50052"
+            ],
+            "Image": "ghcr.io/cirruslabs/flutter:3.19.6",
+            "Volumes": null,
+            "WorkingDir": "",
+            "Entrypoint": null,
+            "OnBuild": null,
+            "Labels": {
+                "org.opencontainers.image.ref.name": "ubuntu",
+                "org.opencontainers.image.source": "https://github.com/cirruslabs/docker-images-flutter",
+                "org.opencontainers.image.version": "22.04"
+            },
+            "StopTimeout": 1
+        },
+        "NetworkSettings": {
+            "Bridge": "",
+            "SandboxID": "a72660e2a6d9f4d6b3c76cc1a1242d1245cb262820f6809774d2263b7dedbd53",
+            "SandboxKey": "/var/run/docker/netns/a72660e2a6d9",
+            "Ports": {
+                "50052/tcp": [
+                    {
+                        "HostIp": "0.0.0.0",
+                        "HostPort": "50052"
+                    },
+                    {
+                        "HostIp": "::",
+                        "HostPort": "50052"
+                    }
+                ],
+                "9090/tcp": [
+                    {
+                        "HostIp": "0.0.0.0",
+                        "HostPort": "9090"
+                    },
+                    {
+                        "HostIp": "::",
+                        "HostPort": "9090"
+                    }
+                ]
+            },
+            "HairpinMode": false,
+            "LinkLocalIPv6Address": "",
+            "LinkLocalIPv6PrefixLen": 0,
+            "SecondaryIPAddresses": null,
+            "SecondaryIPv6Addresses": null,
+            "EndpointID": "1e5742c2671be218b19a5c5853270b4c1a5bd6ed3526f8010feece57896cb806",
+            "Gateway": "172.17.0.1",
+            "GlobalIPv6Address": "",
+            "GlobalIPv6PrefixLen": 0,
+            "IPAddress": "172.17.0.2",
+            "IPPrefixLen": 16,
+            "IPv6Gateway": "",
+            "MacAddress": "9a:1d:de:e0:0c:df",
+            "Networks": {
+                "bridge": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": null,
+                    "MacAddress": "9a:1d:de:e0:0c:df",
+                    "DriverOpts": null,
+                    "GwPriority": 0,
+                    "NetworkID": "0c0e11716493bbea0e5b4b5565b0a41942a9cf91638fdc8f9e79bb4c948e7ec4",
+                    "EndpointID": "1e5742c2671be218b19a5c5853270b4c1a5bd6ed3526f8010feece57896cb806",
+                    "Gateway": "172.17.0.1",
+                    "IPAddress": "172.17.0.2",
+                    "IPPrefixLen": 16,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DNSNames": null
+                }
+            }
+        },
+        "ImageManifestDescriptor": {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:b00008304ab774457f6cf4e1f8ce441b7dc7ba9d7127f77da60702bced7c2c0b",
+            "size": 1638,
+            "platform": {
+                "architecture": "arm64",
+                "os": "linux"
+            }
+        }
+    }
+]
+
+docker exec ca14cb7ad0a6 uname -m
+aarch64
+
+docker exec ca14cb7ad0a6 flutter --version
+Flutter 3.19.6 • channel [user-branch] • unknown source
+Framework • revision 54e66469a9 (1 year, 11 months ago) • 2024-04-17 13:08:03 -0700
+Engine • revision c4cd48e186
+Tools • Dart 3.3.4 • DevTools 2.31.1
+
+docker exec ca14cb7ad0a6 flutter precache --help
+Populate the Flutter tool's cache of binary artifacts.
+
+If no explicit platform flags are provided, this command will download the artifacts for all currently enabled platforms
+
+Global options:
+-h, --help                  Print this usage information.
+-v, --verbose               Noisy logging, including all shell commands executed.
+                            If used with "--help", shows hidden options. If used with "flutter doctor", shows additional diagnostic information. (Use "-vv" to force verbose logging in those cases.)
+-d, --device-id             Target device id or name (prefixes allowed).
+    --version               Reports the version of this tool.
+    --enable-analytics      Enable telemetry reporting each time a flutter or dart command runs.
+    --disable-analytics     Disable telemetry reporting each time a flutter or dart command runs, until it is re-enabled.
+    --suppress-analytics    Suppress analytics reporting for the current CLI invocation.
+
+Usage: flutter precache [arguments]
+-h, --help              Print this usage information.
+-a, --all-platforms     Precache artifacts for all host platforms.
+-f, --force             Force re-downloading of artifacts.
+    --[no-]ios          Precache artifacts for iOS development.
+    --[no-]web          Precache artifacts for web development.
+    --[no-]linux        Precache artifacts for Linux desktop development.
+    --[no-]windows      Precache artifacts for Windows desktop development.
+    --[no-]macos        Precache artifacts for macOS desktop development.
+    --[no-]fuchsia      Precache artifacts for Fuchsia development.
+    --[no-]universal    Precache artifacts required for any development platform.
+                        (defaults to on)
+
+Run "flutter help" to see global options.
+
+docker exec ca14cb7ad0a6 ls /sdks/flutter/bin/cache/artifacts/engine/
+android-arm
+android-arm64
+android-arm64-profile
+android-arm64-release
+android-arm-profile
+android-arm-release
+android-x64
+android-x64-profile
+android-x64-release
+android-x86
+android-x86-jit-release
+common
+linux-arm64
+
+docker exec ca14cb7ad0a6 ls -la /sdks/flutter/bin/cache/artifacts/engine/linux-arm64/
+total 129160
+drwxr-xr-x 3 root root     4096 Apr 17  2024 .
+drwxr-xr-x 1 root root     4096 Apr 17  2024 ..
+-rw-r--r-- 1 root root  3460656 Apr 17  2024 const_finder.dart.snapshot
+-rwxr-xr-x 1 root root 51245712 Apr 17  2024 flutter_tester
+-rwxr-xr-x 1 root root  1507184 Apr 17  2024 font-subset
+-rw-r--r-- 1 root root 49460560 Apr 17  2024 frontend_server.dart.snapshot
+-rwxr-xr-x 1 root root  7920376 Apr 17  2024 gen_snapshot
+-rw-r--r-- 1 root root   817232 Apr 17  2024 icudtl.dat
+-rwxr-xr-x 1 root root  6780312 Apr 17  2024 impellerc
+-rw-r--r-- 1 root root 10339218 Apr 17  2024 isolate_snapshot.bin
+-rwxr-xr-x 1 root root   413416 Apr 17  2024 libpath_ops.so
+-rwxr-xr-x 1 root root   259400 Apr 17  2024 libtessellator.so
+-rw-r--r-- 1 root root      572 Apr 17  2024 LICENSE.artifacts.md
+-rw-r--r-- 1 root root      580 Apr 17  2024 LICENSE.font_subset.md
+drwxr-xr-x 4 root root     4096 Apr 17  2024 shader_lib
+-rw-r--r-- 1 root root    12391 Apr 17  2024 vm_isolate_snapshot.bin
+
+docker exec ca14cb7ad0a6 ls -la /sdks/flutter/bin/cache/artifacts/engine/android-arm64-release/
+total 5448
+drwxr-xr-x 3 root root    4096 Apr 17  2024 .
+drwxr-xr-x 1 root root    4096 Apr 17  2024 ..
+-rw-r--r-- 1 root root 5559995 Apr 17  2024 flutter.jar
+-rw-r--r-- 1 root root     594 Apr 17  2024 LICENSE.flutter_jar_zip.md
+drwxr-xr-x 2 root root    4096 Apr 17  2024 linux-x64
+
+docker exec ca14cb7ad0a6 ls -la /sdks/flutter/bin/cache/artifacts/engine/android-arm64-release/linux-x64/
+total 7372
+drwxr-xr-x 2 root root    4096 Apr 17  2024 .
+drwxr-xr-x 3 root root    4096 Apr 17  2024 ..
+-rwxr-xr-x 1 root root 7533528 Apr 17  2024 gen_snapshot
+-rw-r--r-- 1 root root     591 Apr 17  2024 LICENSE.gen_snapshot.md
+
+=== ANALYSIS ===
+
+Container runs on ARM64 (aarch64), but Flutter SDK cache only contains:
+  /sdks/flutter/bin/cache/artifacts/engine/android-arm64-release/linux-x64/gen_snapshot
+
+It does NOT contain:
+  /sdks/flutter/bin/cache/artifacts/engine/android-arm64-release/linux-arm64/gen_snapshot
+
+The `linux-arm64` directory at the engine root contains a gen_snapshot for host-side Dart
+compilation (Flutter tools), NOT for Android AOT compilation targets.
+
+ROOT CAUSE: The cirruslabs/flutter:3.19.6 image was built for x86_64 hosts and only includes
+linux-x64 gen_snapshot binaries for Android release builds. When run on an ARM64 Docker host
+(Apple Silicon via Rosetta/QEMU emulation), Flutter's AOT compiler looks for linux-arm64
+gen_snapshot under android-*-release/ but finds only linux-x64.
+
+POSSIBLE FIXES:
+1. Use an ARM64-native Flutter Docker image (if available from cirruslabs or build custom)
+2. Run the container with --platform linux/amd64 to force x86_64 emulation throughout
+3. Build a custom Dockerfile that runs `flutter precache` on an ARM64 host to download
+   linux-arm64 Android AOT artifacts

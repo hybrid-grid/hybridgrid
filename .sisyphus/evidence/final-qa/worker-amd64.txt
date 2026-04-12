@@ -1,0 +1,583 @@
+Command: docker ps --format "table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Ports}}"
+Output:
+CONTAINER ID   NAMES               IMAGE                               PORTS
+ca14cb7ad0a6   hg-flutter-worker   ghcr.io/cirruslabs/flutter:3.19.6   0.0.0.0:9090->9090/tcp, [::]:9090->9090/tcp, 0.0.0.0:50052->50052/tcp, [::]:50052->50052/tcp
+
+Command: docker inspect hg-flutter-worker
+Output:
+[
+    {
+        "Id": "ca14cb7ad0a6da1ab28b0ac1f4a43d94800ca77ab6b1ab82b8021cf4916f03af",
+        "Created": "2026-03-20T00:49:49.219980423Z",
+        "Path": "/usr/local/bin/hg-worker",
+        "Args": [
+            "serve",
+            "--coordinator=host.docker.internal:9000",
+            "--port=50052",
+            "--http-port=9090",
+            "--advertise-address=localhost:50052"
+        ],
+        "State": {
+            "Status": "running",
+            "Running": true,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 33294,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-03-20T00:49:49.589297798Z",
+            "FinishedAt": "0001-01-01T00:00:00Z"
+        },
+        "Image": "sha256:0cf271f52c7e55022cc571bcc595ec0bc6422fc8a5bcc9630c7a6e91fc921b31",
+        "ResolvConfPath": "/var/lib/docker/containers/ca14cb7ad0a6da1ab28b0ac1f4a43d94800ca77ab6b1ab82b8021cf4916f03af/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/ca14cb7ad0a6da1ab28b0ac1f4a43d94800ca77ab6b1ab82b8021cf4916f03af/hostname",
+        "HostsPath": "/var/lib/docker/containers/ca14cb7ad0a6da1ab28b0ac1f4a43d94800ca77ab6b1ab82b8021cf4916f03af/hosts",
+        "LogPath": "/var/lib/docker/containers/ca14cb7ad0a6da1ab28b0ac1f4a43d94800ca77ab6b1ab82b8021cf4916f03af/ca14cb7ad0a6da1ab28b0ac1f4a43d94800ca77ab6b1ab82b8021cf4916f03af-json.log",
+        "Name": "/hg-flutter-worker",
+        "RestartCount": 0,
+        "Driver": "overlayfs",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": [
+                "/Users/h3nr1.d14z/Projects/HieuLD/doantotnghiep/hybridgrid/.sisyphus/evidence/final-qa/hg-worker-linux-amd64:/usr/local/bin/hg-worker:ro"
+            ],
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {}
+            },
+            "NetworkMode": "bridge",
+            "PortBindings": {
+                "50052/tcp": [
+                    {
+                        "HostIp": "",
+                        "HostPort": "50052"
+                    }
+                ],
+                "9090/tcp": [
+                    {
+                        "HostIp": "",
+                        "HostPort": "9090"
+                    }
+                ]
+            },
+            "RestartPolicy": {
+                "Name": "no",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": null,
+            "CgroupnsMode": "private",
+            "Dns": [],
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 67108864,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 0,
+            "NanoCpus": 0,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": [],
+            "BlkioDeviceReadBps": [],
+            "BlkioDeviceWriteBps": [],
+            "BlkioDeviceReadIOps": [],
+            "BlkioDeviceWriteIOps": [],
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 0,
+            "MemorySwappiness": null,
+            "OomKillDisable": null,
+            "PidsLimit": null,
+            "Ulimits": [],
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "MaskedPaths": [
+                "/proc/asound",
+                "/proc/acpi",
+                "/proc/interrupts",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/sys/firmware",
+                "/sys/devices/virtual/powercap"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "GraphDriver": {
+            "Data": null,
+            "Name": "overlayfs"
+        },
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/Users/h3nr1.d14z/Projects/HieuLD/doantotnghiep/hybridgrid/.sisyphus/evidence/final-qa/hg-worker-linux-amd64",
+                "Destination": "/usr/local/bin/hg-worker",
+                "Mode": "ro",
+                "RW": false,
+                "Propagation": "rprivate"
+            }
+        ],
+        "Config": {
+            "Hostname": "ca14cb7ad0a6",
+            "Domainname": "",
+            "User": "root",
+            "AttachStdin": false,
+            "AttachStdout": false,
+            "AttachStderr": false,
+            "ExposedPorts": {
+                "50052/tcp": {},
+                "9090/tcp": {}
+            },
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "HG_LOG_LEVEL=debug",
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/android-sdk-linux/cmdline-tools/latest/bin:/opt/android-sdk-linux/platform-tools:/opt/android-sdk-linux/emulator:/sdks/flutter/bin:/sdks/flutter/bin/cache/dart-sdk/bin",
+                "ANDROID_HOME=/opt/android-sdk-linux",
+                "LANG=en_US.UTF-8",
+                "LC_ALL=en_US.UTF-8",
+                "LANGUAGE=en_US:en",
+                "ANDROID_SDK_ROOT=/opt/android-sdk-linux",
+                "ANDROID_SDK_TOOLS_VERSION=10406996",
+                "ANDROID_PLATFORM_VERSION=34",
+                "ANDROID_BUILD_TOOLS_VERSION=34.0.0",
+                "FLUTTER_HOME=/sdks/flutter",
+                "FLUTTER_VERSION=3.19.6",
+                "FLUTTER_ROOT=/sdks/flutter"
+            ],
+            "Cmd": [
+                "/usr/local/bin/hg-worker",
+                "serve",
+                "--coordinator=host.docker.internal:9000",
+                "--port=50052",
+                "--http-port=9090",
+                "--advertise-address=localhost:50052"
+            ],
+            "Image": "ghcr.io/cirruslabs/flutter:3.19.6",
+            "Volumes": null,
+            "WorkingDir": "",
+            "Entrypoint": null,
+            "OnBuild": null,
+            "Labels": {
+                "org.opencontainers.image.ref.name": "ubuntu",
+                "org.opencontainers.image.source": "https://github.com/cirruslabs/docker-images-flutter",
+                "org.opencontainers.image.version": "22.04"
+            },
+            "StopTimeout": 1
+        },
+        "NetworkSettings": {
+            "Bridge": "",
+            "SandboxID": "a72660e2a6d9f4d6b3c76cc1a1242d1245cb262820f6809774d2263b7dedbd53",
+            "SandboxKey": "/var/run/docker/netns/a72660e2a6d9",
+            "Ports": {
+                "50052/tcp": [
+                    {
+                        "HostIp": "0.0.0.0",
+                        "HostPort": "50052"
+                    },
+                    {
+                        "HostIp": "::",
+                        "HostPort": "50052"
+                    }
+                ],
+                "9090/tcp": [
+                    {
+                        "HostIp": "0.0.0.0",
+                        "HostPort": "9090"
+                    },
+                    {
+                        "HostIp": "::",
+                        "HostPort": "9090"
+                    }
+                ]
+            },
+            "HairpinMode": false,
+            "LinkLocalIPv6Address": "",
+            "LinkLocalIPv6PrefixLen": 0,
+            "SecondaryIPAddresses": null,
+            "SecondaryIPv6Addresses": null,
+            "EndpointID": "1e5742c2671be218b19a5c5853270b4c1a5bd6ed3526f8010feece57896cb806",
+            "Gateway": "172.17.0.1",
+            "GlobalIPv6Address": "",
+            "GlobalIPv6PrefixLen": 0,
+            "IPAddress": "172.17.0.2",
+            "IPPrefixLen": 16,
+            "IPv6Gateway": "",
+            "MacAddress": "9a:1d:de:e0:0c:df",
+            "Networks": {
+                "bridge": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": null,
+                    "MacAddress": "9a:1d:de:e0:0c:df",
+                    "DriverOpts": null,
+                    "GwPriority": 0,
+                    "NetworkID": "0c0e11716493bbea0e5b4b5565b0a41942a9cf91638fdc8f9e79bb4c948e7ec4",
+                    "EndpointID": "1e5742c2671be218b19a5c5853270b4c1a5bd6ed3526f8010feece57896cb806",
+                    "Gateway": "172.17.0.1",
+                    "IPAddress": "172.17.0.2",
+                    "IPPrefixLen": 16,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DNSNames": null
+                }
+            }
+        },
+        "ImageManifestDescriptor": {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:b00008304ab774457f6cf4e1f8ce441b7dc7ba9d7127f77da60702bced7c2c0b",
+            "size": 1638,
+            "platform": {
+                "architecture": "arm64",
+                "os": "linux"
+            }
+        }
+    }
+]
+
+Command: docker stop hg-flutter-worker && docker rm hg-flutter-worker && docker run -d --name hg-flutter-worker --platform linux/amd64 -p 50052:50052 -p 9090:9090 -v "/Users/h3nr1.d14z/Projects/HieuLD/doantotnghiep/hybridgrid/.sisyphus/evidence/final-qa/hg-worker-linux-amd64:/usr/local/bin/hg-worker:ro" -e HG_LOG_LEVEL=debug ghcr.io/cirruslabs/flutter:3.19.6 /usr/local/bin/hg-worker serve --coordinator=host.docker.internal:9000 --port=50052 --http-port=9090 --advertise-address=localhost:50052
+Output:
+hg-flutter-worker
+hg-flutter-worker
+00fd338adb627aae4a6d47d9a23b3b829af5c68c32b31ad8d6bea4c669005aaf
+
+Command: docker exec hg-flutter-worker uname -m
+Output:
+x86_64
+
+Command: docker inspect hg-flutter-worker
+Output:
+[
+    {
+        "Id": "00fd338adb627aae4a6d47d9a23b3b829af5c68c32b31ad8d6bea4c669005aaf",
+        "Created": "2026-03-20T01:13:43.568548128Z",
+        "Path": "/usr/local/bin/hg-worker",
+        "Args": [
+            "serve",
+            "--coordinator=host.docker.internal:9000",
+            "--port=50052",
+            "--http-port=9090",
+            "--advertise-address=localhost:50052"
+        ],
+        "State": {
+            "Status": "running",
+            "Running": true,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 35517,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-03-20T01:13:43.947488503Z",
+            "FinishedAt": "0001-01-01T00:00:00Z"
+        },
+        "Image": "sha256:0cf271f52c7e55022cc571bcc595ec0bc6422fc8a5bcc9630c7a6e91fc921b31",
+        "ResolvConfPath": "/var/lib/docker/containers/00fd338adb627aae4a6d47d9a23b3b829af5c68c32b31ad8d6bea4c669005aaf/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/00fd338adb627aae4a6d47d9a23b3b829af5c68c32b31ad8d6bea4c669005aaf/hostname",
+        "HostsPath": "/var/lib/docker/containers/00fd338adb627aae4a6d47d9a23b3b829af5c68c32b31ad8d6bea4c669005aaf/hosts",
+        "LogPath": "/var/lib/docker/containers/00fd338adb627aae4a6d47d9a23b3b829af5c68c32b31ad8d6bea4c669005aaf/00fd338adb627aae4a6d47d9a23b3b829af5c68c32b31ad8d6bea4c669005aaf-json.log",
+        "Name": "/hg-flutter-worker",
+        "RestartCount": 0,
+        "Driver": "overlayfs",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": [
+                "/Users/h3nr1.d14z/Projects/HieuLD/doantotnghiep/hybridgrid/.sisyphus/evidence/final-qa/hg-worker-linux-amd64:/usr/local/bin/hg-worker:ro"
+            ],
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {}
+            },
+            "NetworkMode": "bridge",
+            "PortBindings": {
+                "50052/tcp": [
+                    {
+                        "HostIp": "",
+                        "HostPort": "50052"
+                    }
+                ],
+                "9090/tcp": [
+                    {
+                        "HostIp": "",
+                        "HostPort": "9090"
+                    }
+                ]
+            },
+            "RestartPolicy": {
+                "Name": "no",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": null,
+            "CgroupnsMode": "private",
+            "Dns": [],
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 67108864,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 0,
+            "NanoCpus": 0,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": [],
+            "BlkioDeviceReadBps": [],
+            "BlkioDeviceWriteBps": [],
+            "BlkioDeviceReadIOps": [],
+            "BlkioDeviceWriteIOps": [],
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 0,
+            "MemorySwappiness": null,
+            "OomKillDisable": null,
+            "PidsLimit": null,
+            "Ulimits": [],
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "MaskedPaths": [
+                "/proc/asound",
+                "/proc/acpi",
+                "/proc/interrupts",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/sys/firmware",
+                "/sys/devices/virtual/powercap"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "GraphDriver": {
+            "Data": null,
+            "Name": "overlayfs"
+        },
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/Users/h3nr1.d14z/Projects/HieuLD/doantotnghiep/hybridgrid/.sisyphus/evidence/final-qa/hg-worker-linux-amd64",
+                "Destination": "/usr/local/bin/hg-worker",
+                "Mode": "ro",
+                "RW": false,
+                "Propagation": "rprivate"
+            }
+        ],
+        "Config": {
+            "Hostname": "00fd338adb62",
+            "Domainname": "",
+            "User": "root",
+            "AttachStdin": false,
+            "AttachStdout": false,
+            "AttachStderr": false,
+            "ExposedPorts": {
+                "50052/tcp": {},
+                "9090/tcp": {}
+            },
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "HG_LOG_LEVEL=debug",
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/android-sdk-linux/cmdline-tools/latest/bin:/opt/android-sdk-linux/platform-tools:/opt/android-sdk-linux/emulator:/sdks/flutter/bin:/sdks/flutter/bin/cache/dart-sdk/bin",
+                "ANDROID_HOME=/opt/android-sdk-linux",
+                "LANG=en_US.UTF-8",
+                "LC_ALL=en_US.UTF-8",
+                "LANGUAGE=en_US:en",
+                "ANDROID_SDK_ROOT=/opt/android-sdk-linux",
+                "ANDROID_SDK_TOOLS_VERSION=10406996",
+                "ANDROID_PLATFORM_VERSION=34",
+                "ANDROID_BUILD_TOOLS_VERSION=34.0.0",
+                "FLUTTER_HOME=/sdks/flutter",
+                "FLUTTER_VERSION=3.19.6",
+                "FLUTTER_ROOT=/sdks/flutter"
+            ],
+            "Cmd": [
+                "/usr/local/bin/hg-worker",
+                "serve",
+                "--coordinator=host.docker.internal:9000",
+                "--port=50052",
+                "--http-port=9090",
+                "--advertise-address=localhost:50052"
+            ],
+            "Image": "ghcr.io/cirruslabs/flutter:3.19.6",
+            "Volumes": null,
+            "WorkingDir": "",
+            "Entrypoint": null,
+            "OnBuild": null,
+            "Labels": {
+                "org.opencontainers.image.ref.name": "ubuntu",
+                "org.opencontainers.image.source": "https://github.com/cirruslabs/docker-images-flutter",
+                "org.opencontainers.image.version": "22.04"
+            },
+            "StopTimeout": 1
+        },
+        "NetworkSettings": {
+            "Bridge": "",
+            "SandboxID": "8d8b14660f4347261517fb452d09e2564cc32cf4f2c36a51ab419b15f3677545",
+            "SandboxKey": "/var/run/docker/netns/8d8b14660f43",
+            "Ports": {
+                "50052/tcp": [
+                    {
+                        "HostIp": "0.0.0.0",
+                        "HostPort": "50052"
+                    },
+                    {
+                        "HostIp": "::",
+                        "HostPort": "50052"
+                    }
+                ],
+                "9090/tcp": [
+                    {
+                        "HostIp": "0.0.0.0",
+                        "HostPort": "9090"
+                    },
+                    {
+                        "HostIp": "::",
+                        "HostPort": "9090"
+                    }
+                ]
+            },
+            "HairpinMode": false,
+            "LinkLocalIPv6Address": "",
+            "LinkLocalIPv6PrefixLen": 0,
+            "SecondaryIPAddresses": null,
+            "SecondaryIPv6Addresses": null,
+            "EndpointID": "05d4a3703e7bf242f3e999b8c2a53a10e05716f5319fd40b67531e87276314b9",
+            "Gateway": "172.17.0.1",
+            "GlobalIPv6Address": "",
+            "GlobalIPv6PrefixLen": 0,
+            "IPAddress": "172.17.0.2",
+            "IPPrefixLen": 16,
+            "IPv6Gateway": "",
+            "MacAddress": "46:81:2d:12:25:63",
+            "Networks": {
+                "bridge": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": null,
+                    "MacAddress": "46:81:2d:12:25:63",
+                    "DriverOpts": null,
+                    "GwPriority": 0,
+                    "NetworkID": "0c0e11716493bbea0e5b4b5565b0a41942a9cf91638fdc8f9e79bb4c948e7ec4",
+                    "EndpointID": "05d4a3703e7bf242f3e999b8c2a53a10e05716f5319fd40b67531e87276314b9",
+                    "Gateway": "172.17.0.1",
+                    "IPAddress": "172.17.0.2",
+                    "IPPrefixLen": 16,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DNSNames": null
+                }
+            }
+        },
+        "ImageManifestDescriptor": {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:9d4b098aaa53906717f393c3e611dce186bf1c355c3695b5895212e7ccf93d3a",
+            "size": 1638,
+            "platform": {
+                "architecture": "amd64",
+                "os": "linux"
+            }
+        }
+    }
+]
+
+Command: docker ps --format "table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Ports}}"
+Output:
+CONTAINER ID   NAMES               IMAGE                               PORTS
+00fd338adb62   hg-flutter-worker   ghcr.io/cirruslabs/flutter:3.19.6   0.0.0.0:9090->9090/tcp, [::]:9090->9090/tcp, 0.0.0.0:50052->50052/tcp, [::]:50052->50052/tcp

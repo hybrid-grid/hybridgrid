@@ -712,3 +712,106 @@ test/e2e/testdata/testapp shows 9 modified files, all in allowed scope (, ).
 - Monitor metrics in production deployment
 - Consider adding remaining metrics (network transfer, worker latency) in future iterations
 - Stress test (Blocker 2) remains optional for v0.3.0
+
+## [2026-03-18T04:20:00Z] Task: Prometheus client_golang Official Documentation Lookup
+
+### Official Documentation URLs
+
+1. **Official Prometheus instrumenting Go guide** (step-by-step tutorial):
+   - https://prometheus.io/docs/guides/go-application/
+
+2. **Official Prometheus Go client landing page** (overview):
+   - https://prometheus.io/docs/instrumenting/go/
+
+3. **prometheus package GoDoc** (core registration, metric types, Registry):
+   - https://pkg.go.dev/github.com/prometheus/client_golang/prometheus
+
+4. **promhttp package GoDoc** (HTTP exposition, Handler):
+   - https://pkg.go.dev/github.com/prometheus/client_golang/prometheus/promhttp
+
+5. **promauto package GoDoc** (auto-registration constructors):
+   - https://pkg.go.dev/github.com/prometheus/client_golang/prometheus/promauto
+
+6. **GitHub repo README** (entry point, installation):
+   - https://github.com/prometheus/client_golang
+
+### DefaultRegisterer vs Custom Registries
+
+- **`prometheus.DefaultRegisterer`** is a global, package-level variable. It comes pre-registered with Go runtime and process collectors. All top-level `MustRegister`/`Register` calls go here by default.
+- **`prometheus.NewRegistry()`** creates a custom/isolated registry. It does NOT include Go/process collectors — you must explicitly add them.
+- **`promhttp.Handler()`** (no arguments) returns an `http.Handler` backed by `prometheus.DefaultGatherer` — the Gatherer counterpart of `DefaultRegisterer`. It is pre-instrumented with scrape-count and in-flight metrics.
+- **`promhttp.HandlerFor(reg, opts)`** creates a handler for a **specific** Gatherer (custom or default). Use this when you need non-default `HandlerOpts` or a custom registry.
+- **Key implication for hybridgrid**: If metrics are registered with a custom registry but `promhttp.Handler()` (default) is used on `/metrics`, the custom metrics will NOT appear. Conversely, if `promhttp.HandlerFor(reg, opts)` is used with a custom registry, the default Go/process metrics may be missing. **hybridgrid needs consistency** — either always use `DefaultRegisterer` + `promhttp.Handler()`, or always use a custom registry + `promhttp.HandlerFor(customReg, opts)`.
+
+### Registration Must Happen at Startup
+
+From the official guide and GoDoc:
+- Metrics **must be registered** (via `MustRegister` or `promauto`) before they appear on `/metrics`.
+- Registration is a one-time operation done at **program initialization/startup**, not on first use.
+- The official guide example shows: create registry → create metric → `MustRegister` → start HTTP server. Metrics are defined and registered **before** the server listens.
+- The `promauto` package warns: constructors called in `var` sections (or `init`) will panic on registration failure **at import time**, which is why many projects prefer explicit `MustRegister` in `main()` or an `Init()` function.
+- **`sync.Once` singleton pattern** (used in hybridgrid's `internal/observability/metrics`) is a valid approach: defer registration until first call to `metrics.Default()`, but it **must** be called during startup (before serving HTTP requests).
+
+### Key Best Practices (from pkg.go.dev Overview)
+
+1. **Metrics must be registered before exposure** — undefined/never-registered metrics will not appear in `/metrics` output.
+2. **`promhttp.Handler()` uses `DefaultGatherer`** — if you use a custom registry, you **must** use `promhttp.HandlerFor(yourRegistry, opts)` instead.
+3. **MustRegister panics on duplicate/inconsistent registration** — this is intentional; it's better to fail fast at startup than silently drop metrics.
+4. **`promauto` constructors auto-register** — convenient but risky at `init()` time (import-time panics possible).
+5. **`Registry` implements `Gatherer`** — the Registry is both the registration target AND the data source for `/metrics`.
+6. **Custom registries** are useful for: avoiding global state, testing isolation, exposing different metrics via different `/metrics` endpoints.
+
+### hybridgrid Coordinator Applicability
+
+- **Confirmed root cause** (from Blocker 1 fix, learnings entry 2026-03-16 19:46): `metrics.Default()` was not called at startup, so `MustRegister` never ran, so `DefaultRegisterer` held no `hybridgrid_*` metrics.
+- **`promhttp.Handler()` used on `/metrics`** (per learnings entry): this correctly uses `DefaultGatherer`, so once `metrics.Default()` was called, all registered metrics became visible.
+- **The fix pattern** (singleton `Default()` + `MustRegister` + `promhttp.Handler()`) is the **idiomatic** approach matching official guidance.
+- **No custom registry used** — hybridgrid uses the global `DefaultRegisterer`, which is the simplest and recommended path for single-process applications.
+- **Go/process collectors** are pre-registered in `DefaultRegisterer` by the `prometheus` package itself at import time, so hybridgrid's `/metrics` naturally includes `go_*` and `process_*` metrics even without explicit registration.
+
+
+## [2026-03-18T00:00:00Z] Metrics Search: Full Pipeline Inventory
+
+### What Was Found
+
+#### 1. Metrics Package — Definitions & Registration
+- `internal/observability/metrics/metrics.go`
+  - Singleton pattern: `Default()` with `sync.Once` at lines 42-47; first call triggers `New()` + `Register(prometheus.DefaultRegisterer)`
+  - 12 metric objects defined (lines 50-158): TasksTotal, CacheHits, CacheMisses, FallbacksTotal, WorkersTotal, ActiveTasks, QueueDepth, TaskDuration, QueueTime, TransferBytes, WorkerLatencyMs, CircuitState
+  - All registered via `MustRegister` at lines 162-175
+  - Handler() at lines 178-181 returns promhttp.Handler()
+  - All Record*/Set* methods at lines 192-255
+
+#### 2. Coordinator Startup — Init Call
+- `cmd/hg-coord/main.go:173` — `_ = observabilitymetrics.Default()` — the fix applied during this session; fires before server/dashboard creation
+- Log: "Prometheus metrics initialized" at line 174
+
+#### 3. /metrics HTTP Handler
+- `internal/observability/dashboard/server.go:69` — `mux.Handle("/metrics", promhttp.Handler())`
+- This is the coordinator's port 8080 HTTP server, which exposes Prometheus metrics
+
+#### 4. Recording Points
+- `internal/coordinator/server/grpc.go:151` — m := metrics.Default() in server.New() (first fetch, triggers init)
+- `internal/coordinator/server/grpc.go:152-163` — SetCircuitState on circuit breaker state change
+- `internal/coordinator/server/grpc.go:386` — m := metrics.Default() (subsequent fetches)
+- `internal/coordinator/server/grpc.go:389,395` — SetActiveTaskCount (increment/decrement)
+- `internal/coordinator/server/grpc.go:424,434` — RecordTransfer (upload/download bytes)
+- `internal/coordinator/server/grpc.go:430` — RecordWorkerLatency
+- `internal/coordinator/server/grpc.go:501,503` — RecordTaskComplete (success/error)
+- `internal/coordinator/server/grpc.go:505` — RecordQueueTime
+- `internal/coordinator/registry/registry.go:412-420` — SetWorkerCount (active/total workers)
+- `internal/cache/store.go:107` — m := metrics.Default()
+- `internal/cache/store.go:112,120,129` — RecordCacheMiss (3 error paths)
+- `internal/cache/store.go:141` — RecordCacheHit
+
+#### 5. Separate Internal Metrics Package (NOT Prometheus)
+- `internal/coordinator/metrics/latency.go` — EWMA latency tracker for P2C scheduler (lines 1-89)
+- `internal/coordinator/metrics/ewma.go` — EWMA algorithm implementation (lines 1-62)
+- Used by scheduler at `internal/coordinator/scheduler/scheduler.go:185` for load balancing decisions
+- NOT exported to Prometheus — completely separate from hybridgrid_* metrics
+
+#### 6. CLI Metrics
+- `internal/cli/build/build.go:246` — m := metrics.Default() for fallback counting
+
+### Key Takeaway
+The metrics pipeline is now complete: Default() singleton registered at coordinator startup, /metrics handler wired via promhttp on dashboard server, all recording calls in place. The internal/coordinator/metrics package is for scheduling EWMA, not observability.

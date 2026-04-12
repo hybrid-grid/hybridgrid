@@ -1,0 +1,24 @@
+Error: unknown flag: --release
+Usage:
+  hgbuild flutter build apk [flags]
+
+Flags:
+      --build-mode string   build mode (debug, profile, release) (default "release")
+      --flavor string       build flavor
+  -h, --help                help for apk
+      --project string      path to Flutter project
+
+Global Flags:
+  -C, --coordinator string          coordinator address (auto-discover if empty)
+      --insecure                    use insecure connection (default true)
+      --no-fallback                 disable local fallback when coordinator is unavailable
+      --timeout duration            connection timeout (default 2m0s)
+      --tls-ca string               Path to CA certificate for server verification
+      --tls-cert string             Path to TLS certificate file (PEM format)
+      --tls-key string              Path to TLS private key file (PEM format)
+      --tracing-enable              Enable OpenTelemetry tracing
+      --tracing-endpoint string     OTLP gRPC endpoint (default "localhost:4317")
+      --tracing-sample-rate float   Tracing sample rate (0.0-1.0) (default 0.01)
+  -v, --verbose                     verbose output
+
+unknown flag: --release

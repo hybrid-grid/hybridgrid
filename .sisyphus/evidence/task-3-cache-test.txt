@@ -1,0 +1,89 @@
+# github.com/h3nr1-d14z/hybridgrid/internal/cache.test
+ld: warning: '/private/var/folders/62/_285bdl12dl21gfrbgdl6tzm0000gn/T/go-link-3238678697/000013.o' has malformed LC_DYSYMTAB, expected 98 undefined symbols to start at index 1626, found 95 undefined symbols starting at index 1626
+=== RUN   TestKeyBuilder
+--- PASS: TestKeyBuilder (0.00s)
+=== RUN   TestHashFile
+--- PASS: TestHashFile (0.00s)
+=== RUN   TestCompilationKey
+--- PASS: TestCompilationKey (0.00s)
+=== RUN   TestStore
+--- PASS: TestStore (0.01s)
+=== RUN   TestStoreEviction
+--- PASS: TestStoreEviction (0.02s)
+=== RUN   TestStorePersistence
+--- PASS: TestStorePersistence (0.01s)
+=== RUN   TestNormalizePath
+--- PASS: TestNormalizePath (0.00s)
+=== RUN   TestKeyPath
+--- PASS: TestKeyPath (0.00s)
+=== RUN   TestHashBytes
+--- PASS: TestHashBytes (0.00s)
+=== RUN   TestHashString
+--- PASS: TestHashString (0.00s)
+=== RUN   TestHashStrings
+--- PASS: TestHashStrings (0.00s)
+=== RUN   TestKeyBuilder_AddBytes
+--- PASS: TestKeyBuilder_AddBytes (0.00s)
+=== RUN   TestKeyBuilder_AddStrings
+--- PASS: TestKeyBuilder_AddStrings (0.00s)
+=== RUN   TestKeyBuilder_AddSortedStrings
+--- PASS: TestKeyBuilder_AddSortedStrings (0.00s)
+=== RUN   TestKeyBuilder_AddFile
+--- PASS: TestKeyBuilder_AddFile (0.00s)
+=== RUN   TestKeyBuilder_SumUint64
+--- PASS: TestKeyBuilder_SumUint64 (0.00s)
+=== RUN   TestStore_GetWithReader
+--- PASS: TestStore_GetWithReader (0.00s)
+=== RUN   TestStore_PutWithReader
+--- PASS: TestStore_PutWithReader (0.01s)
+=== RUN   TestStore_TTLExpiration
+--- PASS: TestStore_TTLExpiration (0.00s)
+=== RUN   TestStore_GetMissingFile
+--- PASS: TestStore_GetMissingFile (0.01s)
+=== RUN   TestStore_StatsWithHits
+--- PASS: TestStore_StatsWithHits (0.01s)
+=== RUN   TestStore_UpdateExistingEntry
+--- PASS: TestStore_UpdateExistingEntry (0.01s)
+=== RUN   TestHashFile_NonExistent
+--- PASS: TestHashFile_NonExistent (0.00s)
+=== RUN   TestCompilationKey_DifferentInputs
+=== RUN   TestCompilationKey_DifferentInputs/different_compiler
+=== RUN   TestCompilationKey_DifferentInputs/different_version
+=== RUN   TestCompilationKey_DifferentInputs/different_arch
+=== RUN   TestCompilationKey_DifferentInputs/different_flags
+=== RUN   TestCompilationKey_DifferentInputs/different_defines
+=== RUN   TestCompilationKey_DifferentInputs/different_source
+--- PASS: TestCompilationKey_DifferentInputs (0.00s)
+    --- PASS: TestCompilationKey_DifferentInputs/different_compiler (0.00s)
+    --- PASS: TestCompilationKey_DifferentInputs/different_version (0.00s)
+    --- PASS: TestCompilationKey_DifferentInputs/different_arch (0.00s)
+    --- PASS: TestCompilationKey_DifferentInputs/different_flags (0.00s)
+    --- PASS: TestCompilationKey_DifferentInputs/different_defines (0.00s)
+    --- PASS: TestCompilationKey_DifferentInputs/different_source (0.00s)
+=== RUN   TestNewStore_CreateDirError
+--- PASS: TestNewStore_CreateDirError (0.00s)
+=== RUN   TestCacheKeyValidation_Windows
+--- PASS: TestCacheKeyValidation_Windows (0.03s)
+=== RUN   TestStore_DeleteNonExistent
+--- PASS: TestStore_DeleteNonExistent (0.00s)
+=== RUN   TestStore_ClearEmpty
+--- PASS: TestStore_ClearEmpty (0.00s)
+=== RUN   TestStore_GetNonExistent
+--- PASS: TestStore_GetNonExistent (0.00s)
+=== RUN   TestFlutterCacheKey_Deterministic
+--- PASS: TestFlutterCacheKey_Deterministic (0.00s)
+=== RUN   TestFlutterCacheKey_DifferentPubspecHash
+--- PASS: TestFlutterCacheKey_DifferentPubspecHash (0.00s)
+=== RUN   TestFlutterCacheKey_DifferentBuildMode
+--- PASS: TestFlutterCacheKey_DifferentBuildMode (0.00s)
+=== RUN   TestFlutterCacheKey_DifferentFlavor
+--- PASS: TestFlutterCacheKey_DifferentFlavor (0.00s)
+=== RUN   TestFlutterCacheKey_DifferentFlutterVersion
+--- PASS: TestFlutterCacheKey_DifferentFlutterVersion (0.00s)
+=== RUN   TestFlutterCacheKey_DifferentDartDefines
+--- PASS: TestFlutterCacheKey_DifferentDartDefines (0.00s)
+=== RUN   TestFlutterCacheKey_EmptyFlavorAndDefines
+--- PASS: TestFlutterCacheKey_EmptyFlavorAndDefines (0.00s)
+PASS
+ok  	github.com/h3nr1-d14z/hybridgrid/internal/cache	2.224s
+---EXIT:0

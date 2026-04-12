@@ -1,0 +1,7 @@
+[90m1:39AM[0m [32mINF[0m [1mStarting Hybrid-Grid Worker[0m [36mcoordinator=[0mhost.docker.internal:9000 [36mhostname=[0m6f8278cc642f [36mmax_parallel=[0m8 [36mport=[0m50052 [36mversion=[0mv0.0.0-dev
+[90m1:39AM[0m [32mINF[0m [1mPrometheus metrics initialized[0m
+[90m1:39AM[0m [32mINF[0m [1mWorker registered successfully[0m [36mheartbeat_interval=[0m30 [36mworker_id=[0mworker-6f8278cc642f
+[90m1:39AM[0m [32mINF[0m [1mWorker metrics server started[0m [36mport=[0m9090
+[90m1:39AM[0m [32mINF[0m [1mRequest ID interceptor enabled for worker gRPC server[0m
+[90m1:39AM[0m [32mINF[0m [1mWorker gRPC server starting[0m [36mport=[0m50052
+[90m1:39AM[0m [32mINF[0m [1mRequest ID extracted/generated[0m [36mrequest_id=[0m63f403a8fb7e7cd2ab6966c531da26a9

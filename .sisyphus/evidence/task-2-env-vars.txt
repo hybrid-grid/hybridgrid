@@ -1,0 +1,5 @@
+FLUTTER_ROOT=/opt/flutter
+ANDROID_SDK_ROOT=/opt/flutter/bin/cache/android-sdk
+ANDROID_HOME=/opt/flutter/bin/cache/android-sdk
+JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+PATH=/opt/flutter/bin:/opt/flutter/bin/cache/dart-sdk/bin:/opt/flutter/bin/cache/android-sdk/cmdline-tools/latest/bin:/opt/flutter/bin/cache/android-sdk/platform-tools:/usr/lib/jvm/java-17-openjdk-amd64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/android-sdk-linux/cmdline-tools/latest/bin:/opt/android-sdk-linux/platform-tools:/opt/android-sdk-linux/emulator:/sdks/flutter/bin:/sdks/flutter/bin/cache/dart-sdk/bin
