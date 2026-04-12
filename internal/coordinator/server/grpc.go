@@ -147,10 +147,23 @@ type Server struct {
 	flutterCacheMisses  int64
 	flutterCacheMu      sync.RWMutex
 	flutterCache        map[string]*flutterCacheEntry
+	unityBuilds         int64
+	unityCacheHits      int64
+	unityCacheMisses    int64
+	unityCacheMu        sync.RWMutex
+	unityCache          map[string]*unityCacheEntry
 	activeTasksByWorker sync.Map
 }
 
 type flutterCacheEntry struct {
+	artifacts    []byte
+	artifactList []*pb.ArtifactInfo
+	stdout       string
+	stderr       string
+	buildTimeMs  int64
+}
+
+type unityCacheEntry struct {
 	artifacts    []byte
 	artifactList []*pb.ArtifactInfo
 	stdout       string
@@ -205,6 +218,7 @@ func New(cfg Config) *Server {
 		circuitManager: circuitMgr,
 		workerConns:    newConnPool(dialOpts),
 		flutterCache:   make(map[string]*flutterCacheEntry),
+		unityCache:     make(map[string]*unityCacheEntry),
 	}
 }
 
@@ -555,6 +569,10 @@ func (s *Server) Build(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResp
 		return s.handleFlutterBuild(ctx, req)
 	}
 
+	if req.GetUnityConfig() != nil {
+		return s.handleUnityBuild(ctx, req)
+	}
+
 	return &pb.BuildResponse{
 		Status:   pb.TaskStatus_STATUS_FAILED,
 		ExitCode: 1,
@@ -763,6 +781,207 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest) (
 	return buildResp, nil
 }
 
+func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+	start := time.Now()
+	m := metrics.Default()
+
+	unityConfig := req.GetUnityConfig()
+	unityVersion := unityConfig.GetUnityVersion()
+	cacheKey := cache.UnityCacheKey(unityConfig, req.SourceHash, unityVersion, req.TargetPlatform)
+
+	if cached := s.getUnityCache(cacheKey); cached != nil {
+		atomic.AddInt64(&s.cacheHits, 1)
+		atomic.AddInt64(&s.unityCacheHits, 1)
+		atomic.AddInt64(&s.unityBuilds, 1)
+		atomic.AddInt64(&s.totalTasks, 1)
+		atomic.AddInt64(&s.successTasks, 1)
+
+		if s.eventNotifier != nil {
+			taskStart := start.Unix()
+			s.eventNotifier.NotifyTaskStarted(&TaskEvent{
+				ID:        req.TaskId,
+				BuildType: "unity",
+				Status:    "running",
+				WorkerID:  "",
+				StartedAt: taskStart,
+			})
+			s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
+				ID:           req.TaskId,
+				BuildType:    "unity",
+				Status:       "completed",
+				WorkerID:     "",
+				StartedAt:    taskStart,
+				CompletedAt:  time.Now().Unix(),
+				DurationMs:   cached.buildTimeMs,
+				ExitCode:     0,
+				FromCache:    true,
+				ErrorMessage: "",
+			})
+		}
+
+		return &pb.BuildResponse{
+			Status:       pb.TaskStatus_STATUS_COMPLETED,
+			ExitCode:     0,
+			Stdout:       cached.stdout,
+			Stderr:       cached.stderr,
+			Artifacts:    append([]byte(nil), cached.artifacts...),
+			ArtifactList: cloneArtifactList(cached.artifactList),
+			BuildTimeMs:  cached.buildTimeMs,
+			FromCache:    true,
+		}, nil
+	}
+
+	atomic.AddInt64(&s.cacheMisses, 1)
+	atomic.AddInt64(&s.unityCacheMisses, 1)
+
+	atomic.AddInt64(&s.queuedTasks, 1)
+	defer atomic.AddInt64(&s.queuedTasks, -1)
+
+	worker, err := s.selectUnityWorker(req.TargetPlatform)
+	if err != nil {
+		atomic.AddInt64(&s.totalTasks, 1)
+		atomic.AddInt64(&s.failedTasks, 1)
+		log.Error().Err(err).Str("task_id", req.TaskId).
+			Str("target_platform", req.TargetPlatform.String()).
+			Msg("No worker available for unity build")
+
+		if s.eventNotifier != nil {
+			taskStart := start.Unix()
+			s.eventNotifier.NotifyTaskStarted(&TaskEvent{
+				ID:        req.TaskId,
+				BuildType: "unity",
+				Status:    "running",
+				WorkerID:  "",
+				StartedAt: taskStart,
+			})
+			s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
+				ID:           req.TaskId,
+				BuildType:    "unity",
+				Status:       "failed",
+				WorkerID:     "",
+				StartedAt:    taskStart,
+				CompletedAt:  time.Now().Unix(),
+				DurationMs:   0,
+				ExitCode:     1,
+				FromCache:    false,
+				ErrorMessage: fmt.Sprintf("no worker available: %v", err),
+			})
+		}
+
+		return &pb.BuildResponse{
+			Status:   pb.TaskStatus_STATUS_FAILED,
+			ExitCode: 1,
+			Stderr:   fmt.Sprintf("no worker available: %v", err),
+		}, nil
+	}
+
+	conn, err := s.workerConns.get(ctx, worker.Address)
+	if err != nil {
+		log.Error().Err(err).Str("worker", worker.ID).Msg("Failed to connect to worker")
+		return &pb.BuildResponse{
+			Status:   pb.TaskStatus_STATUS_FAILED,
+			ExitCode: 1,
+			Stderr:   fmt.Sprintf("failed to connect to worker: %v", err),
+		}, nil
+	}
+
+	s.registry.IncrementTasks(worker.ID)
+	atomic.AddInt64(&s.activeTasks, 1)
+	atomic.AddInt64(&s.totalTasks, 1)
+	atomic.AddInt64(&s.unityBuilds, 1)
+
+	val, _ := s.activeTasksByWorker.LoadOrStore(worker.ID, new(int64))
+	count := atomic.AddInt64(val.(*int64), 1)
+	m.SetActiveTaskCount(worker.ID, float64(count))
+
+	defer func() {
+		atomic.AddInt64(&s.activeTasks, -1)
+		if val, ok := s.activeTasksByWorker.Load(worker.ID); ok {
+			c := atomic.AddInt64(val.(*int64), -1)
+			m.SetActiveTaskCount(worker.ID, float64(c))
+		}
+	}()
+
+	taskStartTime := time.Now()
+
+	if s.eventNotifier != nil {
+		s.eventNotifier.NotifyTaskStarted(&TaskEvent{
+			ID:        req.TaskId,
+			BuildType: "unity",
+			Status:    "running",
+			WorkerID:  worker.ID,
+			StartedAt: taskStartTime.Unix(),
+		})
+	}
+
+	client := pb.NewBuildServiceClient(conn)
+	buildResp, err := client.Build(ctx, &pb.BuildRequest{
+		TaskId:         req.TaskId,
+		SourceHash:     req.SourceHash,
+		SourceArchive:  req.SourceArchive,
+		BuildType:      req.BuildType,
+		TargetPlatform: req.TargetPlatform,
+		Config:         req.Config,
+		TimeoutSeconds: req.TimeoutSeconds,
+	})
+
+	success := err == nil && buildResp != nil && buildResp.Status == pb.TaskStatus_STATUS_COMPLETED
+
+	s.registry.DecrementTasks(worker.ID, success, time.Duration(0))
+
+	taskCompletedTime := time.Now()
+
+	if success {
+		atomic.AddInt64(&s.successTasks, 1)
+	} else {
+		atomic.AddInt64(&s.failedTasks, 1)
+	}
+
+	if s.eventNotifier != nil {
+		event := &TaskEvent{
+			ID:          req.TaskId,
+			BuildType:   "unity",
+			WorkerID:    worker.ID,
+			StartedAt:   taskStartTime.Unix(),
+			CompletedAt: taskCompletedTime.Unix(),
+			DurationMs:  taskCompletedTime.Sub(taskStartTime).Milliseconds(),
+			FromCache:   false,
+		}
+		if success {
+			event.Status = "completed"
+			if buildResp != nil {
+				event.ExitCode = buildResp.ExitCode
+			}
+		} else {
+			event.Status = "failed"
+			event.ExitCode = 1
+			if err != nil {
+				event.ErrorMessage = err.Error()
+			} else if buildResp != nil {
+				event.ExitCode = buildResp.ExitCode
+				event.ErrorMessage = buildResp.Stderr
+			}
+		}
+		s.eventNotifier.NotifyTaskCompleted(event)
+	}
+
+	if err != nil {
+		log.Error().Err(err).Str("task_id", req.TaskId).Str("worker", worker.ID).
+			Msg("Worker build failed")
+		return &pb.BuildResponse{
+			Status:   pb.TaskStatus_STATUS_FAILED,
+			ExitCode: 1,
+			Stderr:   fmt.Sprintf("worker error: %v", err),
+		}, nil
+	}
+
+	if buildResp != nil && len(buildResp.Artifacts) > 0 {
+		s.setUnityCache(cacheKey, buildResp)
+	}
+
+	return buildResp, nil
+}
+
 // StreamBuild handles streaming build requests.
 func (s *Server) StreamBuild(stream pb.BuildService_StreamBuildServer) error {
 	var metadata *pb.BuildMetadata
@@ -931,6 +1150,53 @@ func workerSupportsFlutterPlatform(worker *registry.WorkerInfo, platform pb.Targ
 		return true
 	}
 	for _, p := range worker.Capabilities.Flutter.Platforms {
+		if p == platform {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) getUnityCache(key string) *unityCacheEntry {
+	s.unityCacheMu.RLock()
+	entry := s.unityCache[key]
+	s.unityCacheMu.RUnlock()
+	return entry
+}
+
+func (s *Server) setUnityCache(key string, resp *pb.BuildResponse) {
+	entry := &unityCacheEntry{
+		stdout:       resp.Stdout,
+		stderr:       resp.Stderr,
+		artifacts:    resp.Artifacts,
+		artifactList: cloneArtifactList(resp.ArtifactList),
+		buildTimeMs:  resp.BuildTimeMs,
+	}
+	s.unityCacheMu.Lock()
+	s.unityCache[key] = entry
+	s.unityCacheMu.Unlock()
+}
+
+func (s *Server) selectUnityWorker(targetPlatform pb.TargetPlatform) (*registry.WorkerInfo, error) {
+	workers := s.registry.List()
+	for _, w := range workers {
+		if workerSupportsUnityPlatform(w, targetPlatform) {
+			if w.IsHealthy(s.config.HeartbeatTTL) {
+				return w, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("no unity worker available for platform %s", targetPlatform)
+}
+
+func workerSupportsUnityPlatform(worker *registry.WorkerInfo, platform pb.TargetPlatform) bool {
+	if worker == nil || worker.Capabilities == nil || worker.Capabilities.Unity == nil {
+		return false
+	}
+	if len(worker.Capabilities.Unity.BuildTargets) == 0 {
+		return true
+	}
+	for _, p := range worker.Capabilities.Unity.BuildTargets {
 		if p == platform {
 			return true
 		}

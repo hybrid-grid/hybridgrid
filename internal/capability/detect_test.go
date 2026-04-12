@@ -894,3 +894,151 @@ func TestDetectFlutter_WebPlatform(t *testing.T) {
 
 	t.Logf("Platforms: %v", caps.Platforms)
 }
+
+func TestDetectUnity(t *testing.T) {
+	caps := detectUnity()
+
+	if caps != nil {
+		t.Logf("Unity versions: %v", caps.Versions)
+		t.Logf("Unity build targets: %v", caps.BuildTargets)
+	} else {
+		t.Log("Unity not installed (this is OK)")
+	}
+}
+
+func TestDetectUnity_VersionExtraction(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "macOS Hub path",
+			path: "/Applications/Unity/Hub/Editor/2022.3.10f1/Unity.app",
+			want: "2022.3.10f1",
+		},
+		{
+			name: "Linux Hub path",
+			path: "/home/user/Unity/Hub/Editor/2021.3.5f1/Editor/Unity",
+			want: "2021.3.5f1",
+		},
+		{
+			name: "Windows Hub path",
+			path: `C:\Program Files\Unity\Hub\Editor\2022.3.10f1\Editor\Unity.exe`,
+			want: "2022.3.10f1",
+		},
+		{
+			name: "Standalone macOS",
+			path: "/Applications/Unity.app",
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractUnityVersion(tt.path)
+			if got != tt.want {
+				t.Errorf("extractUnityVersion(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetectUnity_BuildTargets(t *testing.T) {
+	targets := detectUnityBuildTargets("")
+	if targets == nil {
+		t.Error("detectUnityBuildTargets should return empty slice, not nil")
+	}
+
+	if len(targets) > 0 {
+		t.Logf("Build targets found: %v", targets)
+	}
+}
+
+func TestDetectUnity_NilOnNoInstall(t *testing.T) {
+	caps := detectUnity()
+
+	if caps == nil {
+		t.Log("Unity not detected (expected if not installed)")
+		return
+	}
+
+	if len(caps.Versions) == 0 {
+		t.Error("Unity capability returned but no versions found")
+	}
+}
+
+func TestDetectUnity_Integration(t *testing.T) {
+	caps := detectUnity()
+
+	if caps == nil {
+		t.Skip("Unity not installed")
+		return
+	}
+
+	if len(caps.Versions) == 0 {
+		t.Fatal("Unity detected but versions slice is empty")
+	}
+
+	if caps.BuildTargets == nil {
+		t.Fatal("Unity detected but BuildTargets slice is nil")
+	}
+
+	t.Logf("Unity versions: %v", caps.Versions)
+	t.Logf("Build targets: %v", caps.BuildTargets)
+}
+
+func TestDetect_UnityCapability(t *testing.T) {
+	caps := Detect()
+
+	if caps.Unity != nil {
+		t.Logf("Unity capability detected")
+		t.Logf("  Versions: %v", caps.Unity.Versions)
+		t.Logf("  Build targets: %v", caps.Unity.BuildTargets)
+	} else {
+		t.Log("Unity not detected (expected if not installed)")
+	}
+}
+
+func TestDetectUnity_BuildTargetDuplicates(t *testing.T) {
+	targets := detectUnityBuildTargets("")
+	if targets == nil {
+		targets = []pb.TargetPlatform{}
+	}
+
+	seen := make(map[pb.TargetPlatform]bool)
+	for _, p := range targets {
+		if seen[p] {
+			t.Errorf("Duplicate build target: %v", p)
+		}
+		seen[p] = true
+	}
+}
+
+func TestDetectUnity_VersionOrder(t *testing.T) {
+	caps := detectUnity()
+	if caps == nil {
+		t.Skip("Unity not installed")
+	}
+
+	versions := caps.Versions
+	for i := 1; i < len(versions); i++ {
+		if versions[i] == versions[i-1] {
+			t.Errorf("Duplicate version at index %d and %d: %s", i-1, i, versions[i])
+		}
+	}
+
+	t.Logf("Unity versions (unique): %v", versions)
+}
+
+func TestDetectUnity_BuildTargetsForNonexistent(t *testing.T) {
+	targets := detectUnityBuildTargets("/nonexistent/path/Unity.app")
+
+	if targets == nil {
+		t.Error("detectUnityBuildTargets should return empty slice, not nil")
+	}
+
+	if len(targets) != 0 {
+		t.Errorf("Expected no targets for nonexistent path, got: %v", targets)
+	}
+}

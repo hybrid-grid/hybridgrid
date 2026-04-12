@@ -48,6 +48,7 @@ type Request struct {
 
 	// Flutter build fields (optional, used by FlutterExecutor)
 	FlutterConfig  *pb.FlutterConfig // Flutter-specific configuration
+	UnityConfig    *pb.UnityConfig
 	SourceArchive  []byte            // Tar archive of Flutter project source
 	TargetPlatform pb.TargetPlatform // Target platform (e.g., PLATFORM_ANDROID)
 	BuildType      pb.BuildType      // Build type (e.g., BUILD_TYPE_FLUTTER)
@@ -72,6 +73,7 @@ type Manager struct {
 	docker     Executor
 	msvc       Executor
 	flutter    Executor
+	unity      Executor
 	nativeArch pb.Architecture
 }
 
@@ -97,6 +99,7 @@ func NewManager(nativeArch pb.Architecture, dockerAvailable bool) *Manager {
 
 	// Initialize Flutter executor
 	m.flutter = NewFlutterExecutor()
+	m.unity = NewUnityExecutor()
 
 	return m
 }
@@ -124,6 +127,10 @@ func (m *Manager) SelectForRequest(req *Request) Executor {
 	// Route Flutter build requests to FlutterExecutor
 	if req.BuildType == pb.BuildType_BUILD_TYPE_FLUTTER {
 		return m.flutter
+	}
+
+	if req.BuildType == pb.BuildType_BUILD_TYPE_UNITY {
+		return m.unity
 	}
 
 	// If client OS is set and differs from this worker's OS,
@@ -171,6 +178,10 @@ func (m *Manager) GetMSVC() Executor {
 // GetFlutter returns the Flutter executor.
 func (m *Manager) GetFlutter() Executor {
 	return m.flutter
+}
+
+func (m *Manager) GetUnity() Executor {
+	return m.unity
 }
 
 // isMSVCCompiler checks if the compiler is MSVC.

@@ -180,3 +180,34 @@ func FlutterCacheKey(config *pb.FlutterConfig, pubspecHash string, flutterVersio
 
 	return kb.Sum()
 }
+
+// UnityCacheKey generates a deterministic cache key for a Unity build.
+// It incorporates the project hash (Assets + ProjectSettings), Unity version,
+// target platform, scripting backend, build method, and extra arguments
+// (sorted for determinism).
+func UnityCacheKey(config *pb.UnityConfig, projectHash string, unityVersion string, targetPlatform pb.TargetPlatform) string {
+	kb := NewKeyBuilder()
+
+	kb.AddString(projectHash)
+	kb.AddString(unityVersion)
+	kb.AddString(targetPlatform.String())
+
+	if config != nil {
+		kb.AddString(config.GetScriptingBackend())
+		kb.AddString(config.GetBuildMethod())
+		keys := make([]string, 0, len(config.GetExtraArgs()))
+		for k := range config.GetExtraArgs() {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			kb.AddString(k)
+			kb.AddString(config.GetExtraArgs()[k])
+		}
+	} else {
+		kb.AddString("")
+		kb.AddString("")
+	}
+
+	return kb.Sum()
+}

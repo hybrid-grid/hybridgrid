@@ -21,6 +21,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/build"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/flutter"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/output"
+	"github.com/h3nr1-d14z/hybridgrid/internal/cli/unity"
 	"github.com/h3nr1-d14z/hybridgrid/internal/compiler"
 	"github.com/h3nr1-d14z/hybridgrid/internal/config"
 	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
@@ -180,6 +181,7 @@ Environment:
 		newWorkersCmd(),
 		newBuildCmd(),
 		newFlutterCmd(),
+		newUnityCmd(),
 		newConfigCmd(),
 		newCacheCmd(),
 		newGraphCmd(),
@@ -439,6 +441,20 @@ func newFlutterCmd() *cobra.Command {
 	}
 
 	return flutter.NewCommand(deps)
+}
+
+func newUnityCmd() *cobra.Command {
+	deps := unity.Dependencies{
+		CoordinatorAddr: getCoordinatorAddress,
+		NewClient: func(address string, requestTimeout time.Duration) (unity.BuildClient, error) {
+			cfg := newClientConfig(address, requestTimeout)
+			return client.New(cfg)
+		},
+		RequestTimeout: 25 * time.Minute,
+		BuildTimeout:   30 * time.Minute,
+	}
+
+	return unity.NewCommand(deps)
 }
 
 // detectCompiler returns an appropriate compiler based on file extension.

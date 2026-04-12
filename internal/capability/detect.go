@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -37,6 +38,9 @@ func Detect() *pb.WorkerCapabilities {
 
 	// Detect Flutter capabilities
 	caps.Flutter = detectFlutter()
+
+	// Detect Unity capabilities
+	caps.Unity = detectUnity()
 
 	return caps
 }
@@ -373,4 +377,226 @@ func detectFlutter() *pb.FlutterCapability {
 	cap.Platforms = append(cap.Platforms, pb.TargetPlatform_PLATFORM_ANDROID)
 
 	return cap
+}
+
+func detectUnity() *pb.UnityCapability {
+	versions := detectUnityVersions()
+	if len(versions) == 0 {
+		return nil
+	}
+
+	cap := &pb.UnityCapability{
+		Versions:     versions,
+		BuildTargets: make([]pb.TargetPlatform, 0),
+	}
+
+	// Detect build targets for the first (latest) Unity installation
+	latestVersion := versions[0]
+	editorPath := getUnityEditorPath(latestVersion)
+	if editorPath != "" {
+		cap.BuildTargets = detectUnityBuildTargets(editorPath)
+	}
+
+	return cap
+}
+
+func detectUnityVersions() []string {
+	var patterns []string
+
+	switch runtime.GOOS {
+	case "darwin":
+		patterns = []string{
+			"/Applications/Unity/Hub/Editor/*/Unity.app",
+			"/Applications/Unity*.app",
+		}
+	case "linux":
+		home := os.Getenv("HOME")
+		patterns = []string{
+			home + "/Unity/Hub/Editor/*/Editor/Unity",
+			home + "/Unity/Editor/Unity",
+		}
+	case "windows":
+		patterns = []string{
+			`C:\Program Files\Unity\Hub\Editor\*\Editor\Unity.exe`,
+			`C:\Program Files\Unity\Editor\Unity.exe`,
+		}
+	}
+
+	versions := make([]string, 0)
+	seen := make(map[string]bool)
+
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		for _, match := range matches {
+			version := extractUnityVersion(match)
+			if version != "" && !seen[version] {
+				versions = append(versions, version)
+				seen[version] = true
+			}
+		}
+	}
+
+	return versions
+}
+
+func getUnityEditorPath(version string) string {
+	var pattern string
+
+	switch runtime.GOOS {
+	case "darwin":
+		pattern = "/Applications/Unity/Hub/Editor/" + version + "/Unity.app"
+	case "linux":
+		home := os.Getenv("HOME")
+		pattern = home + "/Unity/Hub/Editor/" + version + "/Editor/Unity"
+	case "windows":
+		pattern = `C:\Program Files\Unity\Hub\Editor\` + version + `\Editor\Unity.exe`
+	}
+
+	if _, err := os.Stat(pattern); err == nil {
+		return pattern
+	}
+
+	// Try standalone Unity path
+	switch runtime.GOOS {
+	case "darwin":
+		pattern = "/Applications/Unity.app"
+		if _, err := os.Stat(pattern); err == nil {
+			return pattern
+		}
+	}
+
+	return ""
+}
+
+func extractUnityVersion(path string) string {
+	// Extract version from path like:
+	// /Applications/Unity/Hub/Editor/2022.3.10f1/Unity.app
+	// ~/Unity/Hub/Editor/2022.3.10f1/Editor/Unity
+	// C:\Program Files\Unity\Hub\Editor\2022.3.10f1\Editor\Unity.exe
+
+	// For macOS Unity.app, the version is the parent dir of Contents
+	// e.g., /Applications/Unity/Hub/Editor/2022.3.10f1/Unity.app
+	if strings.HasSuffix(path, ".app") {
+		dir := filepath.Dir(path)
+		base := filepath.Base(dir)
+		if isUnityVersion(base) {
+			return base
+		}
+	}
+
+	// For Linux/Windows paths like .../Editor/<version>/Editor/Unity
+	// Split on "Editor" to find the version directory
+	// Need to handle both / and \ separators
+	sep := string(filepath.Separator)
+	for _, candidate := range []string{sep + "Editor" + sep, "\\Editor\\"} {
+		parts := strings.Split(path, candidate)
+		if len(parts) >= 2 {
+			rest := parts[1]
+			version := strings.Split(rest, sep)[0]
+			if version == "" {
+				version = strings.Split(rest, "\\")[0]
+			}
+			if isUnityVersion(version) {
+				return version
+			}
+		}
+	}
+
+	// Fallback: get base name of parent directory
+	base := filepath.Base(filepath.Dir(path))
+	if isUnityVersion(base) {
+		return base
+	}
+
+	return ""
+}
+
+func isUnityVersion(s string) bool {
+	if len(s) < 6 || strings.Count(s, ".") < 2 {
+		return false
+	}
+	// Verify it starts with a year (4 digits)
+	for i := 0; i < 4 && i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func detectUnityBuildTargets(editorPath string) []pb.TargetPlatform {
+	targets := make([]pb.TargetPlatform, 0)
+	seen := make(map[pb.TargetPlatform]bool)
+
+	// Get the Unity.app Contents or the Editor directory
+	editorDir := filepath.Dir(editorPath)
+	if runtime.GOOS == "darwin" {
+		// For macOS Unity.app, look inside Contents/PlaybackEngines
+		editorDir = filepath.Join(editorPath, "Contents", "PlaybackEngines")
+	} else {
+		// For Linux/Windows, PlaybackEngines is alongside Editor
+		editorDir = filepath.Join(editorDir, "PlaybackEngines")
+	}
+
+	// Check for Android
+	androidDir := filepath.Join(editorDir, "AndroidPlayer")
+	if _, err := os.Stat(androidDir); err == nil {
+		if !seen[pb.TargetPlatform_PLATFORM_ANDROID] {
+			targets = append(targets, pb.TargetPlatform_PLATFORM_ANDROID)
+			seen[pb.TargetPlatform_PLATFORM_ANDROID] = true
+		}
+	}
+
+	// Check for iOS (macOS only)
+	if runtime.GOOS == "darwin" {
+		iosDir := filepath.Join(editorDir, "iOSSupport")
+		if _, err := os.Stat(iosDir); err == nil {
+			if !seen[pb.TargetPlatform_PLATFORM_IOS] {
+				targets = append(targets, pb.TargetPlatform_PLATFORM_IOS)
+				seen[pb.TargetPlatform_PLATFORM_IOS] = true
+			}
+		}
+	}
+
+	// Check for Windows
+	windowsDir := filepath.Join(editorDir, "WindowsStandaloneSupport")
+	if _, err := os.Stat(windowsDir); err == nil {
+		if !seen[pb.TargetPlatform_PLATFORM_WINDOWS] {
+			targets = append(targets, pb.TargetPlatform_PLATFORM_WINDOWS)
+			seen[pb.TargetPlatform_PLATFORM_WINDOWS] = true
+		}
+	}
+
+	// Check for Linux
+	linuxDir := filepath.Join(editorDir, "LinuxStandaloneSupport")
+	if _, err := os.Stat(linuxDir); err == nil {
+		if !seen[pb.TargetPlatform_PLATFORM_LINUX] {
+			targets = append(targets, pb.TargetPlatform_PLATFORM_LINUX)
+			seen[pb.TargetPlatform_PLATFORM_LINUX] = true
+		}
+	}
+
+	// Check for macOS (native platform - check if Unity.app exists)
+	if runtime.GOOS == "darwin" {
+		if _, err := os.Stat(editorPath); err == nil {
+			if !seen[pb.TargetPlatform_PLATFORM_MACOS] {
+				targets = append(targets, pb.TargetPlatform_PLATFORM_MACOS)
+				seen[pb.TargetPlatform_PLATFORM_MACOS] = true
+			}
+		}
+	}
+
+	// Check for WebGL
+	webglDir := filepath.Join(editorDir, "WebGLSupport")
+	if _, err := os.Stat(webglDir); err == nil {
+		if !seen[pb.TargetPlatform_PLATFORM_WEBGL] {
+			targets = append(targets, pb.TargetPlatform_PLATFORM_WEBGL)
+			seen[pb.TargetPlatform_PLATFORM_WEBGL] = true
+		}
+	}
+
+	return targets
 }

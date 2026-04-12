@@ -1093,3 +1093,120 @@ func TestWorkerInfo_AllFields_Flutter(t *testing.T) {
 		}
 	}
 }
+
+func TestStats_UnityFields(t *testing.T) {
+	stats := &Stats{
+		TotalTasks:          100,
+		SuccessTasks:        80,
+		FailedTasks:         20,
+		ActiveTasks:         5,
+		QueuedTasks:         10,
+		CacheHits:           60,
+		CacheMisses:         40,
+		CacheHitRate:        0.6,
+		FlutterBuilds:       30,
+		FlutterCacheHits:    20,
+		FlutterCacheMisses:  10,
+		FlutterCacheHitRate: 0.67,
+		UnityBuilds:         25,
+		UnityCacheHits:      15,
+		UnityCacheMisses:    10,
+		UnityCacheHitRate:   0.6,
+		TotalWorkers:        4,
+		HealthyWorkers:      3,
+		UptimeSeconds:       7200,
+		Timestamp:           1234567890,
+	}
+
+	data, err := json.Marshal(stats)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+
+	str := string(data)
+	fields := []string{
+		"unity_builds", "unity_cache_hits",
+		"unity_cache_misses", "unity_cache_hit_rate",
+	}
+	for _, f := range fields {
+		if !strings.Contains(str, f) {
+			t.Errorf("JSON missing Unity field: %s", f)
+		}
+	}
+
+	var decoded Stats
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if decoded.UnityBuilds != 25 {
+		t.Errorf("UnityBuilds = %d, want 25", decoded.UnityBuilds)
+	}
+	if decoded.UnityCacheHits != 15 {
+		t.Errorf("UnityCacheHits = %d, want 15", decoded.UnityCacheHits)
+	}
+	if decoded.UnityCacheMisses != 10 {
+		t.Errorf("UnityCacheMisses = %d, want 10", decoded.UnityCacheMisses)
+	}
+	if decoded.UnityCacheHitRate != 0.6 {
+		t.Errorf("UnityCacheHitRate = %f, want 0.6", decoded.UnityCacheHitRate)
+	}
+}
+
+func TestWorkerInfo_UnityFields(t *testing.T) {
+	worker := &WorkerInfo{
+		ID:                "w1",
+		Host:              "host",
+		Address:           "addr",
+		Architecture:      "x86_64",
+		CPUCores:          8,
+		MemoryGB:          32.0,
+		ActiveTasks:       1,
+		TotalTasks:        50,
+		SuccessRate:       0.9,
+		AvgLatencyMs:      15.0,
+		CircuitState:      "CLOSED",
+		DiscoverySource:   "mdns",
+		Healthy:           true,
+		LastSeen:          123456,
+		FlutterAvailable:  true,
+		FlutterSDKVersion: "3.19.6",
+		FlutterPlatforms:  []string{"TARGET_PLATFORM_ANDROID"},
+		UnityAvailable:    true,
+		UnityVersions:     []string{"2022.3.10f1", "2023.2.1f1"},
+		UnityPlatforms:    []string{"UNITY_BUILD_TARGET_ANDROID", "UNITY_BUILD_TARGET_STANDALONE_WINDOWS64"},
+		Compilers:         []string{"gcc", "g++"},
+		BuildTypes:        []string{"BUILD_TYPE_CPP", "BUILD_TYPE_FLUTTER", "BUILD_TYPE_UNITY"},
+	}
+
+	data, err := json.Marshal(worker)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+
+	str := string(data)
+	fields := []string{
+		"unity_available", "unity_versions", "unity_platforms",
+	}
+	for _, f := range fields {
+		if !strings.Contains(str, f) {
+			t.Errorf("JSON missing Unity field: %s", f)
+		}
+	}
+
+	var decoded WorkerInfo
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if !decoded.UnityAvailable {
+		t.Error("UnityAvailable = false, want true")
+	}
+	if len(decoded.UnityVersions) != 2 {
+		t.Errorf("UnityVersions len = %d, want 2", len(decoded.UnityVersions))
+	}
+	if decoded.UnityVersions[0] != "2022.3.10f1" {
+		t.Errorf("UnityVersions[0] = %s, want 2022.3.10f1", decoded.UnityVersions[0])
+	}
+	if len(decoded.UnityPlatforms) != 2 {
+		t.Errorf("UnityPlatforms len = %d, want 2", len(decoded.UnityPlatforms))
+	}
+}

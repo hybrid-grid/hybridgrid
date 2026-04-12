@@ -49,6 +49,14 @@ func (p *statsProvider) GetStats() *dashboard.Stats {
 		flutterCacheHitRate = float64(flutterCacheHits) / float64(flutterCacheTotal)
 	}
 
+	unityCacheHits := atomic.LoadInt64(&p.server.unityCacheHits)
+	unityCacheMisses := atomic.LoadInt64(&p.server.unityCacheMisses)
+	unityCacheTotal := unityCacheHits + unityCacheMisses
+	unityCacheHitRate := 0.0
+	if unityCacheTotal > 0 {
+		unityCacheHitRate = float64(unityCacheHits) / float64(unityCacheTotal)
+	}
+
 	return &dashboard.Stats{
 		TotalTasks:          atomic.LoadInt64(&p.server.totalTasks),
 		SuccessTasks:        atomic.LoadInt64(&p.server.successTasks),
@@ -62,6 +70,10 @@ func (p *statsProvider) GetStats() *dashboard.Stats {
 		FlutterCacheHits:    flutterCacheHits,
 		FlutterCacheMisses:  flutterCacheMisses,
 		FlutterCacheHitRate: flutterCacheHitRate,
+		UnityBuilds:         atomic.LoadInt64(&p.server.unityBuilds),
+		UnityCacheHits:      unityCacheHits,
+		UnityCacheMisses:    unityCacheMisses,
+		UnityCacheHitRate:   unityCacheHitRate,
 		TotalWorkers:        len(workers),
 		HealthyWorkers:      healthyCount,
 		UptimeSeconds:       int64(time.Since(p.startTime).Seconds()),
@@ -116,6 +128,9 @@ func (p *statsProvider) GetWorkers() []*dashboard.WorkerInfo {
 			FlutterAvailable:  caps.GetFlutter() != nil,
 			FlutterSDKVersion: flutterSDKVersion(caps),
 			FlutterPlatforms:  flutterPlatforms(caps),
+			UnityAvailable:    caps.GetUnity() != nil,
+			UnityVersions:     unityVersions(caps),
+			UnityPlatforms:    unityPlatforms(caps),
 			Compilers:         compilers,
 			BuildTypes:        supportedBuildTypes(caps),
 			Healthy:           w.IsHealthy(p.server.config.HeartbeatTTL),
@@ -193,6 +208,25 @@ func flutterPlatforms(caps *pb.WorkerCapabilities) []string {
 	result := make([]string, len(platforms))
 	for i, p := range platforms {
 		result[i] = p.String()
+	}
+	return result
+}
+
+func unityVersions(caps *pb.WorkerCapabilities) []string {
+	if caps.GetUnity() == nil {
+		return nil
+	}
+	return caps.GetUnity().GetVersions()
+}
+
+func unityPlatforms(caps *pb.WorkerCapabilities) []string {
+	if caps.GetUnity() == nil {
+		return nil
+	}
+	targets := caps.GetUnity().GetBuildTargets()
+	result := make([]string, len(targets))
+	for i, t := range targets {
+		result[i] = t.String()
 	}
 	return result
 }

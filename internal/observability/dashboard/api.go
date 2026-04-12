@@ -20,6 +20,10 @@ type Stats struct {
 	FlutterCacheHits    int64   `json:"flutter_cache_hits"`
 	FlutterCacheMisses  int64   `json:"flutter_cache_misses"`
 	FlutterCacheHitRate float64 `json:"flutter_cache_hit_rate"`
+	UnityBuilds         int64   `json:"unity_builds"`
+	UnityCacheHits      int64   `json:"unity_cache_hits"`
+	UnityCacheMisses    int64   `json:"unity_cache_misses"`
+	UnityCacheHitRate   float64 `json:"unity_cache_hit_rate"`
 	TotalWorkers        int     `json:"total_workers"`
 	HealthyWorkers      int     `json:"healthy_workers"`
 	UptimeSeconds       int64   `json:"uptime_seconds"`
@@ -48,6 +52,9 @@ type WorkerInfo struct {
 	FlutterAvailable  bool     `json:"flutter_available"`
 	FlutterSDKVersion string   `json:"flutter_sdk_version"`
 	FlutterPlatforms  []string `json:"flutter_platforms"`
+	UnityAvailable    bool     `json:"unity_available"`
+	UnityVersions     []string `json:"unity_versions"`
+	UnityPlatforms    []string `json:"unity_platforms"`
 	Compilers         []string `json:"compilers"`
 	BuildTypes        []string `json:"build_types"`
 	Healthy           bool     `json:"healthy"`
