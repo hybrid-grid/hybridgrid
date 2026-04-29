@@ -1,31 +1,76 @@
 # Ralph Progress Log
 
 ## Session start: 2026-04-29
-- M1 (measurement infrastructure) committed and pushed
-- M2 (ε-greedy bandit) committed and pushed
-- ε-greedy benchmark currently running in background
 
-## Pending decisions to track
-- LinUCB feature vector dimension: 12 features per paper-skeleton.md §3.3 — to be validated against M2 logs first to drop low-correlation features
-- Cache-aware extension scope: deferred to post-M3 (not in this Ralph session)
-- HEFT online adaptation: requires careful citation of any deviation from Topcuoglu 2002 since the original is offline
+### M1 (measurement infrastructure) — DONE
+- Scheduler factory + per-task JSON Lines logging
+- 9 unit tests pass with -race
+- Committed and pushed: 2068d80
 
-## Codebase patterns observed
-- Schedulers live in internal/coordinator/scheduler/ with shared filterByOS helper
-- LearningScheduler interface in feedback.go is the extension point
-- Tests use registry.NewInMemoryRegistry directly (not via interface)
-- Worker info pointers from ListByCapability are read-only snapshots — direct field reads OK
-- benchmark-heterogeneous.sh expects SCHEDULER env var; must match enum in CLI validator
+### M2 (ε-greedy bandit) — DONE
+- Sutton & Barto §2.4 incremental sample-mean
+- 9 unit tests pass with -race
+- Benchmark on 5w-hetero: 119s (vs P2C 94s)
+- Top:bottom dispatch ratio: 13.2:1 (worse than heuristics — feature-blind failure)
+- Committed and pushed: cbd1dcc
 
-## Citations confirmed accurate
-- Mitzenmacher 2001 P2C — DOI 10.1109/71.963420 (verified in annotated-bibliography.md)
-- Sutton & Barto 2018 RL textbook §2.4 incremental sample mean (verified by direct code reference in epsilon_greedy.go)
-- Cortez 2017 Resource Central source-size feature importance — needs DOI re-verification (may be 10.1145/3132747.3132772, listed in plan file)
+### Theory verification — DONE
+- Subagent (document-specialist) verified citations:
+  - Li 2010 LinUCB Algorithm 1 verbatim
+  - α formula: α = 1 + sqrt(ln(2/δ)/2)
+  - Chu 2011 regret bound for SupLinUCB (note: NOT plain LinUCB)
+  - Sherman-Morrison complexity O(d²)
+  - HEFT rank function
+  - Sutton & Barto §11.3 deadly triad
+- IMPORTANT correction: r=-log(1+latency) is NOT supported by Decima or any peer-reviewed source. Plan files said it was; corrected in theory-notes.md and paper-skeleton.md.
+- docs/thesis/theory-notes.md committed: e4c81f3
 
-## Open citations needing verification
-- Decima reward formulation — listed as Mao 2019 SIGCOMM but plan files say §4.2; need direct paper read
-- Li 2010 LinUCB α formula — claimed "α = 1 + √(ln(2/δ)/2)" in plan, need direct verification
-- Lattimore & Szepesvári 2020 ch.19 — feature scaling for linear bandits, need direct read
+### M3 (LinUCB) — DONE (code), benchmark in progress
+- Algorithm 1 verbatim from Li 2010 §3.1
+- Sherman-Morrison incremental inverse, verified by unit test against gonum.mat.Inverse
+- 8 unit tests pass with -race
+- 12-dim feature vector per paper-skeleton §3.3
+- Committed and pushed: e4c81f3
+- Benchmark progress: 1w=129s (=P2C), 3w=103s (better than ε-greedy, slower than P2C 85s)
+- 5w-hetero still running
 
-## Risks
-- The Ralph scope spans days realistically; need to either keep iterating across many sessions, or accept that some stories (US-009 thesis chapter, US-010 statistical reps) will be partially complete
+### HEFT baseline — DONE (code), benchmark pending
+- Online adaptation of Topcuoglu 2002 (cited inline)
+- For independent tasks: rank_u(n)=w̄(n), pick argmin EFT
+- 6 unit tests pass with -race
+- Committed and pushed: ad1bada
+
+### Vietnamese thesis chapter — DRAFT DONE
+- docs/thesis/chuong-X-lap-lich.md, 6 sections, formal academic style
+- M1+M2 numbers embedded as Bảng X.1, X.2
+- LinUCB/HEFT cells flagged "kết quả M3" pending
+- Committed and pushed: 0b19053
+
+### Paper skeleton — partially expanded
+- §3.1 Problem formulation: full prose with reward function justification
+- §3.3 LinUCB: full algorithm with feature table, Sherman-Morrison block
+- §3.4 Reward function: explicit empirical-choice framing, Decima alternative noted
+- §6 Discussion: 5 subsections drafted
+- §5 results tables still need M3+HEFT numbers
+
+## Pending stories
+- US-004: LinUCB benchmark numbers in findings.md (waiting on background task)
+- US-007: HEFT benchmark
+- US-008: complete §5 with all 5 scheduler columns + ablations
+- US-010: statistical reps (≥5 runs per scheduler) — large compute investment
+- US-011: final reviewer sign-off
+
+## Citations confirmed accurate (theory-notes.md verification)
+- Mitzenmacher 2001 P2C — DOI 10.1109/71.963420
+- Sutton & Barto 2018 RL textbook §2.4 incremental sample mean
+- Li 2010 LinUCB — DOI 10.1145/1772690.1772758, arXiv:1003.0146 v2
+- Chu 2011 regret — JMLR W&CP 15:208-214
+- Sherman & Morrison 1950 + Golub & Van Loan §2.1.4
+- Topcuoglu 2002 HEFT — DOI 10.1109/71.993206
+- Lenstra-Shmoys-Tardos 1990 R||Cmax — DOI 10.1007/BF01585745
+- Lattimore & Szepesvári 2020 Bandit Algorithms (free PDF available)
+- Decima Mao 2019 SIGCOMM — DOI 10.1145/3341302.3342080
+
+## Known issues
+- Plan files (linucb-scheduler-m2.md, paper-skeleton.md early version) attributed r=-log(1+t) to Decima. Theory verification corrected this — Decima's reward is r_k=-(t_k-t_{k-1})J_k. Code comments and paper now frame -log(1+t) as empirical heuristic.
+- Online HEFT canonical reference is thin; only one 2024 survey acknowledges variants. Our adaptation is documented inline as a deviation from Topcuoglu 2002.

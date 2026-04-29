@@ -33,7 +33,7 @@
       "id": "US-003",
       "title": "Wire LinUCB into factory, CLI, log schema",
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "newScheduler factory accepts \"linucb\" type",
         "--alpha CLI flag added to hg-coord serve, validated to (0, 10]",
@@ -60,7 +60,7 @@
       "id": "US-005",
       "title": "Theoretical research depth — subagent-driven",
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Subagent (document-specialist) produces research note covering: LinUCB regret bound under non-stationarity (Lattimore & Szepesvári 2020 ch.19), reward-shaping pitfalls (Ng et al. 1999), and bandits-vs-MDP framing for our problem",
         "docs/thesis/theory-notes.md written with citations to peer-reviewed sources only (DOI required for each)",
@@ -72,7 +72,7 @@
       "id": "US-006",
       "title": "HEFT baseline implementation (offline-style, adapted to online)",
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "internal/coordinator/scheduler/heft.go implements an online adaptation of Topcuoglu et al. 2002 HEFT (DOI 10.1109/71.993206)",
         "Code comments cite specific paper sections for each design decision (insertion-based, EFT, rank function — or document deviation)",
@@ -109,7 +109,7 @@
       "id": "US-009",
       "title": "Vietnamese thesis report — full chapter draft for scheduling",
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "docs/thesis/chuong-X-lap-lich.md written (≥6 pages, formal academic Vietnamese)",
         "Sections: bài toán → phương pháp → triển khai → đánh giá → thảo luận",

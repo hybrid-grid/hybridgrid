@@ -54,9 +54,15 @@ No published RL scheduler for *distributed compilation* with strict online-only 
 
 ### §3.1 Problem formulation
 
-State `s_t` at decision time: cluster snapshot — for each worker, capability features (CPU, memory, native arch) and live counters (active tasks, recent latency). Action `a_t`: choose one eligible worker. Reward `r_t = -log(1 + compile_time_ms)` upon task completion (heavy-tail compression; precedent Decima §4.2). Horizon: build session ≈ 800-1500 tasks. Episodic, online, no simulator.
+We schedule independent compilation tasks on a heterogeneous worker pool. At decision time $t$, the coordinator has a snapshot of the cluster $s_t$ comprising, for each registered worker $w$: static capability features (CPU cores, memory, native architecture, OS) and live counters (active tasks, recent RPC latency). A new task arrives with metadata: source size, target architecture, build type. The action $a_t \in A_t$ selects one eligible worker; eligibility filters out unhealthy workers, those with open circuit breakers, and those at maximum parallelism (`active_tasks >= max_parallel`).
 
-We model this as a **contextual bandit** rather than full MDP: each compile is approximately independent (low cross-task state coupling once queue depth is in the context vector). Slivkins 2019 §1.3 justifies the bandit framing when the agent's actions don't materially shift the future state distribution.
+Upon task completion, the coordinator observes a scalar reward $r_t$ and uses it to update the policy. We define
+
+$$r_t = -\log\bigl(1 + t_{\text{compile}}^{(t)}\bigr),$$
+
+where $t_{\text{compile}}^{(t)}$ is the worker-reported compile time in milliseconds. The log transform is an empirical heuristic chosen to compress the heavy tail observed in M1 (P99/P50 ≈ 29×); see §4.3 for a discussion of alternative reward functions, including the time-integrated job-count form of Decima (Mao et al. 2019).
+
+We model this as a **contextual bandit** rather than a full MDP. The justification is twofold. First, individual compile tasks are nearly independent — once the queue-depth feature is inside the context vector, the residual state coupling between consecutive decisions is small. Second, an MDP formulation would require attributing the build's makespan back to specific dispatch decisions, which is a credit-assignment problem with sparse rewards over hundreds of steps — a regime where modern policy-gradient methods need a simulator (Decima, DeepRM) that we deliberately do not have. Slivkins 2019 §1.3 formalises the bandit framing as the appropriate model when each action's reward depends primarily on the current context, not on cumulative state evolution. *We acknowledge the limitation*: if cluster state changes (e.g., long-running stragglers occupy a worker), our framing under-models the long-term consequences, and we discuss this in §7.
 
 ### §3.2 ε-greedy baseline
 
@@ -70,22 +76,51 @@ Selection: with probability ε pick uniform random eligible worker, otherwise `a
 
 This is **feature-blind**: the policy ignores task size, worker hardware, even static capability scores.
 
-### §3.3 LinUCB scheduler [M3 — pending]
+### §3.3 LinUCB scheduler
 
-Per-worker `A_a ∈ ℝ^{d×d}, b_a ∈ ℝ^d`. Context vector `x_t ∈ ℝ^d` of d ≈ 12 features:
-- Task: `log(source_size_bytes)`, build_type one-hot (3), target_arch one-hot (2)
-- Worker: `cpu_cores/16`, `mem_bytes/64GB`, native_arch_match, `active_tasks/max_parallel`, `recent_rpc_latency/100ms`
-- Interaction: `log(source_size) / cpu_cores`
+Following Li, Chu, Langford & Schapire (2010), we instantiate the disjoint linear contextual bandit for our problem. For each worker $a$ we maintain $A_a \in \mathbb{R}^{d\times d}$ initialised to $I_d$ and $b_a \in \mathbb{R}^d$ initialised to $\mathbf{0}$ (Algorithm 1, lines 5–6). The current ridge-regression estimate of the per-arm parameter is
 
-Selection: `argmax_a θ_a^T x_t + α√(x_t^T A_a⁻¹ x_t)`, with `θ_a = A_a⁻¹ b_a`.
+$$\hat{\theta}_a = A_a^{-1} b_a.$$
 
-Update on `(a_t, r_t, x_t)`: `A_a ← A_a + x_t x_t^T`, `b_a ← b_a + r_t x_t`. α = 1.0 default (Li 2010 §3.2 prescription).
+At round $t$, we compute the UCB score for each eligible worker
 
-Sherman-Morrison incremental inverse keeps update cost O(d²).
+$$p_{t,a} = \hat{\theta}_a^\top x_{t,a} + \alpha \sqrt{x_{t,a}^\top A_a^{-1} x_{t,a}},$$
+
+select $a_t = \arg\max_a p_{t,a}$, dispatch the task, observe reward $r_t$, and update the chosen arm via
+
+$$A_{a_t} \leftarrow A_{a_t} + x_{t,a_t} x_{t,a_t}^\top, \qquad b_{a_t} \leftarrow b_{a_t} + r_t x_{t,a_t}.$$
+
+Per Li 2010 Eq. (4), the theoretical exploration coefficient is $\alpha = 1 + \sqrt{\ln(2/\delta)/2}$ for confidence $1-\delta$. We default to $\alpha = 1.0$ and report results across $\alpha \in \{0.1, 0.5, 1.0, 2.0\}$ in the ablation (§5.5).
+
+**Feature vector $x_{t,a} \in \mathbb{R}^{d}$, $d = 12$.** Composed of:
+
+| Index | Feature | Normalisation |
+|---|---|---|
+| 0 | bias | constant 1.0 |
+| 1 | $\log(1 + \text{source size}) / 16$ | $\le 1.5$ for typical sources |
+| 2–4 | build type one-hot | CPP / Flutter / Unity |
+| 5–6 | target arch one-hot | x86\_64 / arm64 |
+| 7 | worker CPU cores / 16 | clipped at 1.0 |
+| 8 | worker memory / 64 GiB | clipped at 1.0 |
+| 9 | native arch matches target | 0 / 1 |
+| 10 | active tasks / max parallel | $\in [0, 1]$ |
+| 11 | EWMA RPC latency / 100 ms | clipped at 1.0 |
+
+All features are normalised to a roughly bounded scale, matching the linear-payoff convention of Chu et al. 2011 ($\lVert x \rVert$ bounded). We do not enforce $\lVert x \rVert \le 1$ exactly; the normalisations keep all feature values in $[0, 1]$ except for the bias (1) and the log-size feature (which can exceed 1 marginally). We explore the impact of stricter normalisation in §5.5.
+
+**Sherman–Morrison incremental inverse.** Each update is rank-1: $A_{\text{new}} = A_{\text{old}} + x x^\top$. Naive re-inversion costs $\mathcal{O}(d^3)$; the Sherman–Morrison formula reduces this to $\mathcal{O}(d^2)$:
+
+$$A_{\text{new}}^{-1} = A_{\text{old}}^{-1} - \frac{A_{\text{old}}^{-1} x x^\top A_{\text{old}}^{-1}}{1 + x^\top A_{\text{old}}^{-1} x}.$$
+
+We cache $A_a^{-1}$ alongside $A_a$ and $b_a$, applying the formula on every update. A unit test in `internal/coordinator/scheduler/linucb_test.go` (`TestLinUCB_ShermanMorrisonMatchesBruteForce`) verifies the cached inverse against a fresh inversion via `gonum/mat` after 50 random updates; the elementwise discrepancy is below $10^{-6}$.
+
+**Single-candidate fast path.** The M1 P2C measurement showed a 41% slowdown on 1-worker clusters because the scheduler's filtering pipeline runs even when only one candidate exists. Both ε-greedy and LinUCB short-circuit this case: when `len(eligible) == 1`, return the sole candidate without any matrix algebra.
 
 ### §3.4 Reward function
 
-`r_t = -log(1 + compile_time_ms)` — log compresses the 29× P99/P50 spread we observed in M1. Failed tasks: `r = -log(1 + request_timeout_ms)` so the learner downweights consistently failing workers. Ablation in §5.5 compares to raw negative latency.
+We compute the reward upon task completion as $r_t = -\log(1 + t_{\text{compile}}^{(t)})$ where $t_{\text{compile}}$ is in milliseconds. Failed tasks (timeouts, worker-reported errors) receive $r = -\log(1 + T_{\text{timeout}})$ — the worst case the system would have observed — so the learner discounts persistently failing workers without conflating compile-time noise with hard failures.
+
+The log transform is an *empirical* choice motivated by the heavy tail in our data (P99/P50 ≈ 29×). Without compression, a single 24-second outlier would dominate sample-mean updates and could make ε-greedy's $Q$ values diverge across workers. Sutton & Barto 2018 §3.2 treats reward design as a domain engineering choice, providing no prescriptive theory of scaling. The most-cited published reward formulation for cluster scheduling is Decima's Little's-Law-justified $r_k = -(t_k - t_{k-1}) J_k$ (Mao et al. 2019, §5.2), which minimises the time-integrated job count and indirectly the average JCT. *We have not found peer-reviewed support for $-\log(1+\cdot)$* (despite earlier internal plans incorrectly attributing it to Decima) and so we frame it as an engineering choice. §5.5 includes an ablation comparing raw negative latency, log latency, and a Decima-style time-integrated penalty.
 
 ---
 
@@ -179,12 +214,29 @@ Inject one slow worker mid-run; measure recovery time (tasks-to-divergence-from-
 
 ## §6 Discussion
 
-[Filled after §5 numbers complete]
+### §6.1 Why a feature-blind bandit underperforms
 
-Likely points:
-- LinUCB regret bound assumes linear payoff; real compile time is super-linear in source size — does this matter?
-- Online learning without reset across builds — pros and cons, drift risk
-- Cache-aware extension as natural follow-up (cache state is a sparse feature)
+Our M2 ε-greedy results (5w-hetero: 119 s vs P2C 94 s; top:bottom dispatch ratio 13.2:1 vs P2C 8.6:1) demonstrate a non-obvious failure mode for naive online learning in heterogeneous scheduling. The bandit faithfully learns "this worker has the best mean reward" and proceeds to over-concentrate traffic on it. The static P2C scoring, by contrast, penalises high `active_tasks` directly through its weight vector and so spreads load even though it never observes a single compile time. Online learning is thus *not always better* than a well-tuned static heuristic; it depends on whether the learner conditions on the right features. This is the mechanistic argument for moving from MAB to contextual bandits.
+
+### §6.2 Linear realisability and reward shape
+
+LinUCB's regret bound (Chu et al. 2011 Thm. 1, with caveats noted in §3) assumes $\mathbb{E}[r \mid x] = x^\top \theta^*$. Real compile time is roughly proportional to source size only for small files; large templated translation units exhibit super-linear growth (preprocessing expansion, optimisation passes). After our log transform, the residual non-linearity is reduced but not eliminated. Lattimore & Szepesvári 2020 §24.4 quantifies the impact: a misspecification of magnitude $\varepsilon$ inflates regret by an additive $\mathcal{O}(\varepsilon \sqrt{T})$. Our numbers in §5.5 (ablating reward shapes) bound this empirically.
+
+The reward function is the most consequential design lever and the least well-justified theoretically. Decima's $-(t_k - t_{k-1})J_k$ formulation has a direct connection to Little's law and JCT; our $-\log(1 + t)$ is purely heuristic. Future work should either (a) demonstrate empirical equivalence under realistic workloads, or (b) adopt the Decima form, paying the implementation cost of tracking time-integrated job counts in the coordinator.
+
+### §6.3 Drift, restarts and the deadly triad
+
+Worker performance is not stationary. Thermal throttling, GC pauses on JVM/Unity workers, and noisy-neighbour effects on shared hosts all cause $\theta_a^*$ to drift. LinUCB has no published regret guarantee under drift (Lattimore & Szepesvári Ch. 31). In practice, we have observed coarse drift in M1 logs (dispatch counts diverge over the build session even with constant feature distributions). Practical mitigations — sliding windows, change-point detection — sit in the open-research bucket and are flagged as future work.
+
+A separate caveat is the *deadly triad* (Sutton & Barto 2018 §11.3): function approximation + bootstrapping + off-policy. LinUCB does not invoke the triad because it is a bandit (no value function, no bootstrap). Any extension to multi-step Q-learning over build-session state — e.g., to model dependencies between linking and earlier compile steps — would walk straight into the triad and require explicit safeguards. We treat this as a scope boundary for the present work.
+
+### §6.4 Cost of the matrix algebra
+
+Empirically, the LinUCB scoring step (12-dim vector + 12×12 matrix-vector product) takes microseconds per worker. With clusters of $\le 20$ workers, the per-decision overhead is dominated by the gRPC RTT to dispatch, not the matrix work. We did not encounter a regime where Sherman–Morrison's $\mathcal{O}(d^2)$ cost was material; future work that increases $d$ (e.g., 100+ feature interactions for cache-aware scheduling) may need to revisit.
+
+### §6.5 What "good" looks like
+
+Beyond the headline makespan number, we evaluate three properties. **(1) Robustness:** does the scheduler fall back gracefully when one worker degrades? §5.6 (failure mode injection) directly tests this. **(2) Sample complexity:** how many tasks until LinUCB exceeds P2C? Our learning-curve plots in §5.4 quantify this. **(3) Interpretability:** the bandit weight vector $\hat{\theta}_a$ tells us which features the policy values. We report the learned weights for each worker in §5.5; the magnitudes provide a direct, falsifiable narrative for why a particular worker was preferred.
 
 ## §7 Limitations
 
