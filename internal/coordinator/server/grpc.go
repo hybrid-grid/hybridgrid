@@ -144,6 +144,11 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 			CircuitChecker: cm,
 			Alpha:          cfg.AlphaValue,
 		})
+	case "heft":
+		return scheduler.NewHEFTScheduler(scheduler.HEFTConfig{
+			Registry:       reg,
+			CircuitChecker: cm,
+		})
 	case "leastloaded", "":
 		return scheduler.NewLeastLoadedScheduler(reg)
 	default:
