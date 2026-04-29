@@ -47,7 +47,7 @@
       "id": "US-004",
       "title": "Run LinUCB benchmark and append to findings",
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "tasks-linucb.jsonl saved with ≥800 records under .sisyphus/evidence/",
         "Wall-clock numbers added to findings.md table for 1w/3w/5w configs",
@@ -85,7 +85,7 @@
       "id": "US-007",
       "title": "Run HEFT benchmark and add to comparison",
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "tasks-heft.jsonl + benchmark-heft-results.txt saved under .sisyphus/evidence/",
         "findings.md updated with HEFT column",

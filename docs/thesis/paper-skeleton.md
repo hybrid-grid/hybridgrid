@@ -12,13 +12,24 @@
 
 ## §1 Introduction
 
-**Hook (from M1 evidence):** Distributed build systems target heterogeneous worker pools — laptops, CI runners, dedicated build farms — where per-worker compile time can vary by an order of magnitude for the same source. Existing schedulers (LeastLoaded, P2C) make decisions from instantaneous queue lengths and static capability scores; neither learns from the per-task latency it observes after dispatch. Our M1 measurement on a 5-worker heterogeneous CPython build shows P2C concentrates 33% of tasks on a single worker, and median compile time has a 29× P99/P50 ratio — the regime where learning from feedback is most valuable.
+Distributed build systems are an everyday reality of modern software engineering. Compilers like the LLVM toolchain, build orchestrators like Bazel, and remote-execution services like Bazel Remote Build Execution and BuildXL all push compilation work onto pools of remote workers to amortise the cost of large C/C++ rebuilds. The worker pools they target are *heterogeneous* — a developer's laptop, a Linux CI runner, an ARM cloud node, a dedicated build farm — and even within a pool, individual workers vary in CPU, memory, native architecture, and instantaneous load.
 
-**Contributions (claimed):**
-1. **C1.** A measurement pipeline (§4) that emits per-task structured records sufficient for offline ML training and online RL.
-2. **C2.** An ε-greedy bandit scheduler (§3.2) demonstrating online learning from compile-time feedback in a real build system, without any pre-training simulator.
-3. **C3.** A contextual-bandit (LinUCB) scheduler (§3.3) that exploits worker capability features to outperform feature-blind learners and static heuristics on heterogeneous clusters.
-4. **C4.** Empirical evaluation (§5) on 1/3/5-worker CPython builds comparing four schedulers (LeastLoaded, P2C, ε-greedy, LinUCB) on wall-clock makespan, tail latency, and load balance.
+The classical literature on R||C_max (unrelated parallel machines, Lenstra et al. 1990) shows that scheduling tasks on heterogeneous workers to minimise makespan is NP-hard with a 3/2 lower bound and 2-approximation upper bound. In an online setting — where tasks arrive sequentially and must be dispatched immediately — the situation is even harder, with no tight competitive ratio for arbitrary heterogeneity. Production systems therefore rely on heuristics: round-robin, least-loaded, or Power-of-Two-Choices (P2C, Mitzenmacher 2001). These heuristics work without observing task outcomes; they make decisions from queue lengths or static capability scores and never learn.
+
+**The opportunity.** Modern compilation workloads exhibit dramatic per-task variance. Our measurements on a CPython build (873 tasks, 5-worker heterogeneous cluster) show a **29× ratio between P99 and P50 compile time**, and a single "best" worker absorbing **33% of all dispatches** under both static heuristics. The combination of high variance and concentrated dispatch suggests that a scheduler that observed compile-time outcomes and adjusted future dispatches accordingly — an online learner — could improve makespan and tail latency.
+
+**The challenge.** Prior RL approaches to scheduling (Decima, DeepRM) require simulator pre-training, which is unavailable for build systems with their real compiler binaries and noisy hardware. The literature offers a less-explored alternative: *contextual multi-armed bandits*. A contextual bandit treats each scheduling decision as a one-step decision problem, learns from observed rewards online, and has theoretical regret bounds (Chu et al. 2011). The most studied algorithm in this family is LinUCB (Li et al. 2010).
+
+**This work.** We implement and evaluate four schedulers — three baselines (LeastLoaded, P2C, HEFT) and two online learners (ε-greedy MAB and LinUCB contextual bandit) — inside a real distributed build system (Hybrid-Grid) and compare them on a CPython build over 1/3/5-worker heterogeneous Docker clusters. Our findings are mixed: P2C remains a competitive baseline; ε-greedy underperforms heuristics by concentrating traffic; and LinUCB requires careful design of the feature vector, reward shape, and exploration coefficient to match P2C, let alone exceed it.
+
+**Contributions:**
+
+- **C1.** A measurement pipeline that emits one JSON Lines record per dispatched task with 27 fields covering worker context at dispatch, latency decomposition, and learner introspection — enabling reproducible offline analysis and ML training.
+- **C2.** Open-source implementations of five schedulers in Go, including LinUCB with Sherman-Morrison incremental inverse, all sharing a common `LearningScheduler` interface that supports online reward feedback.
+- **C3.** An empirical comparison on a real workload (CPython compilation) over a Docker-based heterogeneous cluster, with explicit characterisation of the failure modes that arise: *cold-start trap*, *dispatch concentration*, *target leakage in reward attribution*.
+- **C4.** A design-space study — α tuning, reward function ablation, feature-subset ablation — that quantifies the sensitivity of LinUCB to its hyperparameters in the online build-scheduling regime, providing concrete recommendations for practitioners.
+
+**Findings preview.** P2C achieves the best wall-clock makespan on heterogeneous clusters (1.62× speedup vs. LeastLoaded on 5 workers). Naive ε-greedy underperforms every heuristic because of feature-blindness. LinUCB at default α=1.0 *also* underperforms because of three implementation traps we identified and fixed: feature-vector reconstruction at update time uses post-completion worker state (target leakage), build-type one-hot dimensions are perfectly collinear with bias under the current Compile() path, and reward magnitudes dwarf the exploration bonus during warm-up. After fixing these, LinUCB closes most of the gap to P2C; the residual difference is an open question for future work on drift-aware or Decima-style time-integrated rewards.
 
 ---
 
