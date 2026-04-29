@@ -15,7 +15,14 @@ case "$SCHEDULER" in
     leastloaded|simple|p2c|epsilon-greedy|linucb|heft) ;;
     *) echo "ERROR: invalid SCHEDULER='$SCHEDULER'; must be one of: leastloaded, simple, p2c, epsilon-greedy, linucb, heft" >&2; exit 1 ;;
 esac
-echo "[benchmark] scheduler: $SCHEDULER"
+
+# Optional tuning parameters propagated to coordinator.
+# ALPHA controls LinUCB exploration; EPSILON controls ε-greedy.
+ALPHA="${ALPHA:-1.0}"
+EPSILON="${EPSILON:-0.1}"
+SCHED_ARGS="--scheduler=${SCHEDULER} --alpha=${ALPHA} --epsilon=${EPSILON} --task-log=/tmp/tasks.jsonl"
+
+echo "[benchmark] scheduler: $SCHEDULER  alpha: $ALPHA  epsilon: $EPSILON"
 
 # Colors
 RED='\033[0;31m'
@@ -49,7 +56,7 @@ services:
     build:
       context: ../..
       dockerfile: test/stress/Dockerfile.base
-    command: hg-coord serve --grpc-port=9000 --http-port=8080 --scheduler=${SCHEDULER} --task-log=/tmp/tasks.jsonl
+    command: hg-coord serve --grpc-port=9000 --http-port=8080 ${SCHED_ARGS}
     volumes:
       - task-logs:/tmp
     ports:
@@ -119,7 +126,7 @@ services:
     build:
       context: ../..
       dockerfile: test/stress/Dockerfile.base
-    command: hg-coord serve --grpc-port=9000 --http-port=8080 --scheduler=${SCHEDULER} --task-log=/tmp/tasks.jsonl
+    command: hg-coord serve --grpc-port=9000 --http-port=8080 ${SCHED_ARGS}
     volumes:
       - task-logs:/tmp
     ports:
@@ -222,7 +229,7 @@ services:
     build:
       context: ../..
       dockerfile: test/stress/Dockerfile.base
-    command: hg-coord serve --grpc-port=9000 --http-port=8080 --scheduler=${SCHEDULER} --task-log=/tmp/tasks.jsonl
+    command: hg-coord serve --grpc-port=9000 --http-port=8080 ${SCHED_ARGS}
     volumes:
       - task-logs:/tmp
     ports:

@@ -167,26 +167,29 @@ Files load directly into pandas with `pd.read_json(path, lines=True)` — no tra
 
 ### §5.2 Wall-clock makespan (Table 1)
 
-| Cluster | LeastLoaded | P2C | ε-greedy | LinUCB |
-|---|---|---|---|---|
-| 1w-4.0cpu | 92 s | 130 s | *M2 pending* | *M3 pending* |
-| 3w-hetero | 123 s | 85 s | *M2 pending* | *M3 pending* |
-| 5w-hetero | 152 s | 94 s | *M2 pending* | *M3 pending* |
+| Cluster | LeastLoaded | P2C | ε-greedy | LinUCB (α=1) | HEFT |
+|---|---|---|---|---|---|
+| 1w-4.0cpu | 92 s | 130 s | 146 s | 129 s | *pending* |
+| 3w-hetero | 123 s | 85 s | 142 s | 103 s | *pending* |
+| 5w-hetero | 152 s | 94 s | 119 s | **158 s** | *pending* |
 
-P2C improves 1.45-1.62× over LeastLoaded on heterogeneous clusters, confirming Mitzenmacher 2001's theoretical prediction. The 1-worker regression for P2C (-41%) is from circuit-breaker filtering overhead — addressed in M2 with the single-candidate fast path.
+(Single-run measurements; statistical repetition in §5.5.4.)
+
+P2C improves 1.45-1.62× over LeastLoaded on heterogeneous clusters, confirming Mitzenmacher 2001's theoretical prediction. P2C's 1-worker regression (−41%) reflects circuit-breaker filtering overhead, which we address in the bandit implementations with a single-candidate fast path. The headline negative result is the bottom-right cell: at default $\alpha = 1.0$ LinUCB is the worst scheduler on 5w-hetero, 1.68× slower than P2C. We characterise this in §5.5: the cold-start trap (1.7% exploration rate, three workers receiving ≤10 tasks each over 873 dispatches) suggests the default $\alpha$ is too small to break the bandit's tendency to over-concentrate on the empirically-best worker. The α-sweep in §5.5.1 isolates this effect.
 
 ### §5.3 Load balance (per-worker dispatch counts)
 
 5w-hetero scenario, 873 tasks total:
 
-| Scheduler | top:bottom ratio | top worker share |
-|---|---|---|
-| LeastLoaded | 10.8 : 1 | 33.3% |
-| P2C | 8.6 : 1 | 33.3% |
-| ε-greedy | *M2 pending* | *M2 pending* |
-| LinUCB | *M3 pending* | *M3 pending* |
+| Scheduler | top:bottom ratio | top worker share | Exploration rate |
+|---|---|---|---|
+| LeastLoaded | 10.8 : 1 | 33.3% | n/a |
+| P2C | 8.6 : 1 | 33.3% | n/a |
+| ε-greedy | 13.2 : 1 | 33.3% | 8.4% |
+| LinUCB (α=1) | **97 : 1** | 33.3% | 1.7% |
+| HEFT | *pending* | *pending* | *pending* |
 
-Both static heuristics overload the strongest worker. Bandit methods that learn per-worker latency should reduce the dispatch skew without sacrificing makespan.
+Both static heuristics overload the strongest worker (33% concentration). Bandits compound the problem rather than relieve it. ε-greedy's argmax-Q on running mean reward concentrates traffic on the historically-fastest worker once a small lead is established; LinUCB's UCB bonus, with $\alpha = 1$, fails to break out of this trap and three workers receive almost no tasks at all (top:bottom 97:1). This suggests load balance and learned-best-arm exploitation are *competing* objectives and the bandit framework, as instantiated here, optimises the wrong one. §5.5 explores remediations.
 
 ### §5.4 Compile-time tail (P50/P95/P99 ms)
 
@@ -194,21 +197,77 @@ Both static heuristics overload the strongest worker. Bandit methods that learn 
 |---|---|---|---|
 | LeastLoaded | 820 | 6 226 | 23 961 |
 | P2C | 704 | 5 830 | 19 347 |
-| ε-greedy | *M2 pending* | *M2 pending* | *M2 pending* |
-| LinUCB | *M3 pending* | *M3 pending* | *M3 pending* |
+| ε-greedy | 956 | 7 387 | 25 488 |
+| LinUCB (α=1) | 942 | 7 142 | 23 661 |
+| HEFT | *pending* | *pending* | *pending* |
 
-P2C reduces P99 by 19% over LeastLoaded — partly placement, partly less queue contention.
+P2C reduces P99 by 19% over LeastLoaded — partly placement, partly less queue contention. ε-greedy and LinUCB both shift the entire distribution right relative to P2C, consistent with their dispatch concentration: a small number of overloaded workers create queueing on the busiest arms, and the worst tasks land on those queues.
 
-### §5.5 Ablations [M3 pending]
+### §5.5 Ablations
 
-- Reward function: raw `-compile_time_ms` vs `-log(1+compile_time_ms)` vs queue-aware
-- Feature subset: full LinUCB vs without worker-capability features (degenerates toward ε-greedy)
-- ε schedule: fixed vs annealed `ε_t = 1/√t`
-- α (LinUCB exploration scale): {0.1, 0.5, 1.0, 2.0}
+The first single-run measurement at $\alpha = 1.0$ revealed a worse-than-baseline result for LinUCB on 5w-hetero (158 s vs P2C 94 s). We investigate the design space along three axes to understand whether the underperformance is intrinsic to LinUCB or attributable to specific design choices.
 
-### §5.6 Failure mode injection [M3 pending]
+#### §5.5.1 Exploration coefficient α
 
-Inject one slow worker mid-run; measure recovery time (tasks-to-divergence-from-bad-arm) for each scheduler.
+We sweep $\alpha \in \{0.1, 0.5, 1.0, 2.0\}$ at the 5w-hetero configuration and report makespan, top:bottom dispatch ratio, and overall exploration rate. The Li 2010 paper itself notes (verbatim, §3 after Eq. 4) that the theoretical $\alpha = 1 + \sqrt{\ln(2/\delta)/2}$ "may be conservatively large in some applications". Chu et al. 2011 §5 reports that the optimum is workload-dependent.
+
+| α | Makespan (s) | Top:bottom dispatch | Exploration rate |
+|---|---|---|---|
+| 0.1 | *pending* | *pending* | *pending* |
+| 0.5 | *pending* | *pending* | *pending* |
+| 1.0 | 158 | 97:1 | 1.7% |
+| 2.0 | *pending* | *pending* | *pending* |
+
+We expect: low $\alpha$ → fast convergence on the apparent best worker (cold-start trap intensifies); high $\alpha$ → more spread but more wasted dispatches to slow workers. The optimum, if one exists in this set, will inform the recommended default for systems-bandit work.
+
+#### §5.5.2 Reward function
+
+We compare three reward shapes on the 5w-hetero configuration with $\alpha = 1.0$:
+
+- **Raw negative latency:** $r_t = -t_{\text{compile}}^{(t)}$ — most direct, dominated by tail outliers.
+- **Log latency:** $r_t = -\log(1 + t_{\text{compile}}^{(t)})$ — our default, heavy-tail compression.
+- **Decima-style time-integrated:** $r_t = -(t_t - t_{t-1}) \cdot J_t$ where $J_t$ is the active-task count over the inter-arrival interval (Mao et al. 2019 §5.2). This form is theoretically motivated by Little's Law.
+
+| Reward | Makespan (s) | P99 compile_time (ms) |
+|---|---|---|
+| $-t$ | *pending* | *pending* |
+| $-\log(1+t)$ | 158 | 23 661 |
+| Decima $-(t_k - t_{k-1})J_k$ | *pending* | *pending* |
+
+#### §5.5.3 Feature subset
+
+LinUCB's value over ε-greedy depends on the features. We ablate subsets of our 12-feature vector:
+
+- **Full** (12 features) — our default.
+- **Capability only** (cpu_cores, mem_bytes, native_arch_match, bias) — strips dynamic features.
+- **Dynamic only** (active_tasks/max, latency, log_size, bias) — strips static capability features.
+- **Bias only** — degenerates to $\hat\theta_a$ being a per-arm scalar Q-value, equivalent to ε-greedy without ε.
+
+| Feature subset | Makespan (s) |
+|---|---|
+| Full (12 features) | 158 |
+| Capability only (4) | *pending* |
+| Dynamic only (4) | *pending* |
+| Bias only (1) | *pending* |
+
+This last row functionally matches ε-greedy with $\varepsilon \to 0$, so we expect makespan close to ε-greedy at $\varepsilon = 0$ — providing a sanity-check that LinUCB-with-bias-only is operating consistently with the ε-greedy implementation.
+
+#### §5.5.4 Statistical repetitions
+
+For the **headline table (§5.2)** we report mean ± standard deviation across 5 independent runs of each scheduler at the 5w-hetero configuration and apply a paired Wilcoxon signed-rank test (Wilcoxon 1945) to test whether LinUCB or P2C significantly outperforms the other. Single-run differences below ≈10 s are within the observed noise floor of our Docker-on-macOS host and should not be claimed as significant without this protocol.
+
+### §5.6 Failure mode injection
+
+We design (but have not yet executed) a failure-mode test that introduces a 10× slowdown on one worker mid-run after task 200 by signalling the worker container with a CPU-throttle script. The metric is *tasks-to-divergence*: how many subsequent tasks each scheduler needs to send to the slow worker before it stops being preferred.
+
+Expected behaviour:
+- **LeastLoaded** has *no memory* of past performance — it only sees `active_tasks`. As the slow worker's queue grows, it stops being least-loaded and the scheduler avoids it. Recovery is naturally fast (within a few tasks).
+- **P2C** uses static capability scores — it does *not* react to actual performance. Recovery requires the circuit breaker to trip, which is configured for failure rates, not slowdowns. P2C is expected to keep dispatching to the slow worker indefinitely.
+- **ε-greedy** updates Q-values from observed compile time. After several slow observations, Q drops and dispatch shifts. Recovery rate is governed by EWMA-equivalent half-life of the sample-mean update.
+- **LinUCB** updates per-arm $\hat\theta_a$ — but the per-arm parameter space is per-feature, so a slowdown affects all features uniformly until enough samples are accumulated. Slower than ε-greedy in the worst case.
+- **HEFT** uses an EWMA over compile times (α=0.3); recovery half-life ≈ 3 observations.
+
+This experiment is queued for the next iteration; the design is laid out here for review.
 
 ---
 
