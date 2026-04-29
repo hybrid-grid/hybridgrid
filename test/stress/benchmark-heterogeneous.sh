@@ -53,8 +53,8 @@ services:
     volumes:
       - task-logs:/tmp
     ports:
-      - "9000:9000"
-      - "8080:8080"
+      - "19000:9000"
+      - "18080:8080"
     networks:
       - hgnet
     deploy:
@@ -123,8 +123,8 @@ services:
     volumes:
       - task-logs:/tmp
     ports:
-      - "9000:9000"
-      - "8080:8080"
+      - "19000:9000"
+      - "18080:8080"
     networks:
       - hgnet
     deploy:
@@ -226,8 +226,8 @@ services:
     volumes:
       - task-logs:/tmp
     ports:
-      - "9000:9000"
-      - "8080:8080"
+      - "19000:9000"
+      - "18080:8080"
     networks:
       - hgnet
     deploy:
