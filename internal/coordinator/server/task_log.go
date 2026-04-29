@@ -52,6 +52,11 @@ type TaskLogRecord struct {
 	Success                     bool      `json:"success"`
 	ExitCode                    int32     `json:"exit_code"`
 	FromCache                   bool      `json:"from_cache"`
+
+	// Learner introspection (populated only by LearningScheduler
+	// implementations; zero/false otherwise).
+	QValueAtDispatch float64 `json:"q_value_at_dispatch"`
+	WasExploration   bool    `json:"was_exploration"`
 }
 
 // NewTaskLogger opens a JSON Lines log file. An empty path or "stdout"

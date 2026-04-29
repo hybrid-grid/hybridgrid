@@ -92,8 +92,11 @@ type Config struct {
 	Tracing         tracing.Config
 	EnableRequestID bool
 	// SchedulerType selects the scheduler implementation.
-	// Valid: "leastloaded" (default), "simple", "p2c".
+	// Valid: "leastloaded" (default), "simple", "p2c", "epsilon-greedy".
 	SchedulerType string
+	// EpsilonValue is the exploration rate for epsilon-greedy. Ignored
+	// for other schedulers. Default 0.1 (Sutton & Barto §2.3 baseline).
+	EpsilonValue float64
 	// TaskLogPath is the path to the JSON Lines per-task log file.
 	// Empty or "stdout" routes records to standard output.
 	TaskLogPath string
@@ -112,8 +115,8 @@ func DefaultConfig() Config {
 
 // newScheduler constructs a scheduler.Scheduler from the configured type.
 // Unknown types fall back to LeastLoaded for backward compatibility.
-func newScheduler(typ string, reg registry.Registry, cm *resilience.CircuitManager) scheduler.Scheduler {
-	switch typ {
+func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManager) scheduler.Scheduler {
+	switch cfg.SchedulerType {
 	case "simple":
 		return scheduler.NewSimpleScheduler(reg)
 	case "p2c":
@@ -121,10 +124,20 @@ func newScheduler(typ string, reg registry.Registry, cm *resilience.CircuitManag
 			Registry:       reg,
 			CircuitChecker: cm,
 		})
+	case "epsilon-greedy":
+		eps := cfg.EpsilonValue
+		if eps == 0 {
+			eps = 0.1 // Sutton & Barto §2.3 default
+		}
+		return scheduler.NewEpsilonGreedyScheduler(scheduler.EpsilonGreedyConfig{
+			Registry:       reg,
+			CircuitChecker: cm,
+			Epsilon:        eps,
+		})
 	case "leastloaded", "":
 		return scheduler.NewLeastLoadedScheduler(reg)
 	default:
-		log.Warn().Str("requested", typ).Msg("Unknown scheduler type; falling back to leastloaded")
+		log.Warn().Str("requested", cfg.SchedulerType).Msg("Unknown scheduler type; falling back to leastloaded")
 		return scheduler.NewLeastLoadedScheduler(reg)
 	}
 }
@@ -202,7 +215,7 @@ type unityCacheEntry struct {
 func New(cfg Config) *Server {
 	reg := registry.NewInMemoryRegistry(cfg.HeartbeatTTL)
 	circuitMgr := resilience.NewCircuitManager(resilience.DefaultCircuitConfig())
-	sched := newScheduler(cfg.SchedulerType, reg, circuitMgr)
+	sched := newScheduler(cfg, reg, circuitMgr)
 	log.Info().Str("scheduler", cfg.SchedulerType).Msg("Scheduler initialized")
 
 	taskLogger, err := NewTaskLogger(cfg.TaskLogPath)
@@ -433,7 +446,7 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 
 	// Select worker with tracing
 	tracing.AddEvent(ctx, "scheduler.select.start")
-	worker, err := s.scheduler.Select(pb.BuildType_BUILD_TYPE_CPP, req.TargetArch, clientOSFilter)
+	worker, dispatchInfo, err := scheduler.SelectWith(s.scheduler, pb.BuildType_BUILD_TYPE_CPP, req.TargetArch, clientOSFilter)
 	if err != nil {
 		span.SetStatus(otelcodes.Error, "no worker available")
 		tracing.RecordError(ctx, err)
@@ -521,6 +534,20 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	}
 	s.registry.DecrementTasks(worker.ID, success, compileTime)
 
+	// Feedback loop for online-learning schedulers. Reward convention:
+	// higher is better, so use negative log-latency (Decima §4.2 precedent).
+	// Failed tasks receive a punishing constant so the learner downweights
+	// the offending worker without conflating compile-time noise.
+	if learner, ok := s.scheduler.(scheduler.LearningScheduler); ok {
+		var reward float64
+		if success && resp != nil {
+			reward = -math.Log1p(float64(resp.CompilationTimeMs))
+		} else {
+			reward = -math.Log1p(float64(s.config.RequestTimeout.Milliseconds()))
+		}
+		learner.RecordOutcome(worker.ID, reward, success)
+	}
+
 	taskCompletedTime := time.Now()
 	totalDuration := taskCompletedTime.Sub(start)
 	span.SetAttributes(tracing.AttrDurationMs.Int64(totalDuration.Milliseconds()))
@@ -571,6 +598,8 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 			Success:                     success,
 			ExitCode:                    exitCode,
 			FromCache:                   false,
+			QValueAtDispatch:            dispatchInfo.QValueAtDispatch,
+			WasExploration:              dispatchInfo.WasExploration,
 		})
 	}
 

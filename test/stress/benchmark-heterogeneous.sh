@@ -9,11 +9,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # SCHEDULER env var selects which scheduler to benchmark.
-# Valid: leastloaded (default), simple, p2c.
+# Valid: leastloaded (default), simple, p2c, epsilon-greedy.
 SCHEDULER="${SCHEDULER:-leastloaded}"
 case "$SCHEDULER" in
-    leastloaded|simple|p2c) ;;
-    *) echo "ERROR: invalid SCHEDULER='$SCHEDULER'; must be one of: leastloaded, simple, p2c" >&2; exit 1 ;;
+    leastloaded|simple|p2c|epsilon-greedy) ;;
+    *) echo "ERROR: invalid SCHEDULER='$SCHEDULER'; must be one of: leastloaded, simple, p2c, epsilon-greedy" >&2; exit 1 ;;
 esac
 echo "[benchmark] scheduler: $SCHEDULER"
 
