@@ -463,6 +463,7 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	tracing.AddEvent(ctx, "scheduler.select.start")
 	taskCtx := scheduler.TaskContext{
 		SourceSizeBytes: len(req.PreprocessedSource) + len(req.RawSource),
+		TaskID:          req.TaskId,
 	}
 	worker, dispatchInfo, err := scheduler.SelectWith(s.scheduler, pb.BuildType_BUILD_TYPE_CPP, req.TargetArch, clientOSFilter, taskCtx)
 	if err != nil {
@@ -553,15 +554,24 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	s.registry.DecrementTasks(worker.ID, success, compileTime)
 
 	// Feedback loop for online-learning schedulers. Reward convention:
-	// higher is better, so use negative log-latency (Decima §4.2 precedent).
-	// Failed tasks receive a punishing constant so the learner downweights
-	// the offending worker without conflating compile-time noise.
+	// higher is better. We use a normalised negative log-latency so the
+	// reward magnitude does not dwarf LinUCB's UCB exploration bonus
+	// during warm-up (code-review finding HIGH-2). Normalisation divisor
+	// is log1p(RequestTimeoutMs) so the reward lies in roughly [-1, 0].
+	// The log transform compresses the heavy tail (M1 P99/P50 ≈ 29×);
+	// see docs/thesis/theory-notes.md §4.3 for the empirical-choice
+	// rationale (this is NOT the Decima reward function).
 	if learner, ok := s.scheduler.(scheduler.LearningScheduler); ok {
+		timeoutMs := float64(s.config.RequestTimeout.Milliseconds())
+		if timeoutMs <= 0 {
+			timeoutMs = 120000 // 2-minute fallback
+		}
+		denom := math.Log1p(timeoutMs)
 		var reward float64
 		if success && resp != nil {
-			reward = -math.Log1p(float64(resp.CompilationTimeMs))
+			reward = -math.Log1p(float64(resp.CompilationTimeMs)) / denom
 		} else {
-			reward = -math.Log1p(float64(s.config.RequestTimeout.Milliseconds()))
+			reward = -1.0
 		}
 		learner.RecordOutcome(worker.ID, reward, success, taskCtx)
 	}

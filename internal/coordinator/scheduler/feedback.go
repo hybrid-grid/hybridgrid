@@ -13,6 +13,15 @@ type TaskContext struct {
 	// SourceSizeBytes is len(preprocessed_source) + len(raw_source). The
 	// linear-bandit feature for source size is log(1 + this value).
 	SourceSizeBytes int
+
+	// TaskID is the unique identifier supplied by the client. Contextual
+	// learners use it to bind the feature vector observed at Select to
+	// the reward observed at RecordOutcome — without this binding, the
+	// learner is forced to reconstruct the feature vector from a stale
+	// snapshot (worker.ActiveTasks already decremented, RTT already
+	// updated by this task) which causes target leakage and biases the
+	// learned parameters. See code-review finding CRITICAL-1.
+	TaskID string
 }
 
 // DispatchInfo carries learner-internal state observed at the moment the

@@ -66,6 +66,14 @@ type LinUCBScheduler struct {
 
 	mu   sync.Mutex
 	arms map[string]*linUCBArm
+	// pendingX caches the feature vector observed at Select time for
+	// each in-flight task. RecordOutcome consumes the cached value so
+	// the bandit update sees the same x that drove selection — the
+	// alternative (rebuilding x from registry state at outcome time)
+	// suffers from target leakage because ActiveTasks and RTT have
+	// already been mutated by the time the outcome arrives. Keyed by
+	// TaskContext.TaskID; entries are deleted on consumption.
+	pendingX map[string]*mat.VecDense
 }
 
 // linUCBArm holds the per-worker bandit state. We keep both A and its
@@ -95,10 +103,16 @@ type LinUCBConfig struct {
 // NewLinUCBScheduler constructs the scheduler. The feature dimension
 // is fixed at the value returned by featureDim() to keep the state
 // shape stable across the cluster's lifetime.
+//
+// Default α is 0.5. The Li 2010 theoretical form (Eq. 4) is
+// "conservatively large in some applications" per the paper itself;
+// 0.5 is in the practical range Chu et al. 2011 §5 reported, and
+// keeps the UCB bonus from dominating the mean estimate during the
+// short warm-up our build workloads expose (≤ 900 dispatches per run).
 func NewLinUCBScheduler(cfg LinUCBConfig) *LinUCBScheduler {
 	alpha := cfg.Alpha
 	if alpha == 0 {
-		alpha = 1.0
+		alpha = 0.5
 	}
 	if alpha < 0 {
 		alpha = 0
@@ -114,6 +128,7 @@ func NewLinUCBScheduler(cfg LinUCBConfig) *LinUCBScheduler {
 		alpha:          alpha,
 		dim:            featureDim(),
 		arms:           make(map[string]*linUCBArm),
+		pendingX:       make(map[string]*mat.VecDense),
 	}
 }
 
@@ -140,21 +155,49 @@ func (s *LinUCBScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb
 	}
 
 	var best *registry.WorkerInfo
+	var bestX *mat.VecDense
 	bestP := math.Inf(-1)
-	bestMean := 0.0
-	bestBonus := 0.0
 	for _, w := range candidates {
 		x := s.featureVector(w, arch, ctx)
 		mean, bonus := s.score(w.ID, x)
 		p := mean + bonus
 		if p > bestP {
 			bestP = p
-			bestMean = mean
-			bestBonus = bonus
 			best = w
+			bestX = x
 		}
 	}
-	wasExploration := bestBonus > math.Abs(bestMean)
+
+	// Compute exploration flag honestly: the dispatch counts as
+	// exploration if the winner's selection was not the argmax of the
+	// pure mean θ̂ᵀx. We re-evaluate means alone and compare to the UCB
+	// winner — if a different arm has a higher mean, the bonus drove
+	// the choice (true exploration).
+	wasExploration := false
+	{
+		bestMeanID := ""
+		bestMean := math.Inf(-1)
+		for _, w := range candidates {
+			x := s.featureVector(w, arch, ctx)
+			m, _ := s.score(w.ID, x)
+			if m > bestMean {
+				bestMean = m
+				bestMeanID = w.ID
+			}
+		}
+		if bestMeanID != "" && bestMeanID != best.ID {
+			wasExploration = true
+		}
+	}
+
+	// Cache the chosen worker's feature vector so RecordOutcome updates
+	// the bandit against the same x that drove selection.
+	if ctx.TaskID != "" && bestX != nil {
+		s.mu.Lock()
+		s.pendingX[ctx.TaskID] = bestX
+		s.mu.Unlock()
+	}
+
 	return best, DispatchInfo{QValueAtDispatch: bestP, WasExploration: wasExploration}, nil
 }
 
@@ -186,24 +229,30 @@ func (s *LinUCBScheduler) score(workerID string, x *mat.VecDense) (mean, bonus f
 // via Sherman–Morrison.
 //
 // We tolerate NaN/Inf rewards by skipping the update — the learner
-// must not be poisoned by malformed observations.
+// must not be poisoned by malformed observations. The feature vector
+// used for the update is the one cached at Select time keyed by
+// ctx.TaskID; if no cached vector is available (legacy callers, or
+// the scheduler restarted between Select and RecordOutcome) we skip
+// the update rather than fall back to a stale reconstruction that
+// would inject target-leaked features into θ̂.
 func (s *LinUCBScheduler) RecordOutcome(workerID string, reward float64, _ bool, ctx TaskContext) {
 	if workerID == "" || math.IsNaN(reward) || math.IsInf(reward, 0) {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	arm := s.armForLocked(workerID)
 
-	// Reconstruct the feature vector. We pull the worker capabilities
-	// from the registry so the arch one-hot and capability features
-	// reflect current state. A registry miss leaves us without enough
-	// data to update; skip rather than poison the arm.
-	w, ok := s.registry.Get(workerID)
+	x, ok := s.pendingX[ctx.TaskID]
 	if !ok {
+		// No cached x — either the caller did not set TaskID or the
+		// dispatch happened before this scheduler was constructed.
+		// Drop the update to avoid biasing θ̂ with a reconstructed,
+		// post-completion feature vector.
 		return
 	}
-	x := s.featureVector(w, w.Capabilities.NativeArch, ctx)
+	delete(s.pendingX, ctx.TaskID)
+
+	arm := s.armForLocked(workerID)
 
 	// b ← b + r x  (Algorithm 1 line 13)
 	for i := 0; i < s.dim; i++ {
@@ -322,47 +371,53 @@ func (s *LinUCBScheduler) eligibleWorkers(buildType pb.BuildType, arch pb.Archit
 // featureDim is the fixed feature-vector dimension. Increasing this
 // requires a one-time rebuild of all arm states.
 //
-// Layout (12 dims) — see docs/thesis/paper-skeleton.md §3.3:
+// Layout (9 dims) — derived from the paper-skeleton.md §3.3 design but
+// pruned per code-review finding CRITICAL-2: build-type one-hot dims
+// were always set to (1, 0, 0) under the current Compile() path,
+// making them perfectly collinear with the bias. Removing them keeps
+// the design space identifiable and frees Sherman-Morrison from a
+// degenerate rank-2 subspace during warm-up. Build-type can be added
+// back when Flutter/Unity reach the learning path.
 //
-//	[0]   bias                                  = 1.0
-//	[1]   log(1 + source_size_bytes) / 16       (≈ unit scale for typical sizes)
-//	[2]   build_type == CPP                     (1.0 / 0.0)
-//	[3]   build_type == FLUTTER
-//	[4]   build_type == UNITY
-//	[5]   target_arch == X86_64
-//	[6]   target_arch == ARM64
-//	[7]   worker.cpu_cores / 16                 (capped at 1.0)
-//	[8]   worker.mem_bytes / (64 * 2^30)         (capped at 1.0)
-//	[9]   worker.native_arch == target_arch     (1.0 / 0.0)
-//	[10]  worker.active_tasks / max_parallel
-//	[11]  worker.recent_rpc_latency_ms / 100    (capped at 1.0)
-func featureDim() int { return 12 }
+//	[0]   bias                                                      = 1.0
+//	[1]   log(1 + source_size_bytes) / log(1 + 4 MiB)               (≈ [0, 1])
+//	[2]   target_arch == X86_64
+//	[3]   target_arch == ARM64
+//	[4]   worker.cpu_cores / 16                                     (capped at 1.0)
+//	[5]   worker.mem_bytes / (64 * 2^30)                            (capped at 1.0)
+//	[6]   worker.native_arch == target_arch                         (1.0 / 0.0)
+//	[7]   worker.active_tasks / max_parallel
+//	[8]   worker.recent_rpc_latency_ms / 100                        (capped at 1.0)
+func featureDim() int { return 9 }
+
+// sizeNormDenom is log1p of a "typical big translation unit" — a 4 MiB
+// preprocessed source. Using this denominator keeps the size feature
+// in roughly [0, 1] for the workloads we observe (M1 P99 ≈ 2.3 MiB),
+// avoiding the prior /16 divisor that compressed all real values into
+// [0.6, 0.8] and made the feature near-constant for the benchmark
+// (code-review finding MED-4).
+var sizeNormDenom = math.Log1p(4 * 1024 * 1024)
 
 // featureVector builds x_{t,a} for a given (worker, target_arch, ctx).
-// All features are normalized roughly to [0, 1] so ‖x‖ ≤ 1 isn't
-// guaranteed but stays bounded — matching the Chu 2011 convention.
+// All features are normalized roughly to [0, 1] so ‖x‖ stays bounded —
+// matching the Chu 2011 convention.
 func (s *LinUCBScheduler) featureVector(w *registry.WorkerInfo, targetArch pb.Architecture, ctx TaskContext) *mat.VecDense {
 	d := s.dim
 	x := mat.NewVecDense(d, nil)
 	x.SetVec(0, 1.0) // bias
 
-	logSize := math.Log1p(float64(ctx.SourceSizeBytes)) / 16.0
-	if logSize > 1.5 {
-		logSize = 1.5
+	logSize := math.Log1p(float64(ctx.SourceSizeBytes)) / sizeNormDenom
+	if logSize > 1.0 {
+		logSize = 1.0
 	}
 	x.SetVec(1, logSize)
 
-	// build_type one-hot — coordinator only handles CPP via Compile() at
-	// present; future extension covers Flutter/Unity. We keep all three
-	// dims so the schema is stable.
-	x.SetVec(2, 1.0) // CPP — current Compile() path is C/C++
-
-	// target arch one-hot
+	// target arch one-hot (build type omitted — see featureDim doc).
 	switch targetArch {
 	case pb.Architecture_ARCH_X86_64:
-		x.SetVec(5, 1.0)
+		x.SetVec(2, 1.0)
 	case pb.Architecture_ARCH_ARM64:
-		x.SetVec(6, 1.0)
+		x.SetVec(3, 1.0)
 	}
 
 	caps := w.Capabilities
@@ -377,11 +432,11 @@ func (s *LinUCBScheduler) featureVector(w *registry.WorkerInfo, targetArch pb.Ar
 			memBytes = 1.0
 		}
 	}
-	x.SetVec(7, cpuCores)
-	x.SetVec(8, memBytes)
+	x.SetVec(4, cpuCores)
+	x.SetVec(5, memBytes)
 
 	if caps != nil && caps.NativeArch == targetArch {
-		x.SetVec(9, 1.0)
+		x.SetVec(6, 1.0)
 	}
 
 	maxP := w.MaxParallel
@@ -392,13 +447,13 @@ func (s *LinUCBScheduler) featureVector(w *registry.WorkerInfo, targetArch pb.Ar
 	if loadRatio > 1.0 {
 		loadRatio = 1.0
 	}
-	x.SetVec(10, loadRatio)
+	x.SetVec(7, loadRatio)
 
 	rttNorm := s.latencyTracker.Get(w.ID) / 100.0
 	if rttNorm > 1.0 {
 		rttNorm = 1.0
 	}
-	x.SetVec(11, rttNorm)
+	x.SetVec(8, rttNorm)
 
 	return x
 }

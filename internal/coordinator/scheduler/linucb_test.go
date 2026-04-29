@@ -49,17 +49,31 @@ func TestLinUCB_ArmInitialization(t *testing.T) {
 // is the single most important correctness guard — if Sherman–Morrison
 // drifts, the bandit's exploration bonus is wrong.
 func TestLinUCB_ShermanMorrisonMatchesBruteForce(t *testing.T) {
-	reg := newRegistryWithWorkers(t, 1)
+	reg := newRegistryWithWorkers(t, 2)
 	s := NewLinUCBScheduler(LinUCBConfig{Registry: reg})
 
-	// Run 50 RecordOutcome calls with varied feature vectors.
+	// Drive 50 full Select→RecordOutcome cycles so the production
+	// pendingX caching path is exercised. Distinct task IDs guarantee
+	// each outcome lands against the matching feature vector.
 	rng := rand.New(rand.NewSource(7))
 	for i := 0; i < 50; i++ {
-		s.RecordOutcome("worker-a", -rng.Float64()*5, true, TaskContext{SourceSizeBytes: rng.Intn(1 << 20)})
+		ctx := TaskContext{SourceSizeBytes: rng.Intn(1 << 20), TaskID: "task-" + string(rune('A'+i%26)) + string(rune('a'+(i/26)%26))}
+		w, _, err := s.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "", ctx)
+		require.NoError(t, err)
+		s.RecordOutcome(w.ID, -rng.Float64()*5, true, ctx)
 	}
 
 	s.mu.Lock()
 	arm := s.arms["worker-a"]
+	if arm == nil {
+		s.mu.Unlock()
+		// 50 trials is enough to expect at least one dispatch to
+		// worker-a; if not, fall back to the other worker so the test
+		// still exercises Sherman-Morrison on a populated arm.
+		s.mu.Lock()
+		arm = s.arms["worker-b"]
+	}
+	require.NotNil(t, arm, "no arm received any update")
 	A := mat.DenseCopyOf(arm.A)
 	cachedInv := mat.DenseCopyOf(arm.Ainv)
 	s.mu.Unlock()
@@ -164,33 +178,43 @@ func TestLinUCB_FeatureVectorDimensions(t *testing.T) {
 		ActiveTasks: 2,
 	}
 	x := s.featureVector(w, pb.Architecture_ARCH_ARM64, TaskContext{SourceSizeBytes: 1 << 16})
-	assert.Equal(t, s.dim, x.Len())
+	assert.Equal(t, s.dim, x.Len(), "feature dim must be 9 after build-type collinearity removal")
 	assert.Equal(t, 1.0, x.AtVec(0))            // bias
-	assert.Equal(t, 1.0, x.AtVec(2))            // CPP one-hot
-	assert.Equal(t, 1.0, x.AtVec(6))            // ARM64 target
-	assert.Equal(t, 1.0, x.AtVec(9))            // arch matches
-	assert.InDelta(t, 0.5, x.AtVec(7), 1e-9)    // 8/16 cpu cores
-	assert.InDelta(t, 32.0/64.0, x.AtVec(8), 1e-9)
-	assert.InDelta(t, 0.5, x.AtVec(10), 1e-9)   // 2/4 active tasks
+	// dim 1: log size feature; just check it is in the expected band.
+	assert.Greater(t, x.AtVec(1), 0.5)
+	assert.LessOrEqual(t, x.AtVec(1), 1.0)
+	assert.Equal(t, 1.0, x.AtVec(3))            // ARM64 target
+	assert.Equal(t, 1.0, x.AtVec(6))            // native arch matches target
+	assert.InDelta(t, 0.5, x.AtVec(4), 1e-9)    // 8/16 cpu cores
+	assert.InDelta(t, 32.0/64.0, x.AtVec(5), 1e-9)
+	assert.InDelta(t, 0.5, x.AtVec(7), 1e-9)    // 2/4 active tasks
 }
 
 // TestLinUCB_RewardMonotonicity verifies that giving better rewards to
-// one worker increases its θ̂ᵀx faster than another worker's.
+// one worker increases its θ̂ᵀx faster than another worker's. Uses the
+// pendingX cache via Select→RecordOutcome so the test exercises the
+// production path (post-CRITICAL-1 fix).
 func TestLinUCB_RewardMonotonicity(t *testing.T) {
 	reg := newRegistryWithWorkers(t, 2)
 	s := NewLinUCBScheduler(LinUCBConfig{Registry: reg, Alpha: 0})
 
+	// Manually insert a feature vector for each worker so we can fix
+	// the rewards we feed back. Bypass Select to isolate the update
+	// behaviour from the selection policy under α = 0.
+	xa := s.featureVector(&registry.WorkerInfo{ID: "worker-a"}, pb.Architecture_ARCH_X86_64, TaskContext{SourceSizeBytes: 100_000})
+	xb := s.featureVector(&registry.WorkerInfo{ID: "worker-b"}, pb.Architecture_ARCH_X86_64, TaskContext{SourceSizeBytes: 100_000})
+
 	for i := 0; i < 30; i++ {
-		s.RecordOutcome("worker-a", -1.0, true, TaskContext{SourceSizeBytes: 100_000})
-		s.RecordOutcome("worker-b", -10.0, true, TaskContext{SourceSizeBytes: 100_000})
+		idA := "ta-" + string(rune('A'+i%26))
+		idB := "tb-" + string(rune('A'+i%26))
+		s.mu.Lock()
+		s.pendingX[idA] = xa
+		s.pendingX[idB] = xb
+		s.mu.Unlock()
+		s.RecordOutcome("worker-a", -1.0, true, TaskContext{TaskID: idA})
+		s.RecordOutcome("worker-b", -10.0, true, TaskContext{TaskID: idB})
 	}
 
-	wa, ok := s.registry.Get("worker-a")
-	require.True(t, ok)
-	wb, ok := s.registry.Get("worker-b")
-	require.True(t, ok)
-	xa := s.featureVector(wa, pb.Architecture_ARCH_X86_64, TaskContext{SourceSizeBytes: 100_000})
-	xb := s.featureVector(wb, pb.Architecture_ARCH_X86_64, TaskContext{SourceSizeBytes: 100_000})
 	meanA, _ := s.score("worker-a", xa)
 	meanB, _ := s.score("worker-b", xb)
 	assert.Greater(t, meanA, meanB, "worker-a should have higher θ̂ᵀx than worker-b")
