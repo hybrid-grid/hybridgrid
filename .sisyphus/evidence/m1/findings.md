@@ -168,12 +168,82 @@ The ε-greedy evidence shows the **true value of LinUCB**: features must inform 
 
 If LinUCB on 5w-hetero outperforms P2C, the paper's central claim is empirically supported. If it doesn't, we have a clear story about why (feature linearity violated, drift, etc., per `docs/thesis/theory-notes.md` §3.4).
 
-## 7. Files in this directory
+## 7. LinUCB comparison (collected 2026-04-29 15:30, single run, α=1.0)
+
+### 7.1 Wall-clock — LinUCB underperforms expectations on 5w-hetero
+
+| Cluster | LeastLoaded | P2C | ε-greedy | LinUCB | LinUCB vs best |
+|---|---|---|---|---|---|
+| 1w-4.0cpu | 92 s | 130 s | 146 s | 129 s | ≈ P2C |
+| 3w-hetero | 123 s | 85 s | 142 s | 103 s | 21% slower than P2C |
+| 5w-hetero | 152 s | 94 s | 119 s | **158 s** | 68% slower than P2C, *worst of all schedulers* |
+
+**This is a negative result for our hypothesis.** The expectation was that LinUCB's feature-conditioned policy would beat both static heuristics and feature-blind ε-greedy. Instead, on the most heterogeneous configuration (5w-hetero), LinUCB is the worst. We treat this honestly and dig into the cause below.
+
+### 7.2 Per-worker dispatch and exploration
+
+```
+worker-bea00a6a2eec    291    explore=0.0%   ← fully exploited; never marked exploration
+worker-2c198e7e58b9    166    explore=1.2%
+worker-d3668b374fb4    126    explore=0.8%
+worker-581f6862f019    115    explore=2.6%
+worker-2628b05f8b54     95    explore=2.1%
+worker-dc6f93f55f90     61    explore=3.3%
+worker-d728b173b617     10    explore=20.0%  ← starved cold worker
+worker-15e8b9e277bc      6    explore=16.7%
+worker-c59c61c5d300      3    explore=66.7%
+```
+
+Top:bottom = **97 : 1** (worse than every other scheduler we measured). Three workers received fewer than 11 tasks each over the entire 873-task workload. Overall exploration rate: 1.7% (versus ε-greedy's 8.4%).
+
+### 7.3 Why LinUCB underperformed — diagnosis
+
+**Diagnosis 1 — UCB bonus did not break the cold-start trap.**
+The Li 2010 default $\alpha = 1.0$ produces a confidence radius proportional to $\sqrt{x^\top A^{-1} x}$. With $A = I_d$ initially, the bonus magnitude is $\sqrt{\sum x_i^2} \approx 2$ for our 12-feature vector — but $\hat{\theta}_a^\top x_a$ for the warm winner can grow above 2 once a few rewards are accumulated (median Q at dispatch in our log was $-6.3$ but the *winning* arm's mean approaches 0 as $b_a$ tilts toward the exploited arm). The bonus is therefore swamped after the first ten or so observations. The Q-value distribution shows a sharp bimodality: 75% percentile is 0.0 (cold or just-touched arms), max is +2.5 (hot arm) — exactly the regime where the cold arms' bonus cannot overcome the hot arm's mean.
+
+**Diagnosis 2 — single-run variance is not bounded.**
+Docker on macOS Desktop is a noisy host (filesystem, JIT, kernel scheduling). A single 873-task run has wide variance; we saw P2C take 85 s in one run and 94 s in another for the same 5w-hetero config. Without ≥5 repetitions and a paired statistical test, the 158 s LinUCB number cannot be distinguished from a tail-event run.
+
+**Diagnosis 3 — α tuning may be too aggressive in cold start, too weak in steady state.**
+The Li 2010 paper itself (verbatim quote, §3 after Eq. 4): *"the value of α given in Eq. (4) may be conservatively large in some applications, and so optimizing this parameter may result in higher total payoffs in practice."* We did not tune α empirically. Chu et al. 2011 §5 reports α ∈ {0.1, 0.5, 1.0} in their experiments and finds the optimum is workload-dependent. This is a §5.5 ablation we now own.
+
+**Diagnosis 4 — feature linearity is likely violated.**
+Compile time grows super-linearly in source size (preprocessing × optimisation passes). Our `log(1 + size)` transform compresses but does not linearise. Lattimore & Szepesvári 2020 §24.4: misspecification of magnitude $\varepsilon$ inflates regret by additive $\mathcal{O}(\varepsilon\sqrt{T})$. With $T = 873$ and a non-trivial $\varepsilon$, the regret cost can erase the bandit's expected savings.
+
+### 7.4 Compile-time tail (P50/P95/P99 ms)
+
+| Scheduler | P50 | P95 | P99 |
+|---|---|---|---|
+| LeastLoaded | 820 | 6 226 | 23 961 |
+| P2C | 704 | 5 830 | 19 347 |
+| ε-greedy | 956 | 7 387 | 25 488 |
+| LinUCB | 942 | 7 142 | 23 661 |
+
+LinUCB and ε-greedy land in the same regime — both pay queue-contention cost from over-concentrating on a "best" worker.
+
+### 7.5 What the paper claims, given this evidence
+
+- **Confirmed:** P2C beats LeastLoaded by 1.62× on heterogeneous clusters (Mitzenmacher 2001).
+- **Confirmed:** Naive online learning (ε-greedy) underperforms a tuned static heuristic (P2C) — feature-blindness is a real failure mode.
+- **NOT confirmed:** A linear contextual bandit (LinUCB) with reasonable defaults beats the static heuristic on this workload at this scale.
+- **Open:** With α-tuning, repetitions, and possibly an alternative reward (Decima Little's-Law form), LinUCB might close the gap.
+
+This is a credible thesis: we identify the failure mode, document the mechanism (Q-value bimodality, exploration starvation), and propose a structured remediation path. A single-run "negative" result on the hardest configuration is not a failure of the research method; it is evidence that the design space matters more than the algorithm choice.
+
+### 7.6 Immediate next experiments (Ralph US-005, US-008, US-010)
+
+1. **α sweep** at 5w-hetero: $\alpha \in \{0.1, 0.5, 1.0, 2.0\}$ — find the workload-specific optimum.
+2. **Reward ablation**: $-t$, $-\log(1+t)$, $-(t_k - t_{k-1})J_k$ (Decima form) — quantify reward design impact.
+3. **Statistical reps**: ≥ 5 runs per scheduler at 5w-hetero, paired Wilcoxon test.
+4. **HEFT baseline**: §X to land in §5.2 alongside the bandits.
+
+## 8. Files in this directory
 
 - `tasks-leastloaded.jsonl` — 873 records, leastloaded scheduler
 - `tasks-p2c.jsonl` — 873 records, p2c scheduler
 - `tasks-epsilon-greedy.jsonl` — 873 records, ε-greedy scheduler
-- `benchmark-{leastloaded,p2c,epsilon-greedy}-results.txt` — wall-clock CSVs
+- `tasks-linucb.jsonl` — 873 records, LinUCB α=1.0
+- `benchmark-{leastloaded,p2c,epsilon-greedy,linucb}-results.txt` — wall-clock CSVs
 - `findings.md` — this analysis
 
 ## 7. Cross-reference
