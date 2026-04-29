@@ -1,0 +1,31 @@
+# Ralph Progress Log
+
+## Session start: 2026-04-29
+- M1 (measurement infrastructure) committed and pushed
+- M2 (ε-greedy bandit) committed and pushed
+- ε-greedy benchmark currently running in background
+
+## Pending decisions to track
+- LinUCB feature vector dimension: 12 features per paper-skeleton.md §3.3 — to be validated against M2 logs first to drop low-correlation features
+- Cache-aware extension scope: deferred to post-M3 (not in this Ralph session)
+- HEFT online adaptation: requires careful citation of any deviation from Topcuoglu 2002 since the original is offline
+
+## Codebase patterns observed
+- Schedulers live in internal/coordinator/scheduler/ with shared filterByOS helper
+- LearningScheduler interface in feedback.go is the extension point
+- Tests use registry.NewInMemoryRegistry directly (not via interface)
+- Worker info pointers from ListByCapability are read-only snapshots — direct field reads OK
+- benchmark-heterogeneous.sh expects SCHEDULER env var; must match enum in CLI validator
+
+## Citations confirmed accurate
+- Mitzenmacher 2001 P2C — DOI 10.1109/71.963420 (verified in annotated-bibliography.md)
+- Sutton & Barto 2018 RL textbook §2.4 incremental sample mean (verified by direct code reference in epsilon_greedy.go)
+- Cortez 2017 Resource Central source-size feature importance — needs DOI re-verification (may be 10.1145/3132747.3132772, listed in plan file)
+
+## Open citations needing verification
+- Decima reward formulation — listed as Mao 2019 SIGCOMM but plan files say §4.2; need direct paper read
+- Li 2010 LinUCB α formula — claimed "α = 1 + √(ln(2/δ)/2)" in plan, need direct verification
+- Lattimore & Szepesvári 2020 ch.19 — feature scaling for linear bandits, need direct read
+
+## Risks
+- The Ralph scope spans days realistically; need to either keep iterating across many sessions, or accept that some stories (US-009 thesis chapter, US-010 statistical reps) will be partially complete

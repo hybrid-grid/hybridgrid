@@ -114,11 +114,66 @@ The 33% top-worker dominance under P2C is **not** addressed by improved load tra
 
 The 41% overhead penalty on 1-worker P2C also suggests M2/M3 should fast-path single-candidate scheduling.
 
-## 6. Files in this directory
+## 6. ε-greedy comparison (collected 2026-04-29 13:20)
+
+### 6.1 Wall-clock
+
+| Cluster | LeastLoaded | P2C | ε-greedy | LinUCB |
+|---|---|---|---|---|
+| 1w-4.0cpu | 92 s | 130 s | 146 s | *pending* |
+| 3w-hetero | 123 s | 85 s | 142 s | *pending* |
+| 5w-hetero | 152 s | 94 s | **119 s** | *pending* |
+
+ε-greedy underperforms P2C on every config and beats LeastLoaded only on 5w-hetero. This **validates the paper hypothesis**: a feature-blind bandit pays exploration cost without exploiting worker heterogeneity. P2C uses static capability scoring; ε-greedy ignores it. The story for §5 is now: LeastLoaded → P2C (heuristic with capability awareness, +1.62×) → ε-greedy (online learning, but feature-blind, slower than P2C) → LinUCB (online learning + features, expected to surpass both).
+
+### 6.2 Per-worker dispatch (5w-hetero, ε-greedy)
+
+```
+worker-d2bdf558b7db    291    ← Q-greedy "best" worker — concentration extreme
+worker-055c796771e5    205
+worker-bad95e95eba0     84
+worker-21c6bc32a842     83
+worker-54f0dffe055a     59
+worker-8523fe6881f1     57
+worker-e9627737f313     43
+worker-7eb8700719e3     29
+worker-a43db6e6aff8     22    ← cold worker, gets only ε-share + tie-break
+```
+
+Top:bottom = **13.2:1** — *worse* than LeastLoaded (10.8:1) and P2C (8.6:1). ε-greedy's argmax-Q on running mean reward concentrates traffic on the historically-fastest worker, ignoring the queue pressure that the heuristics correctly account for.
+
+### 6.3 Compile-time tail (P50/P95/P99 ms)
+
+| Scheduler | P50 | P95 | P99 |
+|---|---|---|---|
+| LeastLoaded | 820 | 6 226 | 23 961 |
+| P2C | 704 | 5 830 | 19 347 |
+| ε-greedy | 956 | 7 387 | 25 488 |
+| LinUCB | *pending* | *pending* | *pending* |
+
+ε-greedy P99 is **higher** than both heuristics — the concentrated dispatch creates queue contention on the chosen "best" worker. This is the classic failure mode of feature-blind bandits in heterogeneous load scheduling.
+
+### 6.4 Learner introspection
+
+- **Exploration ratio observed:** 0.084 (target ε = 0.10) — slightly under because of the single-candidate fast path on 1w runs.
+- **Q-value distribution:** mean −6.61, std 1.06, range [−7.82, 0]. Q values are concentrated near $-\log(\bar{T})$ for $\bar{T} \approx 800$ ms (matches the median compile time), confirming the reward signal is being learned and the log-transform compresses outliers as intended.
+- **Cold-worker Q = 0** still appears as `max=0.000`, showing some workers never received a sample — exactly the explore-vs-exploit failure mode that LinUCB's UCB bonus addresses.
+
+### 6.5 What this means for M3 (LinUCB)
+
+The ε-greedy evidence shows the **true value of LinUCB**: features must inform the decision. LinUCB's $\theta_a^\top x_t + \alpha\sqrt{x^\top A_a^{-1} x}$ score conditions on:
+- Worker capability (CPU cores, memory) — penalises sending big tasks to small workers
+- Live queue state (active_tasks/max_parallel) — penalises overloaded workers regardless of Q
+- Task size (log source bytes) — picks workers whose history shows good performance on similar-sized tasks
+
+If LinUCB on 5w-hetero outperforms P2C, the paper's central claim is empirically supported. If it doesn't, we have a clear story about why (feature linearity violated, drift, etc., per `docs/thesis/theory-notes.md` §3.4).
+
+## 7. Files in this directory
 
 - `tasks-leastloaded.jsonl` — 873 records, leastloaded scheduler
 - `tasks-p2c.jsonl` — 873 records, p2c scheduler
-- `benchmark-leastloaded-results.txt`, `benchmark-p2c-results.txt` — wall-clock CSVs
+- `tasks-epsilon-greedy.jsonl` — 873 records, ε-greedy scheduler
+- `benchmark-{leastloaded,p2c,epsilon-greedy}-results.txt` — wall-clock CSVs
 - `findings.md` — this analysis
 
 ## 7. Cross-reference

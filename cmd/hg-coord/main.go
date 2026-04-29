@@ -71,14 +71,18 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			schedulerType, _ := cmd.Flags().GetString("scheduler")
 			taskLogPath, _ := cmd.Flags().GetString("task-log")
 			epsilonValue, _ := cmd.Flags().GetFloat64("epsilon")
+			alphaValue, _ := cmd.Flags().GetFloat64("alpha")
 
 			// Validate scheduler choice (fail fast rather than silent fallback).
-			validSchedulers := map[string]bool{"leastloaded": true, "simple": true, "p2c": true, "epsilon-greedy": true}
+			validSchedulers := map[string]bool{"leastloaded": true, "simple": true, "p2c": true, "epsilon-greedy": true, "linucb": true}
 			if !validSchedulers[schedulerType] {
-				return fmt.Errorf("invalid --scheduler %q; must be one of: leastloaded, simple, p2c, epsilon-greedy", schedulerType)
+				return fmt.Errorf("invalid --scheduler %q; must be one of: leastloaded, simple, p2c, epsilon-greedy, linucb", schedulerType)
 			}
 			if epsilonValue < 0 || epsilonValue > 1 {
 				return fmt.Errorf("invalid --epsilon %v; must be in [0, 1]", epsilonValue)
+			}
+			if alphaValue < 0 || alphaValue > 10 {
+				return fmt.Errorf("invalid --alpha %v; must be in [0, 10]", alphaValue)
 			}
 
 			// Validate port ranges
@@ -154,6 +158,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			cfg.SchedulerType = schedulerType
 			cfg.TaskLogPath = taskLogPath
 			cfg.EpsilonValue = epsilonValue
+			cfg.AlphaValue = alphaValue
 			cfg.Tracing.Enable = tracingEnable
 			cfg.Tracing.Endpoint = tracingEndpoint
 			cfg.Tracing.ServiceName = tracingServiceName
@@ -258,9 +263,10 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 	serveCmd.Flags().Int("http-port", 8080, "HTTP/Dashboard port")
 	serveCmd.Flags().String("token", "", "Authentication token")
 	serveCmd.Flags().Bool("no-mdns", false, "Disable mDNS advertisement")
-	serveCmd.Flags().String("scheduler", "leastloaded", "Scheduler type: leastloaded, simple, p2c, epsilon-greedy")
+	serveCmd.Flags().String("scheduler", "leastloaded", "Scheduler type: leastloaded, simple, p2c, epsilon-greedy, linucb")
 	serveCmd.Flags().String("task-log", "", "Path to per-task JSON Lines log file (default: stdout)")
 	serveCmd.Flags().Float64("epsilon", 0.1, "Exploration rate for epsilon-greedy scheduler (in [0, 1]; ignored otherwise)")
+	serveCmd.Flags().Float64("alpha", 1.0, "LinUCB exploration coefficient α (in [0, 10]; ignored for other schedulers)")
 	serveCmd.Flags().String("tls-cert", "", "Path to TLS certificate file (PEM format)")
 	serveCmd.Flags().String("tls-key", "", "Path to TLS private key file (PEM format)")
 	serveCmd.Flags().String("tls-ca", "", "Path to CA certificate for client verification (mTLS)")

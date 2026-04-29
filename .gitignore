@@ -65,3 +65,10 @@ test/distributed/binaries/
 
 # E2E generated TLS assets
 test/e2e/certs/
+
+# OMC runtime state (sessions, checkpoints, project memory) — keep prd.json
+# and progress.txt only
+.omc/sessions/
+.omc/state/
+.omc/notepad.md
+.omc/project-memory.json

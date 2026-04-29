@@ -74,15 +74,16 @@ func NewEpsilonGreedyScheduler(cfg EpsilonGreedyConfig) *EpsilonGreedyScheduler 
 // Select implements the base Scheduler interface; it delegates through
 // SelectWithDispatchInfo and discards the introspection payload.
 func (s *EpsilonGreedyScheduler) Select(buildType pb.BuildType, arch pb.Architecture, clientOS string) (*registry.WorkerInfo, error) {
-	w, _, err := s.SelectWithDispatchInfo(buildType, arch, clientOS)
+	w, _, err := s.SelectWithDispatchInfo(buildType, arch, clientOS, TaskContext{})
 	return w, err
 }
 
 // SelectWithDispatchInfo implements LearningScheduler. The returned
 // DispatchInfo's QValueAtDispatch is the chosen worker's current
 // running-mean reward estimate (zero for cold workers), and
-// WasExploration reports whether the choice was random.
-func (s *EpsilonGreedyScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb.Architecture, clientOS string) (*registry.WorkerInfo, DispatchInfo, error) {
+// WasExploration reports whether the choice was random. ε-greedy is a
+// non-contextual bandit and ignores the TaskContext argument.
+func (s *EpsilonGreedyScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb.Architecture, clientOS string, _ TaskContext) (*registry.WorkerInfo, DispatchInfo, error) {
 	candidates, err := s.eligibleWorkers(buildType, arch, clientOS)
 	if err != nil {
 		return nil, DispatchInfo{}, err
@@ -107,8 +108,9 @@ func (s *EpsilonGreedyScheduler) SelectWithDispatchInfo(buildType pb.BuildType, 
 // RecordOutcome implements LearningScheduler. It updates Q(a) using the
 // incremental sample-mean formula. Failed tasks still update the
 // estimator: a worker that consistently fails should have its Q drop
-// (assuming the caller passes a punishing reward on failure).
-func (s *EpsilonGreedyScheduler) RecordOutcome(workerID string, reward float64, _ bool) {
+// (assuming the caller passes a punishing reward on failure). The
+// TaskContext is unused (ε-greedy is non-contextual).
+func (s *EpsilonGreedyScheduler) RecordOutcome(workerID string, reward float64, _ bool, _ TaskContext) {
 	if workerID == "" || math.IsNaN(reward) || math.IsInf(reward, 0) {
 		return
 	}

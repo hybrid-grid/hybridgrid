@@ -1,0 +1,8 @@
+# Hybridgrid Heterogeneous Worker Benchmark
+# Date: Wed Apr 29 13:15:46 +07 2026
+# Total resources per test: 4.0 CPU, 4.0GB RAM
+# Distribution: Unequal (some workers stronger than others)
+
+1,1w-4.0cpu,146
+3,3w-hetero,142
+5,5w-hetero,119

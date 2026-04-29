@@ -97,6 +97,10 @@ type Config struct {
 	// EpsilonValue is the exploration rate for epsilon-greedy. Ignored
 	// for other schedulers. Default 0.1 (Sutton & Barto §2.3 baseline).
 	EpsilonValue float64
+	// AlphaValue is the LinUCB exploration coefficient α (Li 2010 Eq. 4).
+	// Theoretical form is 1 + sqrt(ln(2/δ)/2); we default to 1.0 and
+	// expect empirical tuning. Ignored for non-LinUCB schedulers.
+	AlphaValue float64
 	// TaskLogPath is the path to the JSON Lines per-task log file.
 	// Empty or "stdout" routes records to standard output.
 	TaskLogPath string
@@ -133,6 +137,12 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 			Registry:       reg,
 			CircuitChecker: cm,
 			Epsilon:        eps,
+		})
+	case "linucb":
+		return scheduler.NewLinUCBScheduler(scheduler.LinUCBConfig{
+			Registry:       reg,
+			CircuitChecker: cm,
+			Alpha:          cfg.AlphaValue,
 		})
 	case "leastloaded", "":
 		return scheduler.NewLeastLoadedScheduler(reg)
@@ -446,7 +456,10 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 
 	// Select worker with tracing
 	tracing.AddEvent(ctx, "scheduler.select.start")
-	worker, dispatchInfo, err := scheduler.SelectWith(s.scheduler, pb.BuildType_BUILD_TYPE_CPP, req.TargetArch, clientOSFilter)
+	taskCtx := scheduler.TaskContext{
+		SourceSizeBytes: len(req.PreprocessedSource) + len(req.RawSource),
+	}
+	worker, dispatchInfo, err := scheduler.SelectWith(s.scheduler, pb.BuildType_BUILD_TYPE_CPP, req.TargetArch, clientOSFilter, taskCtx)
 	if err != nil {
 		span.SetStatus(otelcodes.Error, "no worker available")
 		tracing.RecordError(ctx, err)
@@ -545,7 +558,7 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 		} else {
 			reward = -math.Log1p(float64(s.config.RequestTimeout.Milliseconds()))
 		}
-		learner.RecordOutcome(worker.ID, reward, success)
+		learner.RecordOutcome(worker.ID, reward, success, taskCtx)
 	}
 
 	taskCompletedTime := time.Now()

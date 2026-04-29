@@ -44,7 +44,7 @@ func TestEpsilonGreedy_RecordsRunningMean(t *testing.T) {
 	s := NewEpsilonGreedyScheduler(EpsilonGreedyConfig{Registry: reg, Epsilon: 0})
 
 	for _, r := range []float64{1, 2, 3} {
-		s.RecordOutcome("worker-a", r, true)
+		s.RecordOutcome("worker-a", r, true, TaskContext{})
 	}
 	assert.InDelta(t, 2.0, s.qValue("worker-a"), 1e-9)
 }
@@ -62,11 +62,11 @@ func TestEpsilonGreedy_ConvergesToBestArm(t *testing.T) {
 	means := map[string]float64{"worker-a": -1, "worker-b": -2, "worker-c": -3}
 
 	for i := 0; i < 300; i++ {
-		w, _, err := s.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
+		w, _, err := s.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "", TaskContext{})
 		require.NoError(t, err)
 		// Sample reward ~ N(mean, 0.5)
 		reward := means[w.ID] + rng.NormFloat64()*0.5
-		s.RecordOutcome(w.ID, reward, true)
+		s.RecordOutcome(w.ID, reward, true, TaskContext{})
 	}
 
 	// After 300 calls, ranking of Q values should match ranking of true means.
@@ -89,13 +89,13 @@ func TestEpsilonGreedy_ExplorationRateHonored(t *testing.T) {
 
 	// Pre-train so argmaxQ is well-defined and "exploit" is distinguishable.
 	for i := 0; i < 5; i++ {
-		s.RecordOutcome(idForTest(i), float64(-i), true)
+		s.RecordOutcome(idForTest(i), float64(-i), true, TaskContext{})
 	}
 
 	const N = 1000
 	exploreCount := 0
 	for i := 0; i < N; i++ {
-		_, info, err := s.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
+		_, info, err := s.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "", TaskContext{})
 		require.NoError(t, err)
 		if info.WasExploration {
 			exploreCount++
@@ -114,7 +114,7 @@ func TestEpsilonGreedy_SingleCandidateFastPath(t *testing.T) {
 	reg := newRegistryWithWorkers(t, 1)
 	s := NewEpsilonGreedyScheduler(EpsilonGreedyConfig{Registry: reg, Epsilon: 1.0}) // ε=1 would explore every time, but with 1 candidate exploration is meaningless
 
-	w, info, err := s.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
+	w, info, err := s.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "", TaskContext{})
 	require.NoError(t, err)
 	assert.Equal(t, "worker-a", w.ID)
 	assert.False(t, info.WasExploration, "single candidate must never be reported as exploration")
@@ -127,7 +127,7 @@ func TestEpsilonGreedy_NoWorkers(t *testing.T) {
 	t.Cleanup(func() { reg.Stop() })
 	s := NewEpsilonGreedyScheduler(EpsilonGreedyConfig{Registry: reg, Epsilon: 0.1})
 
-	_, _, err := s.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
+	_, _, err := s.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "", TaskContext{})
 	assert.ErrorIs(t, err, ErrNoWorkers)
 }
 
@@ -137,9 +137,9 @@ func TestEpsilonGreedy_RecordOutcomeIgnoresInvalidInputs(t *testing.T) {
 	reg := newRegistryWithWorkers(t, 1)
 	s := NewEpsilonGreedyScheduler(EpsilonGreedyConfig{Registry: reg, Epsilon: 0.1})
 
-	s.RecordOutcome("", 1.0, true)
-	s.RecordOutcome("worker-a", math.NaN(), true)
-	s.RecordOutcome("worker-a", math.Inf(1), true)
+	s.RecordOutcome("", 1.0, true, TaskContext{})
+	s.RecordOutcome("worker-a", math.NaN(), true, TaskContext{})
+	s.RecordOutcome("worker-a", math.Inf(1), true, TaskContext{})
 	assert.Equal(t, 0.0, s.qValue("worker-a"))
 }
 
@@ -157,11 +157,11 @@ func TestEpsilonGreedy_ConcurrentSafe(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < iterations; i++ {
-				w, _, err := s.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
+				w, _, err := s.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "", TaskContext{})
 				if err != nil {
 					return
 				}
-				s.RecordOutcome(w.ID, -float64(i), true)
+				s.RecordOutcome(w.ID, -float64(i), true, TaskContext{})
 			}
 		}()
 	}
@@ -184,7 +184,7 @@ func TestSelectWith_FallsBackForNonLearners(t *testing.T) {
 	reg := newRegistryWithWorkers(t, 2)
 	ll := NewLeastLoadedScheduler(reg)
 
-	w, info, err := SelectWith(ll, pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
+	w, info, err := SelectWith(ll, pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "", TaskContext{})
 	require.NoError(t, err)
 	require.NotNil(t, w)
 	assert.Equal(t, DispatchInfo{}, info)
@@ -195,9 +195,9 @@ func TestSelectWith_FallsBackForNonLearners(t *testing.T) {
 func TestSelectWith_UsesLearnerInterface(t *testing.T) {
 	reg := newRegistryWithWorkers(t, 2)
 	s := NewEpsilonGreedyScheduler(EpsilonGreedyConfig{Registry: reg, Epsilon: 0})
-	s.RecordOutcome("worker-b", 5.0, true) // make worker-b clearly best
+	s.RecordOutcome("worker-b", 5.0, true, TaskContext{}) // make worker-b clearly best
 
-	_, info, err := SelectWith(s, pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
+	_, info, err := SelectWith(s, pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "", TaskContext{})
 	require.NoError(t, err)
 	// Q for worker-b is 5.0; worker-a is 0.
 	assert.InDelta(t, 5.0, info.QValueAtDispatch, 1e-9)

@@ -1,0 +1,144 @@
+{
+  "title": "Hybrid-Grid LinUCB Scheduler — Code + Theory + Paper + Thesis Report Completion",
+  "context": "User requested Ralph mode until everything is done: code (M3 LinUCB + HEFT baseline + statistical reps), theory (research-backed citations), benchmark vs baseline, English paper draft, and Vietnamese thesis report. Evidence-based throughout — no speculation.",
+  "stories": [
+    {
+      "id": "US-001",
+      "title": "ε-greedy benchmark completes and findings extracted",
+      "priority": 1,
+      "passes": true,
+      "acceptanceCriteria": [
+        "tasks-epsilon-greedy.jsonl saved under .sisyphus/evidence/m1/",
+        "benchmark-epsilon-greedy-results.txt saved under .sisyphus/evidence/m1/",
+        "findings.md updated with ε-greedy column in wall-clock and load-balance tables",
+        "Q-value distribution and exploration ratio analysis added to findings.md"
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "Implement LinUCB scheduler (Go code)",
+      "priority": 2,
+      "passes": true,
+      "acceptanceCriteria": [
+        "internal/coordinator/scheduler/linucb.go implements LinUCBScheduler with per-arm A and b matrices",
+        "Sherman-Morrison update keeps cost O(d²) per RecordOutcome (verified by code inspection)",
+        "Feature vector construction matches paper-skeleton.md §3.3 (12 features)",
+        "Implements LearningScheduler interface; SelectWithDispatchInfo populates Q value as θᵀx",
+        "All math verified against Li et al. 2010 §3.2 algorithm description (cite specific equation numbers in code comments)",
+        "Uses gonum/mat for numerical linear algebra (no hand-rolled matrix ops)",
+        "Unit tests (≥6) cover: argmax UCB selection, A and b updates, cold start, concurrent safety, feature normalization, regret-decreasing trend on synthetic data"
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Wire LinUCB into factory, CLI, log schema",
+      "priority": 3,
+      "passes": false,
+      "acceptanceCriteria": [
+        "newScheduler factory accepts \"linucb\" type",
+        "--alpha CLI flag added to hg-coord serve, validated to (0, 10]",
+        "Config gains AlphaValue float64 field with default 1.0 (Li 2010 §3.2 prescription)",
+        "Compile() feedback hook supplies feature vector via TaskContext",
+        "Integration test verifies LinUCB choice path produces valid log records",
+        "go build clean and go test -race ./internal/coordinator/... pass"
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Run LinUCB benchmark and append to findings",
+      "priority": 4,
+      "passes": false,
+      "acceptanceCriteria": [
+        "tasks-linucb.jsonl saved with ≥800 records under .sisyphus/evidence/",
+        "Wall-clock numbers added to findings.md table for 1w/3w/5w configs",
+        "Per-worker dispatch ratio computed and reported",
+        "P50/P95/P99 compile_time_ms reported",
+        "Q value learning curve over time included in evidence (CSV or PNG)"
+      ]
+    },
+    {
+      "id": "US-005",
+      "title": "Theoretical research depth — subagent-driven",
+      "priority": 5,
+      "passes": false,
+      "acceptanceCriteria": [
+        "Subagent (document-specialist) produces research note covering: LinUCB regret bound under non-stationarity (Lattimore & Szepesvári 2020 ch.19), reward-shaping pitfalls (Ng et al. 1999), and bandits-vs-MDP framing for our problem",
+        "docs/thesis/theory-notes.md written with citations to peer-reviewed sources only (DOI required for each)",
+        "Each citation independently verified by a second subagent (general-purpose) returning either a confirmation or a correction",
+        "No claim in theory-notes.md lacks an inline citation"
+      ]
+    },
+    {
+      "id": "US-006",
+      "title": "HEFT baseline implementation (offline-style, adapted to online)",
+      "priority": 6,
+      "passes": false,
+      "acceptanceCriteria": [
+        "internal/coordinator/scheduler/heft.go implements an online adaptation of Topcuoglu et al. 2002 HEFT (DOI 10.1109/71.993206)",
+        "Code comments cite specific paper sections for each design decision (insertion-based, EFT, rank function — or document deviation)",
+        "Wired into factory + CLI as --scheduler=heft",
+        "≥4 unit tests covering: candidate ranking, insertion logic when slot conflicts, fallback behaviour, concurrency",
+        "Build clean + race tests pass"
+      ]
+    },
+    {
+      "id": "US-007",
+      "title": "Run HEFT benchmark and add to comparison",
+      "priority": 7,
+      "passes": false,
+      "acceptanceCriteria": [
+        "tasks-heft.jsonl + benchmark-heft-results.txt saved under .sisyphus/evidence/",
+        "findings.md updated with HEFT column",
+        "Comparison narrative explains where HEFT is competitive and where the bandit methods exceed it"
+      ]
+    },
+    {
+      "id": "US-008",
+      "title": "Paper full draft — sections §3 Method, §5 Evaluation, §6 Discussion",
+      "priority": 8,
+      "passes": false,
+      "acceptanceCriteria": [
+        "paper-skeleton.md sections §3.2-§3.4 fully expanded with prose and equations (no placeholders)",
+        "§5.2-§5.4 tables filled with all four scheduler columns (LeastLoaded, P2C, ε-greedy, LinUCB) and HEFT row added",
+        "§5.5 ablation section drafted with at least 3 ablation studies described and one executed",
+        "§6 Discussion drafted (≥1 page)",
+        "All citations have DOI or ArXiv ID"
+      ]
+    },
+    {
+      "id": "US-009",
+      "title": "Vietnamese thesis report — full chapter draft for scheduling",
+      "priority": 9,
+      "passes": false,
+      "acceptanceCriteria": [
+        "docs/thesis/chuong-X-lap-lich.md written (≥6 pages, formal academic Vietnamese)",
+        "Sections: bài toán → phương pháp → triển khai → đánh giá → thảo luận",
+        "Referenced as a chapter that the supervisor (GVHD) can review",
+        "Numerical results from .sisyphus/evidence/ embedded as tables"
+      ]
+    },
+    {
+      "id": "US-010",
+      "title": "Statistical significance — multi-repetition runs",
+      "priority": 10,
+      "passes": false,
+      "acceptanceCriteria": [
+        "Each scheduler benchmark run ≥5 times on the 5w-hetero config",
+        "Mean ± standard deviation reported in findings.md and paper §5.2",
+        "Paired statistical test (Wilcoxon signed-rank) computed for LinUCB vs P2C and reported with p-value"
+      ]
+    },
+    {
+      "id": "US-011",
+      "title": "Final commit/push and reviewer sign-off",
+      "priority": 11,
+      "passes": false,
+      "acceptanceCriteria": [
+        "All changes committed using conventional commit format",
+        "Pushed to origin/main",
+        "go build clean, go test -race ./... pass (excluding known-flaky Docker integration)",
+        "Reviewer (architect or critic) approves the implementation against acceptance criteria"
+      ]
+    }
+  ]
+}
