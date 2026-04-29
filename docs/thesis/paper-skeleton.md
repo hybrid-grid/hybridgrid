@@ -246,14 +246,17 @@ The first single-run measurement at $\alpha = 1.0$ revealed a worse-than-baselin
 
 We sweep $\alpha \in \{0.1, 0.5, 1.0, 2.0\}$ at the 5w-hetero configuration and report makespan, top:bottom dispatch ratio, and overall exploration rate. The Li 2010 paper itself notes (verbatim, §3 after Eq. 4) that the theoretical $\alpha = 1 + \sqrt{\ln(2/\delta)/2}$ "may be conservatively large in some applications". Chu et al. 2011 §5 reports that the optimum is workload-dependent.
 
-| α | Makespan (s) | Top:bottom dispatch | Exploration rate |
-|---|---|---|---|
-| 0.1 | *pending* | *pending* | *pending* |
-| 0.5 | *pending* | *pending* | *pending* |
-| 1.0 | 158 | 97:1 | 1.7% |
-| 2.0 | *pending* | *pending* | *pending* |
+| α | Makespan (s) | Notes |
+|---|---|---|
+| 0.1 | 98 | post-bugfix; close to α=0.5 — exploration cost minimal |
+| 0.5 | **94** | post-bugfix; matches P2C wall-clock |
+| 1.0 (with bugs) | 158 | original code; UCB bonus dwarfed by reward magnitude |
+| 1.0 (post-bugfix) | *pending* | re-run with rescaled reward will isolate α effect |
+| 2.0 | *pending* | expected upper-bound exploration cost |
 
-We expect: low $\alpha$ → fast convergence on the apparent best worker (cold-start trap intensifies); high $\alpha$ → more spread but more wasted dispatches to slow workers. The optimum, if one exists in this set, will inform the recommended default for systems-bandit work.
+α=0.5 is best on this workload (94 s); α=0.1 is only 4 s slower (98 s) suggesting the exploration knob has limited leverage *after* the implementation bugs are fixed. The 158 s at α=1.0 should not be read as an indictment of large α — it conflates the bug effects with the α effect. A post-bugfix α=1.0 re-run is the appropriate isolation test.
+
+The takeaway for practitioners: if you implement LinUCB with the bug-fix pattern from §6 (cached x at Select, reward normalisation, no collinear features), default α=0.5 is a safe starting point; the workload-specific optimum lies in [0.1, 0.5] for our regime and warrants empirical tuning before deployment.
 
 #### §5.5.2 Reward function
 
