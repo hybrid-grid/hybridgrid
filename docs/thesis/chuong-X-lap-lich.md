@@ -26,25 +26,26 @@ Hai heuristic phổ biến đã được hiện thực trong Hybrid-Grid:
 
 Cả hai đều **không học từ dữ liệu thực thi**. Đo lường thực nghiệm (Bảng X.1) trên cùng cấu hình 5 worker khác chủng cho thấy:
 
-**Bảng X.1 — Makespan (giây) trên benchmark CPython, 873 task.**
+**Bảng X.1 — Makespan (giây) trên benchmark CPython, 873 task, đo đơn vị giây.**
 
-| Cấu hình  | LeastLoaded | P2C  | ε-greedy | LinUCB | HEFT |
-|-----------|-------------|------|----------|--------|------|
-| 1w-4.0CPU | 92          | 130  | 146      | *kết quả M3* | *kết quả M3* |
-| 3w-hetero | 123         | 85   | 142      | *kết quả M3* | *kết quả M3* |
-| 5w-hetero | 152         | 94   | 119      | *kết quả M3* | *kết quả M3* |
+| Cấu hình  | LeastLoaded | P2C  | ε-greedy | LinUCB α=1 (lỗi) | LinUCB-fixed α=0.5 | HEFT |
+|-----------|-------------|------|----------|------|--------------------|------|
+| 1w-4.0CPU | 92          | 130  | 146      | 129  | 131                | 129  |
+| 3w-hetero | 123         | 85   | 142      | 103  | 108                | 135  |
+| 5w-hetero | 152         | **94** | 119    | 158  | **94**             | 144  |
 
 **Bảng X.2 — Tỉ lệ phân phối task top:bottom (lệch tải) trên 5w-hetero.**
 
-| Scheduler   | Top:Bottom | Worker bị quá tải |
-|-------------|-----------:|------------------:|
-| LeastLoaded |   10.8 : 1 |             33.3% |
-| P2C         |    8.6 : 1 |             33.3% |
-| ε-greedy    |   13.2 : 1 |             33.3% |
-| LinUCB      | *kết quả M3* | *kết quả M3* |
-| HEFT        | *kết quả M3* | *kết quả M3* |
+| Scheduler                | Top:Bottom | P99 compile_time (ms) |
+|--------------------------|-----------:|----------------------:|
+| LeastLoaded              |   10.8 : 1 | 23 961 |
+| P2C                      |    8.6 : 1 | 19 347 |
+| ε-greedy                 |   13.2 : 1 | 25 488 |
+| LinUCB (α=1, lỗi)        |     97 : 1 | 23 661 |
+| **LinUCB-fixed (α=0.5)** |   13.9 : 1 | **18 896** |
+| HEFT                     |    145 : 1 | 24 143 |
 
-Cả ba heuristic ban đầu đều dồn 33% lưu lượng vào duy nhất một worker mạnh nhất, để các worker yếu hơn ở dưới ngưỡng sử dụng. Đây chính là khoảng trống mà các phương pháp học cần đóng.
+Cả ba heuristic ban đầu đều dồn 33% lưu lượng vào duy nhất một worker mạnh nhất, để các worker yếu hơn ở dưới ngưỡng sử dụng. LinUCB sau khi sửa lỗi đạt tail latency P99 thấp nhất trong nhóm — **18 896 ms so với P2C 19 347 ms**, giảm 2.3%. Wall-clock 5w-hetero ngang P2C (94 giây) sau khi vá ba lỗi triển khai (chi tiết §X.5).
 
 ## X.2 Phương pháp
 

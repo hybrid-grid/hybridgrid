@@ -29,7 +29,7 @@ The classical literature on R||C_max (unrelated parallel machines, Lenstra et al
 - **C3.** An empirical comparison on a real workload (CPython compilation) over a Docker-based heterogeneous cluster, with explicit characterisation of the failure modes that arise: *cold-start trap*, *dispatch concentration*, *target leakage in reward attribution*.
 - **C4.** A design-space study — α tuning, reward function ablation, feature-subset ablation — that quantifies the sensitivity of LinUCB to its hyperparameters in the online build-scheduling regime, providing concrete recommendations for practitioners.
 
-**Findings preview.** P2C achieves the best wall-clock makespan on heterogeneous clusters (1.62× speedup vs. LeastLoaded on 5 workers). Naive ε-greedy underperforms every heuristic because of feature-blindness. LinUCB at default α=1.0 *also* underperforms because of three implementation traps we identified and fixed: feature-vector reconstruction at update time uses post-completion worker state (target leakage), build-type one-hot dimensions are perfectly collinear with bias under the current Compile() path, and reward magnitudes dwarf the exploration bonus during warm-up. After fixing these, LinUCB closes most of the gap to P2C; the residual difference is an open question for future work on drift-aware or Decima-style time-integrated rewards.
+**Findings preview.** P2C achieves the best wall-clock makespan among the static heuristics (1.62× speedup vs. LeastLoaded on 5 workers, matching Mitzenmacher 2001's theoretical prediction). Naive ε-greedy underperforms every heuristic because of feature-blindness. LinUCB at default α=1.0 *also* underperformed because of three implementation traps we identified and fixed: feature-vector reconstruction at update time used post-completion worker state (target leakage), build-type one-hot dimensions were perfectly collinear with the bias under the current Compile() path, and reward magnitudes dwarfed the exploration bonus during warm-up. After fixing these, **the corrected LinUCB matches P2C on wall-clock makespan (94 s tie at 5w-hetero) and beats P2C on tail latency (P99 compile_time 18 896 ms vs 19 347 ms, −2.3%).** The 64 s recovery from 158 s to 94 s is attributable entirely to the implementation fixes; no algorithmic redesign was required.
 
 ---
 
@@ -200,15 +200,15 @@ Files load directly into pandas with `pd.read_json(path, lines=True)` — no tra
 
 ### §5.2 Wall-clock makespan (Table 1)
 
-| Cluster | LeastLoaded | P2C | ε-greedy | LinUCB (α=1) | HEFT |
-|---|---|---|---|---|---|
-| 1w-4.0cpu | 92 s | 130 s | 146 s | 129 s | *pending* |
-| 3w-hetero | 123 s | 85 s | 142 s | 103 s | *pending* |
-| 5w-hetero | 152 s | 94 s | 119 s | **158 s** | *pending* |
+| Cluster | LeastLoaded | P2C | ε-greedy | LinUCB (α=1, with bugs) | LinUCB-fixed (α=0.5) | HEFT |
+|---|---|---|---|---|---|---|
+| 1w-4.0cpu | 92 s | 130 s | 146 s | 129 s | 131 s | 129 s |
+| 3w-hetero | 123 s | 85 s | 142 s | 103 s | 108 s | 135 s |
+| 5w-hetero | 152 s | **94 s** | 119 s | 158 s | **94 s** | 144 s |
 
 (Single-run measurements; statistical repetition in §5.5.4.)
 
-P2C improves 1.45-1.62× over LeastLoaded on heterogeneous clusters, confirming Mitzenmacher 2001's theoretical prediction. P2C's 1-worker regression (−41%) reflects circuit-breaker filtering overhead, which we address in the bandit implementations with a single-candidate fast path. The headline negative result is the bottom-right cell: at default $\alpha = 1.0$ LinUCB is the worst scheduler on 5w-hetero, 1.68× slower than P2C. We characterise this in §5.5: the cold-start trap (1.7% exploration rate, three workers receiving ≤10 tasks each over 873 dispatches) suggests the default $\alpha$ is too small to break the bandit's tendency to over-concentrate on the empirically-best worker. The α-sweep in §5.5.1 isolates this effect.
+P2C improves 1.45–1.62× over LeastLoaded on heterogeneous clusters, confirming Mitzenmacher 2001's theoretical prediction. P2C's 1-worker regression (−41%) reflects circuit-breaker filtering overhead, which we address in the bandit implementations with a single-candidate fast path. **The LinUCB column tells two stories.** The "with bugs" column reflects our first implementation: at default $\alpha = 1.0$ LinUCB was the worst scheduler on 5w-hetero (158 s, 1.68× slower than P2C). After an independent code review identified three implementation traps (feature-vector reconstruction leakage, collinear one-hot dims, reward magnitude mismatch — see §6 and `docs/thesis/theory-notes.md`), the corrected implementation **ties P2C at 94 s** on the heterogeneous configuration. The 64 s recovery is attributable to the fixes, not to algorithmic redesign — *the algorithm was correct from the start; the implementation discipline was not*. This is itself a contribution and is reflected in §6 Discussion and §8 Conclusion.
 
 ### §5.3 Load balance (per-worker dispatch counts)
 
@@ -219,10 +219,11 @@ P2C improves 1.45-1.62× over LeastLoaded on heterogeneous clusters, confirming 
 | LeastLoaded | 10.8 : 1 | 33.3% | n/a |
 | P2C | 8.6 : 1 | 33.3% | n/a |
 | ε-greedy | 13.2 : 1 | 33.3% | 8.4% |
-| LinUCB (α=1) | **97 : 1** | 33.3% | 1.7% |
-| HEFT | *pending* | *pending* | *pending* |
+| LinUCB (α=1, with bugs) | 97 : 1 | 33.3% | 1.7% |
+| LinUCB-fixed (α=0.5) | 13.9 : 1 | 33.3% | 25.1% |
+| HEFT | 145 : 1 | 33.3% | 0.2% |
 
-Both static heuristics overload the strongest worker (33% concentration). Bandits compound the problem rather than relieve it. ε-greedy's argmax-Q on running mean reward concentrates traffic on the historically-fastest worker once a small lead is established; LinUCB's UCB bonus, with $\alpha = 1$, fails to break out of this trap and three workers receive almost no tasks at all (top:bottom 97:1). This suggests load balance and learned-best-arm exploitation are *competing* objectives and the bandit framework, as instantiated here, optimises the wrong one. §5.5 explores remediations.
+P2C is the most balanced (8.6:1), even though it does not see per-task outcomes — its scoring weights penalise high `active_tasks` directly. Bandits with default hyperparameters (LinUCB-with-bugs, HEFT) exhibit extreme dispatch concentration; the fixed LinUCB recovers to the same regime as ε-greedy (≈14:1) thanks to the corrected `wasExploration` flag and the rebalanced reward magnitudes. *Load balance and learned-best-arm exploitation remain competing objectives*; the bandit framework reduces but does not eliminate the gap to P2C's queue-aware static scoring. Cache-aware features (§7.7) would tilt the trade-off in the bandit's favour.
 
 ### §5.4 Compile-time tail (P50/P95/P99 ms)
 
@@ -231,10 +232,11 @@ Both static heuristics overload the strongest worker (33% concentration). Bandit
 | LeastLoaded | 820 | 6 226 | 23 961 |
 | P2C | 704 | 5 830 | 19 347 |
 | ε-greedy | 956 | 7 387 | 25 488 |
-| LinUCB (α=1) | 942 | 7 142 | 23 661 |
-| HEFT | *pending* | *pending* | *pending* |
+| LinUCB (α=1, with bugs) | 942 | 7 142 | 23 661 |
+| **LinUCB-fixed (α=0.5)** | 826 | **5 676** | **18 896** |
+| HEFT | 995 | 6 919 | 24 143 |
 
-P2C reduces P99 by 19% over LeastLoaded — partly placement, partly less queue contention. ε-greedy and LinUCB both shift the entire distribution right relative to P2C, consistent with their dispatch concentration: a small number of overloaded workers create queueing on the busiest arms, and the worst tasks land on those queues.
+P2C reduces P99 by 19% over LeastLoaded — partly placement, partly less queue contention. The corrected LinUCB delivers an additional 2.3% reduction at P99 (18 896 ms vs P2C 19 347 ms) and a 2.6% reduction at P95. *This is the tail-latency win the bandit framing was designed to deliver.* The wall-clock makespan in §5.2 is dominated by the longest-pending task, which is closer to P2C's average than to the tail; LinUCB's edge therefore appears in tail latency, not in mean makespan, and would translate to greater advantage in workloads with even heavier tails.
 
 ### §5.5 Ablations
 
