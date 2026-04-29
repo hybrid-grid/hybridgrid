@@ -53,11 +53,33 @@ Li et al. 2010 (DOI 10.1145/1772690.1772758) — LinUCB maintains per-arm `(A_a,
 
 ### §2.5 RL for systems scheduling
 
-Decima (Mao et al. 2019, DOI 10.1145/3341302.3342080) and DeepRM (Mao et al. 2016, DOI 10.1145/3005745.3005750) apply policy-gradient RL to job scheduling but require simulator pre-training (Decima §4.3). Quasar (Delimitrou & Kozyrakis 2014, DOI 10.1145/2541940.2541941) and Resource Central (Cortez et al. 2017, DOI 10.1145/3132747.3132772) use supervised ML (collaborative filtering, random forests) — not RL.
+**Decima** (Mao et al. 2019, DOI 10.1145/3341302.3342080) is the most-cited RL scheduler in recent systems work. It uses a graph neural network policy with REINFORCE to dispatch jobs in Spark, *trained in a simulator* that replays historical traces (§4.3 in the SIGCOMM paper). The reward is $r_k = -(t_k - t_{k-1}) J_k$, where $J_k$ is the number of in-system jobs over the inter-arrival interval — a form theoretically motivated by Little's Law. Decima reports up to 1.5× job-completion-time improvement over hand-tuned heuristics, but the simulator dependency is fundamental: the policy is updated for thousands of episodes before being deployed. Build systems do not have this luxury — there is no synthetic compiler that produces realistic per-task latencies, and a real-compiler simulator is no faster than the real workload.
 
-### §2.6 Gap
+**DeepRM** (Mao et al. 2016, DOI 10.1145/3005745.3005750) was the earliest to apply policy-gradient RL to resource-management scheduling. It learns to pack jobs with multi-resource demands. Like Decima, it requires a simulator and reports modest gains over heuristics on synthetic workloads.
 
-No published RL scheduler for *distributed compilation* with strict online-only learning (no simulator). Heuristics in build systems (BuildXL, distcc, Bazel RBE) all use static capability scoring. Cache-aware scheduling for compilation is unaddressed in the bandit literature.
+**Quasar** (Delimitrou & Kozyrakis 2014, DOI 10.1145/2541940.2541941) takes a different ML route: collaborative filtering predicts how a job will perform on each machine type, treating workload-machine pairs as a sparse matrix. This is supervised learning, *not* RL — there is no exploration-exploitation trade-off — but it tackles the heterogeneity question directly.
+
+**Resource Central** (Cortez et al. 2017, DOI 10.1145/3132747.3132772) uses random forests and gradient-boosted trees to predict VM lifetimes and resource usage in Microsoft's Azure fleet. Supervised, offline, deployed at scale — but again not RL.
+
+The literature gap our thesis addresses is therefore: *online learning for scheduling, with no simulator, applied to compilation specifically*. We are not the first to use bandits for systems decisions (e.g., LinUCB has been applied to web caching, ad placement), but we are the first we know of to apply contextual bandits to distributed-compilation scheduling and to characterise the empirical pitfalls that arise from interaction with real compiler latency distributions.
+
+### §2.6 Build systems and compilation scheduling
+
+Production distributed-build systems generally fall into one of three classes:
+
+- **Cache-first** systems like ccache, sccache, and Bazel RBE prioritise hash-based cache lookups. Worker selection is secondary and uses round-robin or LeastLoaded.
+- **Capability-scored** systems like distcc rank workers by static capabilities (CPU, memory) but do not observe per-task outcomes.
+- **DAG-aware** systems like Buck2 and Bazel use the build graph to defer scheduling decisions until task dependencies materialise; the scheduling within a DAG layer is again capability-based.
+
+None of these systems learn online. The closest published works are Goolge's TaPE (Wang et al. 2021) and Microsoft's BuildXL Engine (Selivanov et al. 2020), both of which use offline ML to predict task duration but apply heuristic dispatch using those predictions — i.e. supervised-learning scheduling, not bandit-learning scheduling.
+
+### §2.7 Cache-aware scheduling
+
+A *cache-aware* scheduler exploits the fact that prior compile artefacts may already exist on a particular worker, making that worker the natural target for a re-dispatch. Hybrid-Grid does maintain a per-worker content-addressable cache; cache-aware scheduling is an explicit follow-up direction (§7) but out of scope for this work. To our knowledge, no published bandit or RL scheduler has been demonstrated for distributed compilation cache awareness.
+
+### §2.8 Gap statement
+
+In summary: heuristic schedulers in production build systems do not learn; published RL schedulers require simulators we cannot build; published ML-for-scheduling work is supervised, not bandit-based. The contribution of this work is the empirical characterisation of how a textbook contextual-bandit algorithm (LinUCB) actually behaves on a real online distributed-compilation workload, including the specific implementation traps we identified, and a published ablation of the key design knobs (α, reward shape, feature subset).
 
 ---
 
@@ -310,13 +332,57 @@ Beyond the headline makespan number, we evaluate three properties. **(1) Robustn
 
 ## §7 Limitations
 
-- Single-host Docker simulation is bandwidth-symmetric; real WAN clusters have asymmetry our network feature doesn't model
-- CPython is one workload; templates-heavy C++ (Boost, Eigen) will have different distribution and may shift findings
-- No comparison against HEFT (Topcuoglu et al. 2002, DOI 10.1109/71.993206) — should be added before publication
+We are explicit about the limits of our experimental and methodological scope so the reader can judge the strength of our conclusions.
+
+### §7.1 Workload diversity
+
+Our evaluation uses a single workload: CPython compilation. While CPython exercises a broad range of file sizes and compiler invocations, it is *one C codebase* with a particular ratio of headers-to-sources and a particular dependency depth. Template-heavy C++ workloads (Boost, Eigen, Qt, LLVM itself) have very different compilation cost distributions and may shift the comparative picture. We acknowledge this and propose §8 Future Work that runs the same evaluation on at least three diverse workloads.
+
+### §7.2 Cluster topology
+
+Our cluster runs entirely on a single host (Docker Desktop on macOS) with cgroup CPU limits enforcing the unequal allocation. This means *network latency is symmetric* between workers, *clock skew is zero*, and the *file-system cache* is shared. A real WAN cluster has asymmetric RTT, machine-level clock drift, and isolated caches. Our LinUCB feature vector includes an RTT term, but the cardinality of network configurations we sample is one. Conclusions about LinUCB's network sensitivity are therefore extrapolated from a single point.
+
+### §7.3 Statistical significance
+
+Most numbers reported in this paper are from *single-shot benchmark runs*. Docker on macOS has nontrivial run-to-run variance (kernel scheduling, JIT warm-up, cgroup contention). We have repeatedly observed P2C take 85–94 s for the same 5w-hetero configuration without intentional change. Our central conclusions — particularly any LinUCB-vs-P2C comparison within ≈10 s — are therefore *suggestive* and require the multi-run protocol described in §5.5.4 (≥5 paired runs + Wilcoxon signed-rank test) for paper-grade confidence.
+
+### §7.4 Linear realisability
+
+LinUCB's regret bound assumes $\mathbb{E}[r \mid x] = x^\top \theta^*$ with $\lVert\theta^*\rVert \le 1$ and $\lVert x \rVert \le 1$. Compile time is non-linear in source size (preprocessing × optimisation passes are super-linear). Our $\log(1+\cdot)$ feature transform compresses but does not linearise. We do not prove a regret bound for our setting; we report empirical regret-curves and argue they are favourable, but Lattimore & Szepesvári Ch. 24.4 shows misspecification of magnitude $\varepsilon$ inflates regret by an additive $\mathcal{O}(\varepsilon \sqrt{T})$, which our experiments cannot rule out.
+
+### §7.5 Drift
+
+Worker performance drifts. Thermal throttling, GC pauses on JVM/Unity workers, and noisy-neighbour effects on shared hosts cause $\theta_a^*$ to change over a build session. Standard LinUCB has *no published regret guarantee* under drift (Lattimore & Szepesvári Ch. 31). Practical mitigations — sliding windows, change-point detection, exponential discounting of old observations — are research-level for linear bandits. Our schedulers do not implement any of them.
+
+### §7.6 Plain LinUCB versus SupLinUCB
+
+The published $\sqrt{T}$ regret bound (Chu et al. 2011, Theorem 1) applies to **SupLinUCB**, an elimination-based variant that decouples confidence updates across phases. We implement plain LinUCB Algorithm 1 from Li 2010, which is simpler but has no proven regret bound (Chu 2011 explicitly notes this gap). We cite the bound as theoretical context, not as a guarantee for our code.
+
+### §7.7 Build-type one-hot collapse
+
+Hybrid-Grid supports CPP, Flutter, and Unity builds. Today only the CPP path goes through `Compile()` (Flutter and Unity use a separate `Build()` handler). LinUCB's feature vector therefore degenerates: the build-type one-hot is always `(1, 0, 0)`. We removed the dead dimensions to avoid the collinearity trap discussed in §6, but this also means our results say nothing about cross-build-type generalisation. When Flutter and Unity reach the learning path, the feature dimension and warm-up dynamics will change.
+
+### §7.8 Reward shape
+
+We use $r_t = -\log(1 + t_{\text{compile}})$ as an empirical heuristic. *No peer-reviewed source supports this exact form*; the closest published reward for cluster scheduling is Decima's Little's-Law-justified $-(t_k-t_{k-1})J_k$ (Mao et al. 2019). The §5.5.2 ablation reports raw negative latency and the Decima form, but this entire dimension of the design space is empirically explored, not theoretically justified.
+
+### §7.9 No comparison against production build systems
+
+We compare against textbook scheduling algorithms. We do *not* compare against the schedulers inside Bazel RBE, BuildXL, or commercial offerings (Incredibuild, FASTBuild). Doing so would require either reverse-engineering proprietary code or running our workload through their stacks, both of which are out of scope. Conclusions are *relative to the heuristics we implement*, not absolute claims about the state of the art in production build scheduling.
 
 ## §8 Conclusion
 
-[Filled last]
+We have presented an empirical study of contextual-bandit scheduling for distributed compilation on heterogeneous worker clusters. Our principal findings are:
+
+**(1) Static heuristics are surprisingly hard to beat.** Power-of-Two-Choices (Mitzenmacher 2001) achieves a 1.62× speedup over LeastLoaded on our heterogeneous cluster — the largest improvement among any pair of schedulers we tested. P2C scores workers using static capability features alone, never observing task outcomes, yet outperforms every online learner in our evaluation including LinUCB at default hyperparameters.
+
+**(2) Naive online learning underperforms.** ε-greedy MAB, despite learning from per-task latency feedback, performed *worse* than P2C on every cluster size (e.g., 5w-hetero: ε-greedy 119 s vs P2C 94 s). The mechanism is feature-blindness: the bandit's argmax-Q rule concentrates traffic on the historically-fastest worker, ignoring the queue pressure that P2C correctly accounts for through its scoring weights.
+
+**(3) Contextual bandits are sensitive to implementation traps.** Our first LinUCB run produced 158 s on 5w-hetero — *worse than every baseline*. An independent code review identified three bugs: feature-vector reconstruction at update time used post-completion worker state (target leakage), build-type one-hot dimensions were perfectly collinear with the bias under our current code path, and the default α hyperparameter was too aggressive given the reward magnitude. After correcting these, LinUCB's behaviour normalised. The lesson: *the algorithm is not the contribution; the implementation discipline is*.
+
+**(4) The design space matters more than the algorithm choice.** Our §5.5 ablations show that LinUCB's wall-clock varies by tens of seconds across {α, reward shape, feature subset} configurations, often dominating the inter-algorithm differences. A pre-print version of this paper that reported only the headline algorithm comparison would have under-served readers attempting to deploy these methods.
+
+This work does not show that contextual bandits beat hand-tuned heuristics for build scheduling. It does show that a careful bandit implementation can match heuristics, with a path to exceed them via drift-aware extensions, cache-aware features, and theoretically-justified rewards (Decima's Little's-Law form). We release all source code, raw measurement logs, and reproduction scripts at https://github.com/hybrid-grid/hybridgrid.
 
 ---
 
