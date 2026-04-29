@@ -246,17 +246,18 @@ The first single-run measurement at $\alpha = 1.0$ revealed a worse-than-baselin
 
 We sweep $\alpha \in \{0.1, 0.5, 1.0, 2.0\}$ at the 5w-hetero configuration and report makespan, top:bottom dispatch ratio, and overall exploration rate. The Li 2010 paper itself notes (verbatim, §3 after Eq. 4) that the theoretical $\alpha = 1 + \sqrt{\ln(2/\delta)/2}$ "may be conservatively large in some applications". Chu et al. 2011 §5 reports that the optimum is workload-dependent.
 
-| α | Makespan (s) | Notes |
-|---|---|---|
-| 0.1 | 98 | post-bugfix; close to α=0.5 — exploration cost minimal |
-| 0.5 | **94** | post-bugfix; matches P2C wall-clock |
-| 1.0 (with bugs) | 158 | original code; UCB bonus dwarfed by reward magnitude |
-| 1.0 (post-bugfix) | *pending* | re-run with rescaled reward will isolate α effect |
-| 2.0 | *pending* | expected upper-bound exploration cost |
+| α | 5w-hetero (s) | 3w-hetero (s) | 1w-4.0cpu (s) | Notes |
+|---|---|---|---|---|
+| 0.1 | 98 | 111 | 132 | post-bugfix; close to α=0.5 — exploration cost minimal |
+| 0.5 | **94** | 108 | 131 | post-bugfix; matches P2C wall-clock |
+| 1.0 (with bugs) | 158 | 103 | 129 | original code; UCB bonus dwarfed by reward magnitude — *don't read as α effect* |
+| 2.0 | 96 | 88 | 85 | post-bugfix; competitive on 5w, surprising 1w win likely run noise |
 
-α=0.5 is best on this workload (94 s); α=0.1 is only 4 s slower (98 s) suggesting the exploration knob has limited leverage *after* the implementation bugs are fixed. The 158 s at α=1.0 should not be read as an indictment of large α — it conflates the bug effects with the α effect. A post-bugfix α=1.0 re-run is the appropriate isolation test.
+**α=0.5 is best on the 5w-hetero target (94 s)**; α=0.1 trails by 4 s and α=2.0 by 2 s — within the noise band of single-shot Docker-on-macOS runs. The 158 s at α=1.0 conflates bug effects with α effects and should be excluded from the α-effect comparison. A clean post-bugfix α=1.0 isolation run is queued.
 
-The takeaway for practitioners: if you implement LinUCB with the bug-fix pattern from §6 (cached x at Select, reward normalisation, no collinear features), default α=0.5 is a safe starting point; the workload-specific optimum lies in [0.1, 0.5] for our regime and warrants empirical tuning before deployment.
+The 1w-4.0cpu column shows substantial variance (85 s for α=2.0 vs 132 s for α=0.1) — but this configuration uses the single-candidate fast path that bypasses α entirely, so any difference is *purely run-to-run noise*. This itself is useful evidence: single-shot benchmarks under Docker have a noise floor of roughly ±25 s on this host, motivating the multi-run protocol of §5.5.4 before publication-grade conclusions.
+
+**Takeaway for practitioners.** With the bug-fix pattern from §6 (cached x at Select, reward normalisation, no collinear features), default α=0.5 is a safe starting point. The workload-specific optimum lies in [0.1, 2.0] for our regime — anywhere in that range, post-bugfix LinUCB is competitive with P2C on this workload. The bug-fix discipline matters far more than α tuning.
 
 #### §5.5.2 Reward function
 
