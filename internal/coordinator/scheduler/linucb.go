@@ -154,9 +154,15 @@ func (s *LinUCBScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb
 		return candidates[0], DispatchInfo{QValueAtDispatch: 0, WasExploration: false}, nil
 	}
 
+	// Single pass: track argmax over (mean+bonus) for selection and
+	// argmax over mean alone for the exploration flag. A dispatch counts
+	// as exploration when the UCB winner is not the pure-mean argmax —
+	// i.e. the bonus, not the learned value, drove the choice.
 	var best *registry.WorkerInfo
 	var bestX *mat.VecDense
+	var bestMeanID string
 	bestP := math.Inf(-1)
+	bestMean := math.Inf(-1)
 	for _, w := range candidates {
 		x := s.featureVector(w, arch, ctx)
 		mean, bonus := s.score(w.ID, x)
@@ -166,29 +172,12 @@ func (s *LinUCBScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb
 			best = w
 			bestX = x
 		}
-	}
-
-	// Compute exploration flag honestly: the dispatch counts as
-	// exploration if the winner's selection was not the argmax of the
-	// pure mean θ̂ᵀx. We re-evaluate means alone and compare to the UCB
-	// winner — if a different arm has a higher mean, the bonus drove
-	// the choice (true exploration).
-	wasExploration := false
-	{
-		bestMeanID := ""
-		bestMean := math.Inf(-1)
-		for _, w := range candidates {
-			x := s.featureVector(w, arch, ctx)
-			m, _ := s.score(w.ID, x)
-			if m > bestMean {
-				bestMean = m
-				bestMeanID = w.ID
-			}
-		}
-		if bestMeanID != "" && bestMeanID != best.ID {
-			wasExploration = true
+		if mean > bestMean {
+			bestMean = mean
+			bestMeanID = w.ID
 		}
 	}
+	wasExploration := bestMeanID != "" && bestMeanID != best.ID
 
 	// Cache the chosen worker's feature vector so RecordOutcome updates
 	// the bandit against the same x that drove selection.
