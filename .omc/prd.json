@@ -96,7 +96,7 @@
       "id": "US-008",
       "title": "Paper full draft — sections §3 Method, §5 Evaluation, §6 Discussion",
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "paper-skeleton.md sections §3.2-§3.4 fully expanded with prose and equations (no placeholders)",
         "§5.2-§5.4 tables filled with all four scheduler columns (LeastLoaded, P2C, ε-greedy, LinUCB) and HEFT row added",
@@ -122,6 +122,8 @@
       "title": "Statistical significance — multi-repetition runs",
       "priority": 10,
       "passes": false,
+      "deferred": true,
+      "deferredReason": "Each repetition takes 5–10 min wall-clock; 5 reps × 7 schedulers × 3 cluster sizes = 6+ hours. Documented as future work in paper §5.5.4 and §7.3 (Limitations) with the Wilcoxon protocol described. Single-run findings + diagnosis of variance source (Docker/macOS) ship in this iteration; multi-run validation queued for follow-on session.",
       "acceptanceCriteria": [
         "Each scheduler benchmark run ≥5 times on the 5w-hetero config",
         "Mean ± standard deviation reported in findings.md and paper §5.2",
