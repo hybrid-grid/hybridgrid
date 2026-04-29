@@ -8,6 +8,15 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# SCHEDULER env var selects which scheduler to benchmark.
+# Valid: leastloaded (default), simple, p2c.
+SCHEDULER="${SCHEDULER:-leastloaded}"
+case "$SCHEDULER" in
+    leastloaded|simple|p2c) ;;
+    *) echo "ERROR: invalid SCHEDULER='$SCHEDULER'; must be one of: leastloaded, simple, p2c" >&2; exit 1 ;;
+esac
+echo "[benchmark] scheduler: $SCHEDULER"
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -34,13 +43,15 @@ trap cleanup EXIT
 
 # Generate 1 worker config (4.0 CPU)
 generate_1_worker() {
-    cat > docker-compose-hetero.yml << 'EOF'
+    cat > docker-compose-hetero.yml << EOF
 services:
   coordinator:
     build:
       context: ../..
       dockerfile: test/stress/Dockerfile.base
-    command: hg-coord serve --grpc-port=9000 --http-port=8080
+    command: hg-coord serve --grpc-port=9000 --http-port=8080 --scheduler=${SCHEDULER} --task-log=/tmp/tasks.jsonl
+    volumes:
+      - task-logs:/tmp
     ports:
       - "9000:9000"
       - "8080:8080"
@@ -96,18 +107,21 @@ networks:
 volumes:
   build-cache:
   cpython-src:
+  task-logs:
 EOF
 }
 
 # Generate 3 heterogeneous workers (0.8 + 1.2 + 2.0 = 4.0 CPU)
 generate_3_workers() {
-    cat > docker-compose-hetero.yml << 'EOF'
+    cat > docker-compose-hetero.yml << EOF
 services:
   coordinator:
     build:
       context: ../..
       dockerfile: test/stress/Dockerfile.base
-    command: hg-coord serve --grpc-port=9000 --http-port=8080
+    command: hg-coord serve --grpc-port=9000 --http-port=8080 --scheduler=${SCHEDULER} --task-log=/tmp/tasks.jsonl
+    volumes:
+      - task-logs:/tmp
     ports:
       - "9000:9000"
       - "8080:8080"
@@ -196,18 +210,21 @@ networks:
 volumes:
   build-cache:
   cpython-src:
+  task-logs:
 EOF
 }
 
 # Generate 5 heterogeneous workers (0.5 + 0.6 + 0.8 + 1.0 + 1.1 = 4.0 CPU)
 generate_5_workers() {
-    cat > docker-compose-hetero.yml << 'EOF'
+    cat > docker-compose-hetero.yml << EOF
 services:
   coordinator:
     build:
       context: ../..
       dockerfile: test/stress/Dockerfile.base
-    command: hg-coord serve --grpc-port=9000 --http-port=8080
+    command: hg-coord serve --grpc-port=9000 --http-port=8080 --scheduler=${SCHEDULER} --task-log=/tmp/tasks.jsonl
+    volumes:
+      - task-logs:/tmp
     ports:
       - "9000:9000"
       - "8080:8080"
@@ -328,6 +345,7 @@ networks:
 volumes:
   build-cache:
   cpython-src:
+  task-logs:
 EOF
 }
 

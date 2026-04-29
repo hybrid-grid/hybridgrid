@@ -91,6 +91,12 @@ type Config struct {
 	TLS             hgtls.Config
 	Tracing         tracing.Config
 	EnableRequestID bool
+	// SchedulerType selects the scheduler implementation.
+	// Valid: "leastloaded" (default), "simple", "p2c".
+	SchedulerType string
+	// TaskLogPath is the path to the JSON Lines per-task log file.
+	// Empty or "stdout" routes records to standard output.
+	TaskLogPath string
 }
 
 // DefaultConfig returns sensible defaults.
@@ -100,6 +106,26 @@ func DefaultConfig() Config {
 		HeartbeatTTL:    60 * time.Second,
 		RequestTimeout:  120 * time.Second,
 		EnableRequestID: true,
+		SchedulerType:   "leastloaded",
+	}
+}
+
+// newScheduler constructs a scheduler.Scheduler from the configured type.
+// Unknown types fall back to LeastLoaded for backward compatibility.
+func newScheduler(typ string, reg registry.Registry, cm *resilience.CircuitManager) scheduler.Scheduler {
+	switch typ {
+	case "simple":
+		return scheduler.NewSimpleScheduler(reg)
+	case "p2c":
+		return scheduler.NewP2CScheduler(scheduler.P2CConfig{
+			Registry:       reg,
+			CircuitChecker: cm,
+		})
+	case "leastloaded", "":
+		return scheduler.NewLeastLoadedScheduler(reg)
+	default:
+		log.Warn().Str("requested", typ).Msg("Unknown scheduler type; falling back to leastloaded")
+		return scheduler.NewLeastLoadedScheduler(reg)
 	}
 }
 
@@ -134,6 +160,7 @@ type Server struct {
 	circuitManager *resilience.CircuitManager
 	eventNotifier  EventNotifier
 	workerConns    *connPool
+	taskLogger     *TaskLogger
 
 	activeTasks         int64
 	queuedTasks         int64
@@ -174,8 +201,15 @@ type unityCacheEntry struct {
 // New creates a new coordinator gRPC server.
 func New(cfg Config) *Server {
 	reg := registry.NewInMemoryRegistry(cfg.HeartbeatTTL)
-	sched := scheduler.NewLeastLoadedScheduler(reg)
 	circuitMgr := resilience.NewCircuitManager(resilience.DefaultCircuitConfig())
+	sched := newScheduler(cfg.SchedulerType, reg, circuitMgr)
+	log.Info().Str("scheduler", cfg.SchedulerType).Msg("Scheduler initialized")
+
+	taskLogger, err := NewTaskLogger(cfg.TaskLogPath)
+	if err != nil {
+		log.Warn().Err(err).Str("path", cfg.TaskLogPath).Msg("Failed to open task log; falling back to stdout")
+		taskLogger, _ = NewTaskLogger("")
+	}
 
 	m := metrics.Default()
 	circuitMgr.OnStateChange(func(workerID string, from, to resilience.CircuitState) {
@@ -217,6 +251,7 @@ func New(cfg Config) *Server {
 		scheduler:      sched,
 		circuitManager: circuitMgr,
 		workerConns:    newConnPool(dialOpts),
+		taskLogger:     taskLogger,
 		flutterCache:   make(map[string]*flutterCacheEntry),
 		unityCache:     make(map[string]*unityCacheEntry),
 	}
@@ -278,6 +313,9 @@ func (s *Server) Stop() {
 	}
 	if reg, ok := s.registry.(*registry.InMemoryRegistry); ok {
 		reg.Stop()
+	}
+	if s.taskLogger != nil {
+		_ = s.taskLogger.Close()
 	}
 }
 
@@ -413,6 +451,12 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	tracing.AddEvent(ctx, "scheduler.select.done")
 	span.SetAttributes(tracing.AttrWorkerID.String(worker.ID))
 
+	// Snapshot dispatch-time worker state for offline analysis. Captured
+	// before IncrementTasks so the value reflects load at the scheduling
+	// decision, not after this task has been booked. The read races with
+	// concurrent dispatches but the log is for offline analysis only.
+	activeAtDispatch := worker.ActiveTasks
+
 	// Track task
 	s.registry.IncrementTasks(worker.ID)
 	atomic.AddInt64(&s.activeTasks, 1)
@@ -480,6 +524,55 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	taskCompletedTime := time.Now()
 	totalDuration := taskCompletedTime.Sub(start)
 	span.SetAttributes(tracing.AttrDurationMs.Int64(totalDuration.Milliseconds()))
+
+	// Per-task structured log for offline analysis / RL training.
+	if s.taskLogger != nil {
+		var (
+			workerCPUCores    int32
+			workerMemBytes    int64
+			workerNativeArch  string
+		)
+		if worker.Capabilities != nil {
+			workerCPUCores = worker.Capabilities.CpuCores
+			workerMemBytes = worker.Capabilities.MemoryBytes
+			workerNativeArch = worker.Capabilities.NativeArch.String()
+		}
+		var (
+			compileTimeMs int64
+			exitCode      int32
+		)
+		if resp != nil {
+			compileTimeMs = resp.CompilationTimeMs
+			exitCode = resp.ExitCode
+		}
+		s.taskLogger.Log(&TaskLogRecord{
+			TS:                          time.Now().UTC(),
+			Event:                       "task_completed",
+			TaskID:                      req.TaskId,
+			BuildType:                   "cpp",
+			Scheduler:                   s.config.SchedulerType,
+			WorkerID:                    worker.ID,
+			WorkerArch:                  workerNativeArch,
+			WorkerNativeArch:            workerNativeArch,
+			WorkerCPUCores:              workerCPUCores,
+			WorkerMemBytes:              workerMemBytes,
+			WorkerActiveTasksAtDispatch: activeAtDispatch,
+			WorkerMaxParallel:           worker.MaxParallel,
+			WorkerDiscoverySource:       worker.DiscoverySource,
+			TargetArch:                  req.TargetArch.String(),
+			ClientOS:                    req.ClientOs,
+			SourceSizeBytes:             len(req.PreprocessedSource) + len(req.RawSource),
+			PreprocessedSizeBytes:       len(req.PreprocessedSource),
+			RawSourceSizeBytes:          len(req.RawSource),
+			QueueTimeMs:                 queueTime.Milliseconds(),
+			CompileTimeMs:               compileTimeMs,
+			WorkerRPCLatencyMs:          workerLatency.Milliseconds(),
+			TotalDurationMs:             totalDuration.Milliseconds(),
+			Success:                     success,
+			ExitCode:                    exitCode,
+			FromCache:                   false,
+		})
+	}
 
 	if success {
 		atomic.AddInt64(&s.successTasks, 1)

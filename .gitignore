@@ -12,6 +12,10 @@ hgbuild
 # Test binary
 *.test
 
+# Sisyphus evidence artifacts (binaries from QA runs)
+.sisyphus/evidence/**/hg-*-amd64
+.sisyphus/evidence/**/hg-*-arm64
+
 # Output of go coverage tool
 coverage.out
 coverage.html
