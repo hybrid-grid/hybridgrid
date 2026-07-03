@@ -42,10 +42,10 @@ type HEFTScheduler struct {
 	registry       registry.Registry
 	circuitChecker CircuitChecker
 
-	mu     sync.Mutex
-	wbar   map[string]*metrics.EWMA // per-worker EWMA of compile times in ms
-	alpha  float64                  // EWMA smoothing factor
-	count  map[string]int64         // total observations per worker
+	mu    sync.Mutex
+	wbar  map[string]*metrics.EWMA // per-worker EWMA of compile times in ms
+	alpha float64                  // EWMA smoothing factor
+	count map[string]int64         // total observations per worker
 }
 
 // HEFTConfig holds construction parameters.
@@ -207,4 +207,3 @@ func (s *HEFTScheduler) eligibleWorkers(buildType pb.BuildType, arch pb.Architec
 	}
 	return cands, nil
 }
-

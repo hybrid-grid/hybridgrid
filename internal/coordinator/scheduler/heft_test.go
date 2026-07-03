@@ -72,8 +72,8 @@ func TestHEFT_RespectsObservedTimes(t *testing.T) {
 	s := NewHEFTScheduler(HEFTConfig{Registry: reg, EWMAAlpha: 0.5})
 	// Manually seed observations: small worker is empirically much faster.
 	s.mu.Lock()
-	s.wbarLocked("big").Update(2000)   // 2s
-	s.wbarLocked("small").Update(200)  // 0.2s
+	s.wbarLocked("big").Update(2000)  // 2s
+	s.wbarLocked("small").Update(200) // 0.2s
 	s.mu.Unlock()
 
 	w, info, err := s.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "", TaskContext{})

@@ -5,24 +5,37 @@
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# BASH_SOURCE (not $0) so the path stays correct when this file is
+# sourced as a library by scripts/benchmark_statistical.sh.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # SCHEDULER env var selects which scheduler to benchmark.
-# Valid: leastloaded (default), simple, p2c, epsilon-greedy, linucb, heft.
+# Valid: leastloaded (default), simple, p2c, epsilon-greedy, linucb,
+# hybrid-linucb, heft.
 SCHEDULER="${SCHEDULER:-leastloaded}"
 case "$SCHEDULER" in
-    leastloaded|simple|p2c|epsilon-greedy|linucb|heft) ;;
-    *) echo "ERROR: invalid SCHEDULER='$SCHEDULER'; must be one of: leastloaded, simple, p2c, epsilon-greedy, linucb, heft" >&2; exit 1 ;;
+    leastloaded|simple|p2c|epsilon-greedy|linucb|hybrid-linucb|heft) ;;
+    *) echo "ERROR: invalid SCHEDULER='$SCHEDULER'; must be one of: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, heft" >&2; exit 1 ;;
 esac
 
 # Optional tuning parameters propagated to coordinator.
-# ALPHA controls LinUCB exploration; EPSILON controls ε-greedy.
-ALPHA="${ALPHA:-1.0}"
-EPSILON="${EPSILON:-0.1}"
-SCHED_ARGS="--scheduler=${SCHEDULER} --alpha=${ALPHA} --epsilon=${EPSILON} --task-log=/tmp/tasks.jsonl"
+# ALPHA controls LinUCB exploration; EPSILON controls ε-greedy;
+# WARM_START and LOAD_PENALTY tune hybrid-linucb.
+#
+# SCHED_ARGS is baked into the generated compose file at
+# generate-time, so callers that change SCHEDULER after sourcing this
+# file must re-run compute_sched_args before regenerating.
+compute_sched_args() {
+    ALPHA="${ALPHA:-1.0}"
+    EPSILON="${EPSILON:-0.1}"
+    WARM_START="${WARM_START:-100}"
+    LOAD_PENALTY="${LOAD_PENALTY:-0.5}"
+    SCHED_ARGS="--scheduler=${SCHEDULER} --alpha=${ALPHA} --epsilon=${EPSILON} --warm-start=${WARM_START} --load-penalty=${LOAD_PENALTY} --task-log=/tmp/tasks.jsonl"
+}
+compute_sched_args
 
-echo "[benchmark] scheduler: $SCHEDULER  alpha: $ALPHA  epsilon: $EPSILON"
+echo "[benchmark] scheduler: $SCHEDULER  alpha: $ALPHA  epsilon: $EPSILON  warm-start: $WARM_START  load-penalty: $LOAD_PENALTY"
 
 # Colors
 RED='\033[0;31m'
@@ -356,15 +369,28 @@ volumes:
 EOF
 }
 
+# Pinned workload version. An unpinned clone of main drifts over time
+# (task count changes, and dev branches occasionally break under
+# distributed compilation), which destroys run-to-run comparability.
+# v3.14.0 approximates the ~873-TU workload of the original thesis
+# runs (which cloned the then-current main); v3.12.0 builds only ~263
+# TUs — too small for the statistical benchmark's makespan resolution.
+CPYTHON_VERSION="${CPYTHON_VERSION:-v3.14.0}"
+
 clone_cpython() {
-    log "Cloning CPython..."
-    docker compose -f docker-compose-hetero.yml exec -T builder bash -c '
-        if [ ! -d /workspace/cpython ]; then
-            git clone --depth=1 https://github.com/python/cpython.git /workspace/cpython
-        else
-            echo "CPython already cloned"
+    log "Cloning CPython ${CPYTHON_VERSION}..."
+    docker compose -f docker-compose-hetero.yml exec -T builder bash -c "
+        if [ -d /workspace/cpython ] && [ \"\$(cat /workspace/cpython/.hg-bench-version 2>/dev/null)\" != \"${CPYTHON_VERSION}\" ]; then
+            echo 'CPython version mismatch in volume - recloning'
+            rm -rf /workspace/cpython
         fi
-    '
+        if [ ! -d /workspace/cpython ]; then
+            git clone --depth=1 --branch=${CPYTHON_VERSION} https://github.com/python/cpython.git /workspace/cpython
+            echo '${CPYTHON_VERSION}' > /workspace/cpython/.hg-bench-version
+        else
+            echo 'CPython already cloned'
+        fi
+    "
 }
 
 configure_cpython() {
@@ -511,4 +537,9 @@ main() {
     fi
 }
 
-main "$@"
+# Library mode: scripts/benchmark_statistical.sh sources this file
+# (HG_BENCH_LIB=1) to reuse the compose generators and build helpers
+# without triggering the full 1w/3w/5w run.
+if [ -z "${HG_BENCH_LIB:-}" ]; then
+    main "$@"
+fi

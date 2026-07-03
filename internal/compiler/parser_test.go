@@ -95,6 +95,8 @@ func TestIsDistributable(t *testing.T) {
 		{[]string{"gcc", "foo.o", "bar.o", "-o", "program"}, false}, // linking
 		{[]string{"gcc", "-E", "foo.c"}, false},                     // preprocessing
 		{[]string{"gcc", "-c", "foo.c", "bar.c"}, false},            // multiple inputs
+		{[]string{"gcc", "-c", "trampoline.S", "-o", "t.o"}, false}, // assembly: local only
+		{[]string{"gcc", "-c", "lowercase.s", "-o", "l.o"}, false},  // assembly: local only
 	}
 
 	for _, tt := range tests {

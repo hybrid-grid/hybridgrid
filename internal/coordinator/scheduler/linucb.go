@@ -2,7 +2,10 @@ package scheduler
 
 import (
 	"math"
+	"path"
+	"strings"
 	"sync"
+	"sync/atomic"
 
 	"gonum.org/v1/gonum/mat"
 
@@ -64,6 +67,22 @@ type LinUCBScheduler struct {
 	alpha          float64
 	dim            int
 
+	// warmStartTasks configures the Hybrid-LinUCB warm-start window:
+	// dispatches 1..N are routed by the least-loaded heuristic while
+	// the bandit learns passively from their outcomes. 0 = pure LinUCB.
+	warmStartTasks int64
+	// loadPenalty is λ in the hybrid score p = mean + bonus − λ·loadRatio.
+	// It acts as a hand-coded prior on the load feature: the model
+	// cannot trust its learned load weight during early training, and
+	// delayed rewards would otherwise let the scheduler pile tasks onto
+	// one fast worker before any feedback arrives. 0 disables it.
+	loadPenalty float64
+	// totalDispatches counts every SelectWithDispatchInfo call,
+	// including single-candidate fast-path dispatches — it measures
+	// dispatch volume, not learning events. Accessed atomically; never
+	// reset.
+	totalDispatches int64
+
 	mu   sync.Mutex
 	arms map[string]*linUCBArm
 	// pendingX caches the feature vector observed at Select time for
@@ -98,6 +117,12 @@ type LinUCBConfig struct {
 	// practical tuning typically lies in [0.1, 2.0]. Values ≤ 0
 	// disable exploration (pure greedy on θ̂_a^T x).
 	Alpha float64
+	// WarmStartTasks is the Hybrid-LinUCB warm-start window length.
+	// Zero (the default) keeps pure-LinUCB behavior.
+	WarmStartTasks int
+	// LoadPenalty is the Hybrid-LinUCB λ coefficient. Zero (the
+	// default) keeps pure-LinUCB behavior.
+	LoadPenalty float64
 }
 
 // NewLinUCBScheduler constructs the scheduler. The feature dimension
@@ -121,12 +146,22 @@ func NewLinUCBScheduler(cfg LinUCBConfig) *LinUCBScheduler {
 	if lt == nil {
 		lt = metrics.NewLatencyTracker()
 	}
+	warmStart := cfg.WarmStartTasks
+	if warmStart < 0 {
+		warmStart = 0
+	}
+	loadPenalty := cfg.LoadPenalty
+	if loadPenalty < 0 {
+		loadPenalty = 0
+	}
 	return &LinUCBScheduler{
 		registry:       cfg.Registry,
 		circuitChecker: cfg.CircuitChecker,
 		latencyTracker: lt,
 		alpha:          alpha,
 		dim:            featureDim(),
+		warmStartTasks: int64(warmStart),
+		loadPenalty:    loadPenalty,
 		arms:           make(map[string]*linUCBArm),
 		pendingX:       make(map[string]*mat.VecDense),
 	}
@@ -144,20 +179,30 @@ func (s *LinUCBScheduler) Select(buildType pb.BuildType, arch pb.Architecture, c
 // score (Q value) and an exploration flag. We mark a dispatch as
 // "exploration" when the chosen arm's UCB bonus exceeds its mean term —
 // i.e. selection was driven by uncertainty rather than learned value.
+//
+// In hybrid mode (warmStartTasks/loadPenalty non-zero) the score is
+// p = θ̂ᵀx + α√(xᵀA⁻¹x) − λ·loadRatio, and the first warmStartTasks
+// dispatches are delegated to the least-loaded heuristic while the
+// bandit observes their outcomes (docs/thesis/hybrid_linucb_proposal.md).
 func (s *LinUCBScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb.Architecture, clientOS string, ctx TaskContext) (*registry.WorkerInfo, DispatchInfo, error) {
 	candidates, err := s.eligibleWorkers(buildType, arch, clientOS)
 	if err != nil {
 		return nil, DispatchInfo{}, err
 	}
+	n := atomic.AddInt64(&s.totalDispatches, 1)
 	if len(candidates) == 1 {
 		// Fast path: no choice. Skip matrix ops entirely.
 		return candidates[0], DispatchInfo{QValueAtDispatch: 0, WasExploration: false}, nil
 	}
+	if s.warmStartTasks > 0 && n <= s.warmStartTasks {
+		return s.selectWarmStart(candidates, arch, ctx)
+	}
 
-	// Single pass: track argmax over (mean+bonus) for selection and
-	// argmax over mean alone for the exploration flag. A dispatch counts
-	// as exploration when the UCB winner is not the pure-mean argmax —
-	// i.e. the bonus, not the learned value, drove the choice.
+	// Single pass: track argmax over (mean−λ·lr+bonus) for selection and
+	// argmax over (mean−λ·lr) alone for the exploration flag. A dispatch
+	// counts as exploration when the UCB winner is not the penalized-mean
+	// argmax — i.e. the bonus, not the learned+heuristic value, drove the
+	// choice.
 	var best *registry.WorkerInfo
 	var bestX *mat.VecDense
 	var bestMeanID string
@@ -166,14 +211,15 @@ func (s *LinUCBScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb
 	for _, w := range candidates {
 		x := s.featureVector(w, arch, ctx)
 		mean, bonus := s.score(w.ID, x)
-		p := mean + bonus
+		penalized := mean - s.loadPenalty*loadRatio(w)
+		p := penalized + bonus
 		if p > bestP {
 			bestP = p
 			best = w
 			bestX = x
 		}
-		if mean > bestMean {
-			bestMean = mean
+		if penalized > bestMean {
+			bestMean = penalized
 			bestMeanID = w.ID
 		}
 	}
@@ -188,6 +234,43 @@ func (s *LinUCBScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb
 	}
 
 	return best, DispatchInfo{QValueAtDispatch: bestP, WasExploration: wasExploration}, nil
+}
+
+// selectWarmStart routes a warm-start dispatch to the least-loaded
+// candidate (min ActiveTasks, first-wins tie-break — mirroring
+// LeastLoadedScheduler.Select) while the bandit learns passively: the
+// chosen worker's feature vector is cached in pendingX so RecordOutcome
+// applies the normal rank-1 update, exactly as if the bandit had made
+// the choice itself.
+//
+// DispatchInfo semantics: QValueAtDispatch reports the learner's hybrid
+// score for the delegated choice so offline analysis can watch Q
+// converge during the warm-start window; WasExploration is true because
+// the pick was not the learner's greedy argmax, which lets analysis
+// split the warm-start window without relying on record ordering.
+//
+// Lock ordering: s.score locks s.mu internally, so it must complete
+// before the pendingX store takes s.mu — never call it with the lock
+// held.
+func (s *LinUCBScheduler) selectWarmStart(candidates []*registry.WorkerInfo, arch pb.Architecture, ctx TaskContext) (*registry.WorkerInfo, DispatchInfo, error) {
+	chosen := candidates[0]
+	for _, w := range candidates[1:] {
+		if w.ActiveTasks < chosen.ActiveTasks {
+			chosen = w
+		}
+	}
+
+	x := s.featureVector(chosen, arch, ctx)
+	mean, bonus := s.score(chosen.ID, x)
+	q := mean + bonus - s.loadPenalty*loadRatio(chosen)
+
+	if ctx.TaskID != "" {
+		s.mu.Lock()
+		s.pendingX[ctx.TaskID] = x
+		s.mu.Unlock()
+	}
+
+	return chosen, DispatchInfo{QValueAtDispatch: q, WasExploration: true}, nil
 }
 
 // score returns the mean estimate (θ̂^T x) and the UCB exploration bonus
@@ -360,13 +443,18 @@ func (s *LinUCBScheduler) eligibleWorkers(buildType pb.BuildType, arch pb.Archit
 // featureDim is the fixed feature-vector dimension. Increasing this
 // requires a one-time rebuild of all arm states.
 //
-// Layout (9 dims) — derived from the paper-skeleton.md §3.3 design but
+// Layout (12 dims) — derived from the paper-skeleton.md §3.3 design but
 // pruned per code-review finding CRITICAL-2: build-type one-hot dims
 // were always set to (1, 0, 0) under the current Compile() path,
 // making them perfectly collinear with the bias. Removing them keeps
 // the design space identifiable and frees Sherman-Morrison from a
 // degenerate rank-2 subspace during warm-up. Build-type can be added
 // back when Flutter/Unity reach the learning path.
+//
+// Dims 9-11 extend the design per the Hybrid-LinUCB proposal
+// (docs/thesis/hybrid_linucb_proposal.md §3): task-language and raw
+// task weight give the model a handle on the "goods" being compiled,
+// and worker success rate exposes reliability the hardware dims miss.
 //
 //	[0]   bias                                                      = 1.0
 //	[1]   log(1 + source_size_bytes) / log(1 + 4 MiB)               (≈ [0, 1])
@@ -377,7 +465,10 @@ func (s *LinUCBScheduler) eligibleWorkers(buildType pb.BuildType, arch pb.Archit
 //	[6]   worker.native_arch == target_arch                         (1.0 / 0.0)
 //	[7]   worker.active_tasks / max_parallel
 //	[8]   worker.recent_rpc_latency_ms / 100                        (capped at 1.0)
-func featureDim() int { return 9 }
+//	[9]   task language is C++                                      (1.0 / 0.0)
+//	[10]  log(1 + raw_source_size_bytes) / log(1 + 1 MiB)           (≈ [0, 1])
+//	[11]  worker success rate, Laplace-smoothed (s+1)/(s+f+2)
+func featureDim() int { return 12 }
 
 // sizeNormDenom is log1p of a "typical big translation unit" — a 4 MiB
 // preprocessed source. Using this denominator keeps the size feature
@@ -386,6 +477,53 @@ func featureDim() int { return 9 }
 // [0.6, 0.8] and made the feature near-constant for the benchmark
 // (code-review finding MED-4).
 var sizeNormDenom = math.Log1p(4 * 1024 * 1024)
+
+// rawSizeNormDenom normalizes raw (unpreprocessed) source size. Raw
+// sources lack expanded headers so they run 10-100x smaller than
+// preprocessed TUs; a 1 MiB denominator covers the raw-file range of
+// the observed workloads and keeps the feature spread across (0, 1]
+// instead of clustering near zero under the 4 MiB preprocessed
+// denominator.
+var rawSizeNormDenom = math.Log1p(1024 * 1024)
+
+// cppExtensions are the file extensions (lowercased) that identify a
+// C++ translation unit. ".C" (uppercase) is handled separately since
+// by Unix convention it means C++ while ".c" means C.
+var cppExtensions = map[string]bool{
+	".cpp": true, ".cc": true, ".cxx": true, ".c++": true,
+	".hpp": true, ".hh": true,
+}
+
+// isCppSource reports whether the task compiles C++ rather than C.
+// The file extension decides when recognized; otherwise a "++"
+// compiler driver (g++, clang++) decides, matching GCC semantics
+// where g++ compiles even .c inputs as C++.
+func isCppSource(filename, compiler string) bool {
+	ext := path.Ext(filename)
+	if ext == ".C" {
+		return true
+	}
+	if cppExtensions[strings.ToLower(ext)] {
+		return true
+	}
+	return strings.Contains(compiler, "++")
+}
+
+// loadRatio returns ActiveTasks/MaxParallel clamped to [0, 1], using
+// the same MaxParallel<=0 → 4 default as eligibleWorkers. Feature [7]
+// and the hybrid load penalty must observe the identical value, so
+// both go through this helper.
+func loadRatio(w *registry.WorkerInfo) float64 {
+	maxP := w.MaxParallel
+	if maxP <= 0 {
+		maxP = 4
+	}
+	lr := float64(w.ActiveTasks) / float64(maxP)
+	if lr > 1.0 {
+		lr = 1.0
+	}
+	return lr
+}
 
 // featureVector builds x_{t,a} for a given (worker, target_arch, ctx).
 // All features are normalized roughly to [0, 1] so ‖x‖ stays bounded —
@@ -428,21 +566,32 @@ func (s *LinUCBScheduler) featureVector(w *registry.WorkerInfo, targetArch pb.Ar
 		x.SetVec(6, 1.0)
 	}
 
-	maxP := w.MaxParallel
-	if maxP <= 0 {
-		maxP = 4
-	}
-	loadRatio := float64(w.ActiveTasks) / float64(maxP)
-	if loadRatio > 1.0 {
-		loadRatio = 1.0
-	}
-	x.SetVec(7, loadRatio)
+	x.SetVec(7, loadRatio(w))
 
 	rttNorm := s.latencyTracker.Get(w.ID) / 100.0
 	if rttNorm > 1.0 {
 		rttNorm = 1.0
 	}
 	x.SetVec(8, rttNorm)
+
+	if isCppSource(ctx.SourceFilename, ctx.Compiler) {
+		x.SetVec(9, 1.0)
+	}
+
+	rawSize := math.Log1p(float64(ctx.RawSourceSizeBytes)) / rawSizeNormDenom
+	if rawSize > 1.0 {
+		rawSize = 1.0
+	}
+	x.SetVec(10, rawSize)
+
+	// Laplace-smoothed success rate (s+1)/(s+f+2). The raw rate with an
+	// optimistic prior of 1.0 is exactly 1.0 for every worker on a
+	// fully-successful workload — perfectly collinear with the bias dim,
+	// the same degeneracy class removed in CRITICAL-2. Smoothing keeps
+	// the value experience-dependent (0/0 → 0.5, rising toward the true
+	// rate) so the column is never constant.
+	total := w.SuccessfulTasks + w.FailedTasks
+	x.SetVec(11, float64(w.SuccessfulTasks+1)/float64(total+2))
 
 	return x
 }

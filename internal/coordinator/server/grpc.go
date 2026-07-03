@@ -92,7 +92,8 @@ type Config struct {
 	Tracing         tracing.Config
 	EnableRequestID bool
 	// SchedulerType selects the scheduler implementation.
-	// Valid: "leastloaded" (default), "simple", "p2c", "epsilon-greedy".
+	// Valid: "leastloaded" (default), "simple", "p2c", "epsilon-greedy",
+	// "linucb", "hybrid-linucb", "heft".
 	SchedulerType string
 	// EpsilonValue is the exploration rate for epsilon-greedy. Ignored
 	// for other schedulers. Default 0.1 (Sutton & Barto §2.3 baseline).
@@ -101,6 +102,13 @@ type Config struct {
 	// Theoretical form is 1 + sqrt(ln(2/δ)/2); we default to 1.0 and
 	// expect empirical tuning. Ignored for non-LinUCB schedulers.
 	AlphaValue float64
+	// WarmStartTasks is the hybrid-linucb warm-start window: that many
+	// initial dispatches are routed least-loaded while the bandit learns
+	// passively. 0 disables warm-start. Ignored by other schedulers.
+	WarmStartTasks int
+	// LoadPenaltyValue is the hybrid-linucb λ in p = mean + bonus −
+	// λ·loadRatio. 0 disables the penalty. Ignored by other schedulers.
+	LoadPenaltyValue float64
 	// TaskLogPath is the path to the JSON Lines per-task log file.
 	// Empty or "stdout" routes records to standard output.
 	TaskLogPath string
@@ -114,6 +122,11 @@ func DefaultConfig() Config {
 		RequestTimeout:  120 * time.Second,
 		EnableRequestID: true,
 		SchedulerType:   "leastloaded",
+		// Hybrid-LinUCB defaults per docs/thesis/hybrid_linucb_proposal.md
+		// §3; zero is a meaningful value ("off") for both, so defaults
+		// live here rather than in the factory.
+		WarmStartTasks:   100,
+		LoadPenaltyValue: 0.5,
 	}
 }
 
@@ -143,6 +156,17 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 			Registry:       reg,
 			CircuitChecker: cm,
 			Alpha:          cfg.AlphaValue,
+		})
+	case "hybrid-linucb":
+		// Pass-through without zero-defaulting so --warm-start=0 or
+		// --load-penalty=0 genuinely disables each mechanism for
+		// ablation runs.
+		return scheduler.NewLinUCBScheduler(scheduler.LinUCBConfig{
+			Registry:       reg,
+			CircuitChecker: cm,
+			Alpha:          cfg.AlphaValue,
+			WarmStartTasks: cfg.WarmStartTasks,
+			LoadPenalty:    cfg.LoadPenaltyValue,
 		})
 	case "heft":
 		return scheduler.NewHEFTScheduler(scheduler.HEFTConfig{
@@ -462,84 +486,130 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	// Select worker with tracing
 	tracing.AddEvent(ctx, "scheduler.select.start")
 	taskCtx := scheduler.TaskContext{
-		SourceSizeBytes: len(req.PreprocessedSource) + len(req.RawSource),
-		TaskID:          req.TaskId,
+		SourceSizeBytes:    len(req.PreprocessedSource) + len(req.RawSource),
+		RawSourceSizeBytes: len(req.RawSource),
+		SourceFilename:     req.SourceFilename,
+		Compiler:           req.Compiler,
+		TaskID:             req.TaskId,
 	}
-	worker, dispatchInfo, err := scheduler.SelectWith(s.scheduler, pb.BuildType_BUILD_TYPE_CPP, req.TargetArch, clientOSFilter, taskCtx)
-	if err != nil {
-		span.SetStatus(otelcodes.Error, "no worker available")
-		tracing.RecordError(ctx, err)
-		log.Error().Err(err).
-			Str("task_id", req.TaskId).
-			Str("client_os", req.ClientOs).
-			Bool("cross_compile", len(req.RawSource) > 0).
-			Msg("No worker available")
-		return &pb.CompileResponse{
-			Status:   pb.TaskStatus_STATUS_FAILED,
-			ExitCode: 1,
-			Stderr:   fmt.Sprintf("no worker available: %v", err),
-		}, nil
-	}
-	tracing.AddEvent(ctx, "scheduler.select.done")
-	span.SetAttributes(tracing.AttrWorkerID.String(worker.ID))
-
-	// Snapshot dispatch-time worker state for offline analysis. Captured
-	// before IncrementTasks so the value reflects load at the scheduling
-	// decision, not after this task has been booked. The read races with
-	// concurrent dispatches but the log is for offline analysis only.
-	activeAtDispatch := worker.ActiveTasks
-
-	// Track task
-	s.registry.IncrementTasks(worker.ID)
-	atomic.AddInt64(&s.activeTasks, 1)
-	atomic.AddInt64(&s.totalTasks, 1)
-
 	m := metrics.Default()
-	val, _ := s.activeTasksByWorker.LoadOrStore(worker.ID, new(int64))
-	count := atomic.AddInt64(val.(*int64), 1)
-	m.SetActiveTaskCount(worker.ID, float64(count))
-
-	defer func() {
-		atomic.AddInt64(&s.activeTasks, -1)
-		if val, ok := s.activeTasksByWorker.Load(worker.ID); ok {
-			count := atomic.AddInt64(val.(*int64), -1)
-			m.SetActiveTaskCount(worker.ID, float64(count))
-		}
-	}()
-
-	queueTime := time.Since(start)
-	taskStartTime := time.Now()
-	span.SetAttributes(tracing.AttrQueueTimeMs.Int64(queueTime.Milliseconds()))
-
-	log.Debug().
-		Str("task_id", req.TaskId).
-		Str("worker_id", worker.ID).
-		Dur("queue_time", queueTime).
-		Msg("Forwarding compile request")
-
-	// Notify task started
-	if s.eventNotifier != nil {
-		s.eventNotifier.NotifyTaskStarted(&TaskEvent{
-			ID:        req.TaskId,
-			BuildType: "cpp",
-			Status:    "running",
-			WorkerID:  worker.ID,
-			StartedAt: taskStartTime.Unix(),
-		})
-	}
-
 	uploadBytes := len(req.PreprocessedSource)
 	if len(req.RawSource) > 0 {
 		uploadBytes = len(req.RawSource)
 	}
 	m.RecordTransfer("upload", float64(uploadBytes))
 
-	tracing.AddEvent(ctx, "forward.start")
-	workerCallStart := time.Now()
-	resp, err := s.forwardCompile(ctx, worker, req)
-	workerLatency := time.Since(workerCallStart)
-	m.RecordWorkerLatency(worker.ID, float64(workerLatency.Milliseconds()))
-	tracing.AddEvent(ctx, "forward.done")
+	// Select → book → forward, with bounded reselection when the worker's
+	// admission control rejects the dispatch (ResourceExhausted).
+	// Concurrent Compile handlers race between SelectWith (which reads
+	// ActiveTasks) and IncrementTasks (which books it), so a burst — e.g.
+	// make -jN cold start — can over-book a small worker. The worker
+	// rejects rather than queueing, and without reselection that
+	// scheduling artifact surfaces to the client as a compile failure.
+	// A rejected attempt is unbooked with success=false: the rejection
+	// is a genuine overload signal for the worker's stats. The learner
+	// sees no RecordOutcome for aborted attempts — re-Select overwrites
+	// the pendingX entry for this TaskID.
+	const maxDispatchAttempts = 3
+	var (
+		worker           *registry.WorkerInfo
+		dispatchInfo     scheduler.DispatchInfo
+		resp             *pb.CompileResponse
+		err              error
+		workerLatency    time.Duration
+		queueTime        time.Duration
+		taskStartTime    time.Time
+		activeAtDispatch int32
+	)
+	atomic.AddInt64(&s.activeTasks, 1)
+	defer atomic.AddInt64(&s.activeTasks, -1)
+	for attempt := 1; ; attempt++ {
+		worker, dispatchInfo, err = scheduler.SelectWith(s.scheduler, pb.BuildType_BUILD_TYPE_CPP, req.TargetArch, clientOSFilter, taskCtx)
+		if err != nil {
+			span.SetStatus(otelcodes.Error, "no worker available")
+			tracing.RecordError(ctx, err)
+			log.Error().Err(err).
+				Str("task_id", req.TaskId).
+				Str("client_os", req.ClientOs).
+				Bool("cross_compile", len(req.RawSource) > 0).
+				Msg("No worker available")
+			return &pb.CompileResponse{
+				Status:   pb.TaskStatus_STATUS_FAILED,
+				ExitCode: 1,
+				Stderr:   fmt.Sprintf("no worker available: %v", err),
+			}, nil
+		}
+		tracing.AddEvent(ctx, "scheduler.select.done")
+		span.SetAttributes(tracing.AttrWorkerID.String(worker.ID))
+
+		// Snapshot dispatch-time worker state for offline analysis. Captured
+		// before IncrementTasks so the value reflects load at the scheduling
+		// decision, not after this task has been booked. The read races with
+		// concurrent dispatches but the log is for offline analysis only.
+		activeAtDispatch = worker.ActiveTasks
+
+		s.registry.IncrementTasks(worker.ID)
+		val, _ := s.activeTasksByWorker.LoadOrStore(worker.ID, new(int64))
+		count := atomic.AddInt64(val.(*int64), 1)
+		m.SetActiveTaskCount(worker.ID, float64(count))
+
+		queueTime = time.Since(start)
+		taskStartTime = time.Now()
+
+		log.Debug().
+			Str("task_id", req.TaskId).
+			Str("worker_id", worker.ID).
+			Dur("queue_time", queueTime).
+			Msg("Forwarding compile request")
+
+		// Notify task started. A rejected attempt re-notifies with the
+		// next worker; events are keyed by task ID so the dashboard just
+		// sees the assignment move.
+		if s.eventNotifier != nil {
+			s.eventNotifier.NotifyTaskStarted(&TaskEvent{
+				ID:        req.TaskId,
+				BuildType: "cpp",
+				Status:    "running",
+				WorkerID:  worker.ID,
+				StartedAt: taskStartTime.Unix(),
+			})
+		}
+
+		tracing.AddEvent(ctx, "forward.start")
+		workerCallStart := time.Now()
+		resp, err = s.forwardCompile(ctx, worker, req)
+		workerLatency = time.Since(workerCallStart)
+		m.RecordWorkerLatency(worker.ID, float64(workerLatency.Milliseconds()))
+		tracing.AddEvent(ctx, "forward.done")
+
+		if err != nil && status.Code(err) == codes.ResourceExhausted && attempt < maxDispatchAttempts {
+			s.registry.DecrementTasks(worker.ID, false, 0)
+			if v, ok := s.activeTasksByWorker.Load(worker.ID); ok {
+				c := atomic.AddInt64(v.(*int64), -1)
+				m.SetActiveTaskCount(worker.ID, float64(c))
+			}
+			log.Warn().
+				Str("task_id", req.TaskId).
+				Str("worker_id", worker.ID).
+				Int("attempt", attempt).
+				Msg("Worker at capacity; reselecting")
+			// Brief backoff lets the racing bookings land in the
+			// registry before the next Select reads it.
+			time.Sleep(time.Duration(attempt) * 25 * time.Millisecond)
+			continue
+		}
+		break
+	}
+	span.SetAttributes(tracing.AttrQueueTimeMs.Int64(queueTime.Milliseconds()))
+
+	atomic.AddInt64(&s.totalTasks, 1)
+
+	defer func() {
+		if val, ok := s.activeTasksByWorker.Load(worker.ID); ok {
+			count := atomic.AddInt64(val.(*int64), -1)
+			m.SetActiveTaskCount(worker.ID, float64(count))
+		}
+	}()
 
 	if resp != nil && len(resp.ObjectFile) > 0 {
 		m.RecordTransfer("download", float64(len(resp.ObjectFile)))
@@ -583,9 +653,9 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	// Per-task structured log for offline analysis / RL training.
 	if s.taskLogger != nil {
 		var (
-			workerCPUCores    int32
-			workerMemBytes    int64
-			workerNativeArch  string
+			workerCPUCores   int32
+			workerMemBytes   int64
+			workerNativeArch string
 		)
 		if worker.Capabilities != nil {
 			workerCPUCores = worker.Capabilities.CpuCores
