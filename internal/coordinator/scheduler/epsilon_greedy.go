@@ -31,6 +31,13 @@ type EpsilonGreedyScheduler struct {
 	circuitChecker CircuitChecker
 	epsilon        float64
 
+	// randFloat draws the explore/exploit coin; randInt picks the
+	// uniform arm when exploring. Defaults to crypto/rand; tests inject
+	// a seeded source so statistical assertions are deterministic
+	// instead of flaking on unlucky exploration draws.
+	randFloat func() float64
+	randInt   func(n int) int
+
 	mu     sync.Mutex
 	values map[string]*armState
 }
@@ -67,6 +74,8 @@ func NewEpsilonGreedyScheduler(cfg EpsilonGreedyConfig) *EpsilonGreedyScheduler 
 		registry:       cfg.Registry,
 		circuitChecker: cfg.CircuitChecker,
 		epsilon:        eps,
+		randFloat:      uniformFloat,
+		randInt:        uniformInt,
 		values:         make(map[string]*armState),
 	}
 }
@@ -95,10 +104,10 @@ func (s *EpsilonGreedyScheduler) SelectWithDispatchInfo(buildType pb.BuildType, 
 		return w, DispatchInfo{QValueAtDispatch: s.qValue(w.ID), WasExploration: false}, nil
 	}
 
-	exploring := s.epsilon > 0 && uniformFloat() < s.epsilon
+	exploring := s.epsilon > 0 && s.randFloat() < s.epsilon
 	var chosen *registry.WorkerInfo
 	if exploring {
-		chosen = candidates[uniformInt(len(candidates))]
+		chosen = candidates[s.randInt(len(candidates))]
 	} else {
 		chosen = s.argmaxQ(candidates)
 	}

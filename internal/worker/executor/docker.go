@@ -71,7 +71,7 @@ func NewDockerExecutorWithLimits(limits DockerResourceLimits) (*DockerExecutor, 
 	_, err = cli.Ping(ctx)
 	if err != nil {
 		cli.Close()
-		return nil, fmt.Errorf("Docker not available: %w", err)
+		return nil, fmt.Errorf("docker not available: %w", err)
 	}
 
 	return &DockerExecutor{

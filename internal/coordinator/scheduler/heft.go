@@ -116,9 +116,9 @@ func (s *HEFTScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb.A
 		} else {
 			allCold = false
 		}
-		w_ij := wbar.Value()
-		avail := float64(w.ActiveTasks) * w_ij
-		eft := avail + w_ij
+		wij := wbar.Value()
+		avail := float64(w.ActiveTasks) * wij
+		eft := avail + wij
 		if best == nil || eft < bestEFT {
 			best = w
 			bestEFT = eft

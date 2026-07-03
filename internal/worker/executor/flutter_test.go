@@ -195,6 +195,12 @@ func setupFakeFlutter(t *testing.T) string {
 
 	if runtime.GOOS == "windows" {
 		scriptPath = filepath.Join(binDir, "flutter.bat")
+		// %* is the only cmd.exe construct that preserves arguments like
+		// ABC=123 intact — positional parameters (%1, shift, for %%a) all
+		// treat '=' as a delimiter. The stub therefore writes the raw
+		// argument string on one line; readArgsFile tokenizes on
+		// whitespace, which matches both this format and the Unix stub's
+		// one-per-line output.
 		contents = []byte("@echo off\r\n" +
 			"if not \"%HG_FLUTTER_ARGS_FILE%\"==\"\" (\r\n" +
 			"  echo %* > \"%HG_FLUTTER_ARGS_FILE%\"\r\n" +
@@ -322,11 +328,11 @@ func readArgsFile(t *testing.T, argsFile string) []string {
 	if err != nil {
 		t.Fatalf("Read args file error: %v", err)
 	}
-	content := strings.TrimSpace(string(data))
-	if content == "" {
-		return nil
-	}
-	return strings.Split(content, "\n")
+	// Whitespace tokenization handles both stub formats: the Unix scripts
+	// write one argument per line, the Windows ones a single space-joined
+	// line (see the %* note in setupFakeFlutter). This assumes no test
+	// argument contains spaces — currently true for every fixture.
+	return strings.Fields(string(data))
 }
 
 func assertArgsContain(t *testing.T, args []string, expected ...string) {

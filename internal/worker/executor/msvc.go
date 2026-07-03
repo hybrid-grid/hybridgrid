@@ -95,7 +95,6 @@ func (e *MSVCExecutor) Execute(ctx context.Context, req *Request) (*Result, erro
 	}
 	defer os.RemoveAll(workDir)
 
-	var srcFile string
 	var args []string
 
 	// Determine output file path (MSVC uses .obj extension)
@@ -104,13 +103,13 @@ func (e *MSVCExecutor) Execute(ctx context.Context, req *Request) (*Result, erro
 	// Check if using raw source mode (cross-compilation) or preprocessed mode
 	if len(req.RawSource) > 0 {
 		// Mode 2: Raw source
-		srcFile, args, err = e.setupRawSourceMode(workDir, req, outFile)
+		_, args, err = e.setupRawSourceMode(workDir, req, outFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to setup raw source: %w", err)
 		}
 	} else {
 		// Mode 1: Preprocessed source
-		srcFile = filepath.Join(workDir, "source.i")
+		srcFile := filepath.Join(workDir, "source.i")
 		if err := os.WriteFile(srcFile, req.PreprocessedSource, 0644); err != nil {
 			return nil, fmt.Errorf("failed to write source: %w", err)
 		}

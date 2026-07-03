@@ -5,11 +5,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 )
+
+// unityVersionPattern matches Unity version directory names such as
+// "2022.3.10f1" or "6000.0.23b2" — letters, digits and dots only, so a
+// version string can never navigate the filesystem.
+var unityVersionPattern = regexp.MustCompile(`^[0-9A-Za-z.]+$`)
 
 // Detect detects the capabilities of the current system.
 func Detect() *pb.WorkerCapabilities {
@@ -443,6 +449,14 @@ func detectUnityVersions() []string {
 }
 
 func getUnityEditorPath(version string) string {
+	// version comes from a local Unity Hub directory listing, but it is
+	// spliced into a filesystem path — reject anything that is not a
+	// plain Unity version token ("2022.3.10f1") so it cannot traverse
+	// out of the Hub tree.
+	if version == "" || !unityVersionPattern.MatchString(version) {
+		return ""
+	}
+
 	var pattern string
 
 	switch runtime.GOOS {
@@ -455,7 +469,7 @@ func getUnityEditorPath(version string) string {
 		pattern = `C:\Program Files\Unity\Hub\Editor\` + version + `\Editor\Unity.exe`
 	}
 
-	if _, err := os.Stat(pattern); err == nil {
+	if _, err := os.Stat(pattern); err == nil { // #nosec G703 -- version validated against unityVersionPattern above
 		return pattern
 	}
 
@@ -488,16 +502,16 @@ func extractUnityVersion(path string) string {
 	}
 
 	// For Linux/Windows paths like .../Editor/<version>/Editor/Unity
-	// Split on "Editor" to find the version directory
-	// Need to handle both / and \ separators
-	sep := string(filepath.Separator)
-	for _, candidate := range []string{sep + "Editor" + sep, "\\Editor\\"} {
+	// Split on "Editor" to find the version directory. Both separator
+	// styles are tried unconditionally: building candidates from
+	// filepath.Separator would skip "/Editor/" when running on Windows,
+	// so slash-style paths (and tests using them) would never match.
+	for _, candidate := range []string{"/Editor/", "\\Editor\\"} {
 		parts := strings.Split(path, candidate)
 		if len(parts) >= 2 {
-			rest := parts[1]
-			version := strings.Split(rest, sep)[0]
-			if version == "" {
-				version = strings.Split(rest, "\\")[0]
+			version := parts[1]
+			if i := strings.IndexAny(version, `/\`); i >= 0 {
+				version = version[:i]
 			}
 			if isUnityVersion(version) {
 				return version

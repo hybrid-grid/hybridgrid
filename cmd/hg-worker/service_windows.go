@@ -48,7 +48,7 @@ func (s *workerService) Execute(args []string, r <-chan svc.ChangeRequest, chang
 	changes <- svc.Status{State: svc.StartPending}
 
 	// Initialize logging to file for service mode
-	logFile, err := os.OpenFile(filepath.Join(os.TempDir(), "hg-worker.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logFile, err := os.OpenFile(filepath.Join(os.TempDir(), "hg-worker.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err == nil {
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: logFile, NoColor: true})
 	}
