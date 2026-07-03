@@ -117,9 +117,29 @@ jobs:
           args: -exclude=G104,G109,G112,G115,G204,G301,G304,G306,G402 -exclude-dir=gen -exclude-dir=test ./...
 
       - name: Run govulncheck
+        # Fails on any reachable vulnerability except the allowlisted IDs:
+        # github.com/docker/docker findings with no fixed release published
+        # (checked 2026-07: GO-2026-5746, -5668, -5617, -4887, -4883 all
+        # report "Fixed in: N/A"). Re-check periodically and remove IDs
+        # from ALLOW as upstream fixes ship.
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+          ALLOW="GO-2026-5746 GO-2026-5668 GO-2026-5617 GO-2026-4887 GO-2026-4883"
+          govulncheck -json ./... > vulns.json
+          found=$(jq -r 'select(.finding != null) | select(.finding.trace[0].function != null) | .finding.osv' vulns.json | sort -u)
+          new=""
+          for id in $found; do
+            case " $ALLOW " in
+              *" $id "*) ;;
+              *) new="$new $id" ;;
+            esac
+          done
+          if [ -n "$new" ]; then
+            echo "New reachable vulnerabilities not in the allowlist:$new"
+            govulncheck ./... || true
+            exit 1
+          fi
+          echo "Reachable findings are all allowlisted (unpatched upstream): $found"
 
   # ============================================
   # Proto Check (ensure generated code is up-to-date)

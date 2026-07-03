@@ -61,7 +61,10 @@ func createSourceArchive(projectPath string) ([]byte, string, error) {
 			return nil
 		}
 
-		file, err := os.Open(path)
+		// The walk root is the user's own project directory supplied on
+		// the CLI; a symlink swapped in mid-walk (TOCTOU) could only be
+		// planted by the invoking user against themselves.
+		file, err := os.Open(path) // #nosec G122
 		if err != nil {
 			return err
 		}

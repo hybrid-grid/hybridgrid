@@ -65,7 +65,7 @@ func NewTaskLogger(path string) (*TaskLogger, error) {
 	if path == "" || path == "stdout" {
 		return &TaskLogger{w: os.Stdout}, nil
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
 	}
