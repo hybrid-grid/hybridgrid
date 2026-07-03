@@ -190,15 +190,18 @@ func setupFakeUnity(t *testing.T) (string, string) {
 
 	if runtime.GOOS == "windows" {
 		scriptPath = filepath.Join(binDir, "unity.bat")
+		// Args are written one per line inside the parse loop (mirroring the
+		// Unix stub's printf '%s\n' "$@") — a `for %%a in (%*)` loop would
+		// split on = and expand globs. The >>"file" echo form (redirect
+		// first) avoids echo 2>>file misparsing on digit-final arguments.
 		contents = []byte("@echo off\r\n" +
 			"set PROJECT=\r\n" +
 			"set LOGFILE=\r\n" +
 			"set TARGET=\r\n" +
-			"if not \"%HG_UNITY_ARGS_FILE%\"==\"\" (\r\n" +
-			"  for %%a in (%*) do echo %%a>>\"%HG_UNITY_ARGS_FILE%\"\r\n" +
-			")\r\n" +
+			"if not \"%HG_UNITY_ARGS_FILE%\"==\"\" break > \"%HG_UNITY_ARGS_FILE%\"\r\n" +
 			":loop\r\n" +
-			"if \"%1\"==\"\" goto done\r\n" +
+			"if \"%~1\"==\"\" goto done\r\n" +
+			"if not \"%HG_UNITY_ARGS_FILE%\"==\"\" >>\"%HG_UNITY_ARGS_FILE%\" echo %~1\r\n" +
 			"if \"%1\"==\"-projectPath\" (\r\n" +
 			"  set PROJECT=%2\r\n" +
 			")\r\n" +

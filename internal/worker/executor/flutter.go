@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -212,7 +213,13 @@ func runFlutterPubGet(ctx context.Context, flutterCmd, workDir string, stdout, s
 // stopGradleDaemon kills the Gradle daemon to ensure build isolation.
 // Best-effort: errors are swallowed since daemon cleanup is non-critical.
 func stopGradleDaemon(workDir string) {
-	gradlewPath := filepath.Join(workDir, "android", "gradlew")
+	// Windows cannot exec the extensionless gradlew shell script; Gradle
+	// projects ship gradlew.bat alongside it for exactly this case.
+	gradlewName := "gradlew"
+	if runtime.GOOS == "windows" {
+		gradlewName = "gradlew.bat"
+	}
+	gradlewPath := filepath.Join(workDir, "android", gradlewName)
 	if _, err := os.Stat(gradlewPath); err != nil {
 		return
 	}
