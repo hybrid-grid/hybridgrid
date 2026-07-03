@@ -22,6 +22,9 @@ func TestNewScheduler_KnownTypes(t *testing.T) {
 		"leastloaded":    (*scheduler.LeastLoadedScheduler)(nil),
 		"":               (*scheduler.LeastLoadedScheduler)(nil), // empty -> default
 		"epsilon-greedy": (*scheduler.EpsilonGreedyScheduler)(nil),
+		"linucb":         (*scheduler.LinUCBScheduler)(nil),
+		"hybrid-linucb":  (*scheduler.LinUCBScheduler)(nil),
+		"heft":           (*scheduler.HEFTScheduler)(nil),
 	}
 
 	for typ, want := range cases {

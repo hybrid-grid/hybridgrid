@@ -1,9 +1,11 @@
 package scheduler
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -106,10 +108,10 @@ func TestLinUCB_LearnsBestArm(t *testing.T) {
 		ID:      "fast",
 		Address: "127.0.0.1:0",
 		Capabilities: &pb.WorkerCapabilities{
-			NativeArch: pb.Architecture_ARCH_X86_64,
-			CpuCores:   8,
+			NativeArch:  pb.Architecture_ARCH_X86_64,
+			CpuCores:    8,
 			MemoryBytes: 8 * 1024 * 1024 * 1024,
-			Cpp: &pb.CppCapability{Compilers: []string{"gcc"}},
+			Cpp:         &pb.CppCapability{Compilers: []string{"gcc"}},
 		},
 		MaxParallel: 4,
 	}))
@@ -118,10 +120,10 @@ func TestLinUCB_LearnsBestArm(t *testing.T) {
 		ID:      "slow",
 		Address: "127.0.0.1:0",
 		Capabilities: &pb.WorkerCapabilities{
-			NativeArch: pb.Architecture_ARCH_X86_64,
-			CpuCores:   1,
+			NativeArch:  pb.Architecture_ARCH_X86_64,
+			CpuCores:    1,
 			MemoryBytes: 1 * 1024 * 1024 * 1024,
-			Cpp: &pb.CppCapability{Compilers: []string{"gcc"}},
+			Cpp:         &pb.CppCapability{Compilers: []string{"gcc"}},
 		},
 		MaxParallel: 4,
 	}))
@@ -135,13 +137,17 @@ func TestLinUCB_LearnsBestArm(t *testing.T) {
 	const warmup = 50
 	fastPicks := 0
 	for i := 0; i < trials; i++ {
-		w, _, err := s.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "", TaskContext{SourceSizeBytes: 100_000})
+		// TaskID binds the Select-time feature vector to the outcome via
+		// pendingX; without it RecordOutcome drops every update and the
+		// bandit never learns (the test then measures only the bonus).
+		ctx := TaskContext{SourceSizeBytes: 100_000, TaskID: fmt.Sprintf("t-%d", i)}
+		w, _, err := s.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "", ctx)
 		require.NoError(t, err)
 		if i >= warmup && w.ID == "fast" {
 			fastPicks++
 		}
 		r := rewards[w.ID] + rng.NormFloat64()*0.5
-		s.RecordOutcome(w.ID, r, true, TaskContext{SourceSizeBytes: 100_000})
+		s.RecordOutcome(w.ID, r, true, ctx)
 	}
 	frac := float64(fastPicks) / float64(trials-warmup)
 	assert.Greater(t, frac, 0.65, "expected >65%% picks on the fast worker after warm-up; got %.3f", frac)
@@ -174,20 +180,30 @@ func TestLinUCB_FeatureVectorDimensions(t *testing.T) {
 			CpuCores:    8,
 			MemoryBytes: 32 * 1024 * 1024 * 1024,
 		},
-		MaxParallel: 4,
-		ActiveTasks: 2,
+		MaxParallel:     4,
+		ActiveTasks:     2,
+		SuccessfulTasks: 3,
+		FailedTasks:     1,
 	}
-	x := s.featureVector(w, pb.Architecture_ARCH_ARM64, TaskContext{SourceSizeBytes: 1 << 16})
-	assert.Equal(t, s.dim, x.Len(), "feature dim must be 9 after build-type collinearity removal")
-	assert.Equal(t, 1.0, x.AtVec(0))            // bias
+	ctx := TaskContext{
+		SourceSizeBytes:    1 << 16,
+		RawSourceSizeBytes: 32 * 1024,
+		SourceFilename:     "obj.cpp",
+	}
+	x := s.featureVector(w, pb.Architecture_ARCH_ARM64, ctx)
+	assert.Equal(t, s.dim, x.Len(), "feature dim must be 12 per the Hybrid-LinUCB layout")
+	assert.Equal(t, 1.0, x.AtVec(0)) // bias
 	// dim 1: log size feature; just check it is in the expected band.
 	assert.Greater(t, x.AtVec(1), 0.5)
 	assert.LessOrEqual(t, x.AtVec(1), 1.0)
-	assert.Equal(t, 1.0, x.AtVec(3))            // ARM64 target
-	assert.Equal(t, 1.0, x.AtVec(6))            // native arch matches target
-	assert.InDelta(t, 0.5, x.AtVec(4), 1e-9)    // 8/16 cpu cores
+	assert.Equal(t, 1.0, x.AtVec(3))         // ARM64 target
+	assert.Equal(t, 1.0, x.AtVec(6))         // native arch matches target
+	assert.InDelta(t, 0.5, x.AtVec(4), 1e-9) // 8/16 cpu cores
 	assert.InDelta(t, 32.0/64.0, x.AtVec(5), 1e-9)
-	assert.InDelta(t, 0.5, x.AtVec(7), 1e-9)    // 2/4 active tasks
+	assert.InDelta(t, 0.5, x.AtVec(7), 1e-9) // 2/4 active tasks
+	assert.Equal(t, 1.0, x.AtVec(9))         // .cpp is C++
+	assert.InDelta(t, math.Log1p(32*1024)/math.Log1p(1024*1024), x.AtVec(10), 1e-9)
+	assert.InDelta(t, 4.0/6.0, x.AtVec(11), 1e-9) // Laplace (3+1)/(3+1+2)
 }
 
 // TestLinUCB_RewardMonotonicity verifies that giving better rewards to
@@ -270,4 +286,158 @@ func TestLinUCB_RejectsInvalidInputs(t *testing.T) {
 		s.mu.Unlock()
 		assert.InDelta(t, 0.0, bSum, 1e-12, "b vector should be untouched after invalid inputs")
 	}
+}
+
+// newHybridTestWorker builds a CPP-capable worker for hybrid tests.
+func newHybridTestWorker(id string, cores int32, memGiB int64, active int32) *registry.WorkerInfo {
+	return &registry.WorkerInfo{
+		ID:      id,
+		Address: "127.0.0.1:0",
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch:  pb.Architecture_ARCH_X86_64,
+			CpuCores:    cores,
+			MemoryBytes: memGiB * 1024 * 1024 * 1024,
+			Cpp:         &pb.CppCapability{Compilers: []string{"gcc"}},
+		},
+		MaxParallel: 4,
+		ActiveTasks: active,
+	}
+}
+
+// TestLinUCB_WarmStartDelegatesToLeastLoadedAndLearns checks the two
+// warm-start invariants: selection follows the least-loaded heuristic,
+// and the bandit still learns passively from the delegated dispatch
+// (pendingX cached, Sherman-Morrison update applied on outcome).
+func TestLinUCB_WarmStartDelegatesToLeastLoadedAndLearns(t *testing.T) {
+	reg := registry.NewInMemoryRegistry(60_000_000_000)
+	t.Cleanup(reg.Stop)
+	require.NoError(t, reg.Add(newHybridTestWorker("busy", 4, 4, 3)))
+	require.NoError(t, reg.Add(newHybridTestWorker("idle", 4, 4, 1)))
+	require.NoError(t, reg.Add(newHybridTestWorker("half", 4, 4, 2)))
+
+	s := NewLinUCBScheduler(LinUCBConfig{Registry: reg, WarmStartTasks: 10})
+
+	ctx := TaskContext{SourceSizeBytes: 1024, TaskID: "w1"}
+	w, info, err := s.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "", ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "idle", w.ID, "warm-start must pick the least-loaded worker")
+	assert.True(t, info.WasExploration, "warm-start dispatches are flagged as exploration")
+
+	s.mu.Lock()
+	_, cached := s.pendingX["w1"]
+	s.mu.Unlock()
+	require.True(t, cached, "warm-start must cache the feature vector for passive learning")
+
+	s.RecordOutcome(w.ID, -1.0, true, ctx)
+	s.mu.Lock()
+	arm := s.arms[w.ID]
+	var bSum float64
+	for i := 0; i < s.dim; i++ {
+		bSum += math.Abs(arm.b.AtVec(i))
+	}
+	count := arm.count
+	s.mu.Unlock()
+	assert.Equal(t, int64(1), count, "passive learning must apply the rank-1 update")
+	assert.Greater(t, bSum, 0.0, "b must absorb the delegated dispatch's reward")
+}
+
+// TestLinUCB_WarmStartHandsOverAfterN checks the warm-start boundary:
+// dispatches 1..N go least-loaded, dispatch N+1 switches to the UCB
+// argmax (with θ = 0 the bonus ∝ ‖x‖ favors the bigger worker).
+func TestLinUCB_WarmStartHandsOverAfterN(t *testing.T) {
+	reg := registry.NewInMemoryRegistry(60_000_000_000)
+	t.Cleanup(reg.Stop)
+	require.NoError(t, reg.Add(newHybridTestWorker("big", 8, 8, 1)))
+	require.NoError(t, reg.Add(newHybridTestWorker("small", 1, 1, 0)))
+
+	s := NewLinUCBScheduler(LinUCBConfig{Registry: reg, Alpha: 1, WarmStartTasks: 2})
+
+	for i := 1; i <= 2; i++ {
+		w, _, err := s.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "", TaskContext{SourceSizeBytes: 1024})
+		require.NoError(t, err)
+		assert.Equal(t, "small", w.ID, "dispatch %d is inside the warm-start window", i)
+	}
+
+	w, _, err := s.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "", TaskContext{SourceSizeBytes: 1024})
+	require.NoError(t, err)
+	assert.Equal(t, "big", w.ID, "dispatch 3 must come from the UCB argmax (bonus ∝ ‖x‖)")
+}
+
+// TestLinUCB_LoadPenaltySteersAwayFromLoadedWorker isolates the λ
+// term: with exploration disabled (Alpha < 0 — note the constructor
+// maps Alpha == 0 to the 0.5 default) and θ = 0, the only score
+// difference between two identical workers is −λ·loadRatio.
+func TestLinUCB_LoadPenaltySteersAwayFromLoadedWorker(t *testing.T) {
+	reg := registry.NewInMemoryRegistry(60_000_000_000)
+	t.Cleanup(reg.Stop)
+	require.NoError(t, reg.Add(newHybridTestWorker("loaded", 4, 4, 3)))
+	require.NoError(t, reg.Add(newHybridTestWorker("free", 4, 4, 0)))
+
+	s := NewLinUCBScheduler(LinUCBConfig{Registry: reg, Alpha: -1, LoadPenalty: 1.0})
+
+	w, info, err := s.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "", TaskContext{SourceSizeBytes: 1024})
+	require.NoError(t, err)
+	assert.Equal(t, "free", w.ID, "penalty must steer away from the loaded worker")
+	assert.False(t, info.WasExploration)
+}
+
+// TestIsCppSource covers the extension table and the compiler-driver
+// fallback (a "++" driver compiles even .c inputs as C++).
+func TestIsCppSource(t *testing.T) {
+	cases := []struct {
+		filename string
+		compiler string
+		want     bool
+	}{
+		{"main.cpp", "g++", true},
+		{"main.c", "gcc", false},
+		{"a.cc", "", true},
+		{"a.cxx", "", true},
+		{"Foo.C", "", true},
+		{"foo.hpp", "", true},
+		{"main.c", "clang++", true},
+		{"", "gcc", false},
+		{"", "g++", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.filename+"/"+tc.compiler, func(t *testing.T) {
+			assert.Equal(t, tc.want, isCppSource(tc.filename, tc.compiler))
+		})
+	}
+}
+
+// TestLinUCB_SuccessRatePrior checks the Laplace-smoothed success-rate
+// feature: (s+1)/(s+f+2), so an unobserved worker sits at 0.5 and the
+// column is never constant even on all-success workloads.
+func TestLinUCB_SuccessRatePrior(t *testing.T) {
+	reg := newRegistryWithWorkers(t, 1)
+	s := NewLinUCBScheduler(LinUCBConfig{Registry: reg})
+
+	cases := []struct {
+		succ, fail int64
+		want       float64
+	}{
+		{0, 0, 0.5},
+		{3, 1, 4.0 / 6.0},
+		{0, 2, 1.0 / 4.0},
+	}
+	for _, tc := range cases {
+		w := &registry.WorkerInfo{ID: "x", SuccessfulTasks: tc.succ, FailedTasks: tc.fail}
+		x := s.featureVector(w, pb.Architecture_ARCH_X86_64, TaskContext{})
+		assert.InDelta(t, tc.want, x.AtVec(11), 1e-9, "success rate for %d/%d", tc.succ, tc.fail)
+	}
+}
+
+// TestLinUCB_TotalDispatchesCountsFastPath pins the counter semantics:
+// totalDispatches measures dispatch volume, so single-candidate
+// fast-path dispatches count too.
+func TestLinUCB_TotalDispatchesCountsFastPath(t *testing.T) {
+	reg := newRegistryWithWorkers(t, 1)
+	s := NewLinUCBScheduler(LinUCBConfig{Registry: reg})
+
+	for i := 0; i < 3; i++ {
+		_, _, err := s.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "", TaskContext{SourceSizeBytes: 1024})
+		require.NoError(t, err)
+	}
+	assert.Equal(t, int64(3), atomic.LoadInt64(&s.totalDispatches))
 }

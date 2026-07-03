@@ -159,6 +159,14 @@ func (p *ParsedArgs) IsDistributable() bool {
 	if !isSourceFile(p.InputFiles[0]) {
 		return false
 	}
+	// Assembly units (.s/.S) must compile locally: the preprocess-and-
+	// ship pipeline produces objects missing their symbol definitions
+	// (observed on CPython's asm_trampoline_x86_64.S, whose absence
+	// only surfaces later at link time), and distributing them buys
+	// nothing — assembling is not the expensive part of a build.
+	if ext := strings.ToLower(filepath.Ext(p.InputFiles[0])); ext == ".s" {
+		return false
+	}
 	return true
 }
 

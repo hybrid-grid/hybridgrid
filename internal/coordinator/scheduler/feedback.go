@@ -14,6 +14,24 @@ type TaskContext struct {
 	// linear-bandit feature for source size is log(1 + this value).
 	SourceSizeBytes int
 
+	// RawSourceSizeBytes is len(raw_source) alone. Raw sources lack
+	// expanded headers so they run 10-100x smaller than preprocessed
+	// translation units; keeping them as a separate feature preserves a
+	// task-weight signal that SourceSizeBytes (dominated by the
+	// preprocessed part) washes out.
+	RawSourceSizeBytes int
+
+	// SourceFilename is the original file name with extension
+	// ("main.cpp"). Contextual learners infer the source language from
+	// it. Empty for clients that predate the field.
+	SourceFilename string
+
+	// Compiler is the requested compiler driver ("gcc", "g++",
+	// "clang++"). Fallback language signal when SourceFilename carries
+	// no recognized extension: a "++" driver compiles as C++ regardless
+	// of extension (GCC semantics).
+	Compiler string
+
 	// TaskID is the unique identifier supplied by the client. Contextual
 	// learners use it to bind the feature vector observed at Select to
 	// the reward observed at RecordOutcome — without this binding, the

@@ -3,10 +3,12 @@ services:
     build:
       context: ../..
       dockerfile: test/stress/Dockerfile.base
-    command: hg-coord serve --grpc-port=9000 --http-port=8080
+    command: hg-coord serve --grpc-port=9000 --http-port=8080 --scheduler=hybrid-linucb --alpha=0.5 --epsilon=0.1 --warm-start=100 --load-penalty=0.5 --task-log=/tmp/tasks.jsonl
+    volumes:
+      - task-logs:/tmp
     ports:
-      - "9000:9000"
-      - "8080:8080"
+      - "19000:9000"
+      - "18080:8080"
     networks:
       - hgnet
     deploy:
@@ -124,3 +126,4 @@ networks:
 volumes:
   build-cache:
   cpython-src:
+  task-logs:
