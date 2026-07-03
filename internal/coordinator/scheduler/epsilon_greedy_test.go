@@ -59,9 +59,16 @@ func TestEpsilonGreedy_ConvergesToBestArm(t *testing.T) {
 	s := NewEpsilonGreedyScheduler(EpsilonGreedyConfig{Registry: reg, Epsilon: 0.1})
 
 	rng := rand.New(rand.NewSource(42))
+	// Seed the exploration coin too: an unlucky crypto/rand run pushes
+	// a sample mean outside the ±0.3 tolerance and flakes the test. The
+	// registry's map iteration still randomizes which arm each explore
+	// draw lands on, so the per-arm sample count needs enough budget
+	// (~100 explore visits per arm at ε=0.1) to make ±0.3 a ≥6σ bound.
+	s.randFloat = rng.Float64
+	s.randInt = rng.Intn
 	means := map[string]float64{"worker-a": -1, "worker-b": -2, "worker-c": -3}
 
-	for i := 0; i < 300; i++ {
+	for i := 0; i < 3000; i++ {
 		w, _, err := s.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "", TaskContext{})
 		require.NoError(t, err)
 		// Sample reward ~ N(mean, 0.5)
@@ -69,7 +76,7 @@ func TestEpsilonGreedy_ConvergesToBestArm(t *testing.T) {
 		s.RecordOutcome(w.ID, reward, true, TaskContext{})
 	}
 
-	// After 300 calls, ranking of Q values should match ranking of true means.
+	// After 3000 calls, ranking of Q values should match ranking of true means.
 	qa, qb, qc := s.qValue("worker-a"), s.qValue("worker-b"), s.qValue("worker-c")
 	assert.Greater(t, qa, qb, "worker-a should outrank worker-b in Q")
 	assert.Greater(t, qb, qc, "worker-b should outrank worker-c in Q")
@@ -86,6 +93,11 @@ func TestEpsilonGreedy_ConvergesToBestArm(t *testing.T) {
 func TestEpsilonGreedy_ExplorationRateHonored(t *testing.T) {
 	reg := newRegistryWithWorkers(t, 5)
 	s := NewEpsilonGreedyScheduler(EpsilonGreedyConfig{Registry: reg, Epsilon: 0.3})
+	// Seeded coin: the binomial ±3σ bound still fails ~0.3% of runs
+	// under crypto/rand; a fixed seed makes the count reproducible.
+	rng := rand.New(rand.NewSource(7))
+	s.randFloat = rng.Float64
+	s.randInt = rng.Intn
 
 	// Pre-train so argmaxQ is well-defined and "exploit" is distinguishable.
 	for i := 0; i < 5; i++ {
