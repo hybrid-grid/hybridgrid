@@ -189,7 +189,7 @@ type PreprocessError struct {
 func (e *PreprocessError) Error() string {
 	// Format a helpful error message
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("preprocessing failed for %s\n", e.SourceFile))
+	fmt.Fprintf(&sb, "preprocessing failed for %s\n", e.SourceFile)
 
 	// Parse stderr for specific errors
 	if e.Stderr != "" {
