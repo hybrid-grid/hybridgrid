@@ -88,7 +88,9 @@ jobs:
           fi
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v4
+        # Action major must track the golangci-lint major: v4 predates
+        # golangci-lint v2 and invokes it with removed v1 flags (exit 3).
+        uses: golangci/golangci-lint-action@v8
         with:
           version: latest
           args: --timeout=5m
