@@ -10,7 +10,11 @@ on:
     branches: [main]
 
 env:
-  GO_VERSION: "1.25.8"
+  # Track the latest 1.25 patch release. Pinning an exact patch
+  # (previously 1.25.8) let the toolchain drift behind security fixes,
+  # and govulncheck scans the stdlib of the toolchain in use — three
+  # patch releases of stdlib CVEs turned the Security Scan red.
+  GO_VERSION: "1.25.x"
 
 jobs:
   # ============================================
