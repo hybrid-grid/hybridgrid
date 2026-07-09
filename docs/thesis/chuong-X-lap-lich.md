@@ -93,7 +93,24 @@ Chi phí mỗi cập nhật giảm xuống $\mathcal{O}(d^2)$ — phù hợp v�
 
 ### X.2.5 Véc-tơ đặc trưng
 
-Số chiều $d = 12$, gồm: hệ số bias, log kích thước nguồn (chuẩn hoá), one-hot loại build (CPP/Flutter/Unity), one-hot kiến trúc đích (x86_64/arm64), tỉ lệ năng lực worker (CPU lõi / 16, bộ nhớ / 64GB), khớp kiến trúc native, áp lực hàng đợi (active_tasks / max_parallel), độ trễ RPC (chuẩn hoá theo 100 ms). Tất cả đặc trưng được chuẩn hoá vào khoảng $[0, 1]$ để duy trì giả định $\|x\|\leq 1$ (Chu et al. 2011 §3) — đây là điều kiện tiên quyết cho regret bound, mặc dù trong thực nghiệm chúng tôi không hiệu lực hoá ràng buộc này một cách nghiêm ngặt.
+Số chiều $d = 12$. Phiên bản đầu tiên dùng one-hot ba chiều cho *loại build* (CPP/Flutter/Unity); vì luồng `Compile()` hiện tại chỉ phát sinh loại CPP, ba chiều này suy biến (chiều CPP trùng tuyến tính với bias, hai chiều còn lại vĩnh viễn bằng 0) và đã bị loại bỏ trong quá trình sửa lỗi (§X.5). Bố cục 12 chiều hiện tại của mã nguồn (`internal/coordinator/scheduler/linucb.go`, hàm `featureVector`) như sau:
+
+| Chỉ số | Đặc trưng | Công thức chuẩn hoá |
+|---|---|---|
+| [0] | bias | hằng số 1.0 |
+| [1] | log kích thước nguồn (đã tiền xử lý) | $\log(1+\text{size})/\log(1+4\,\text{MiB})$, chặn tại 1 |
+| [2] | kiến trúc đích = x86\_64 | one-hot 0/1 |
+| [3] | kiến trúc đích = arm64 | one-hot 0/1 |
+| [4] | số lõi CPU của worker | $\text{cpu\_cores}/16$, chặn tại 1 |
+| [5] | bộ nhớ worker | $\text{mem\_bytes}/64\,\text{GiB}$, chặn tại 1 |
+| [6] | khớp kiến trúc native | 1.0 nếu `native_arch == target` |
+| [7] | áp lực hàng đợi | $\text{active\_tasks}/\text{max\_parallel}$, chặn tại 1 |
+| [8] | độ trễ RPC gần đây | $\text{rtt\_ms}/100$, chặn tại 1 |
+| [9] | task là C++ | 1.0 nếu phần mở rộng/compiler là C++ |
+| [10] | log kích thước nguồn thô (chưa tiền xử lý) | $\log(1+\text{raw\_size})/\log(1+1\,\text{MiB})$, chặn tại 1 |
+| [11] | tỉ lệ thành công của worker (Laplace-smoothed) | $(\text{s}+1)/(\text{s}+\text{f}+2)$ |
+
+Hai chiều bổ sung so với thiết kế ban đầu — [10] kích thước nguồn thô và [11] tỉ lệ thành công — được thêm sau khi review chỉ ra rằng: (a) chiều "tỉ lệ thành công" thô với prior lạc quan 1.0 sẽ luôn bằng 1.0 trên workload thành công hoàn toàn, trùng tuyến tính với bias, nên cần Laplace-smoothing để duy trì tính phụ-thuộc-kinh-nghiệm; (b) một mẫu số chuẩn hoá kích thước riêng cho nguồn thô để đặc trưng không dồn về 0 dưới mẫu số 4 MiB của nguồn đã tiền xử lý. Tất cả đặc trưng được chuẩn hoá xấp xỉ vào $[0, 1]$ để giữ $\|x\|$ bị chặn (Chu et al. 2011 §3) — điều kiện tiên quyết cho regret bound, mặc dù thực nghiệm không hiệu lực hoá ràng buộc này một cách nghiêm ngặt.
 
 ### X.2.6 Đảm bảo về regret
 
