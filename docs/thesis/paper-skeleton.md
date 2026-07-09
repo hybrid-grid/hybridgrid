@@ -16,7 +16,7 @@ Distributed build systems are an everyday reality of modern software engineering
 
 The classical literature on R||C_max (unrelated parallel machines, Lenstra et al. 1990) shows that scheduling tasks on heterogeneous workers to minimise makespan is NP-hard with a 3/2 lower bound and 2-approximation upper bound. In an online setting — where tasks arrive sequentially and must be dispatched immediately — the situation is even harder, with no tight competitive ratio for arbitrary heterogeneity. Production systems therefore rely on heuristics: round-robin, least-loaded, or Power-of-Two-Choices (P2C, Mitzenmacher 2001). These heuristics work without observing task outcomes; they make decisions from queue lengths or static capability scores and never learn.
 
-**The opportunity.** Modern compilation workloads exhibit dramatic per-task variance. Our measurements on a CPython build (873 tasks, 5-worker heterogeneous cluster) show a **29× ratio between P99 and P50 compile time**, and a single "best" worker absorbing **33% of all dispatches** under both static heuristics. The combination of high variance and concentrated dispatch suggests that a scheduler that observed compile-time outcomes and adjusted future dispatches accordingly — an online learner — could improve makespan and tail latency.
+**The opportunity.** Modern compilation workloads exhibit dramatic per-task variance. Our measurements on a CPython build (~293 compilation tasks per build; the "873" in early M1 notes is the sum over the 1/3/5-worker configs, not a per-build count) on a 5-worker heterogeneous cluster show a **29× ratio between P99 and P50 compile time**, and a single "best" worker absorbing **33% of all dispatches** under both static heuristics. The combination of high variance and concentrated dispatch suggests that a scheduler that observed compile-time outcomes and adjusted future dispatches accordingly — an online learner — could improve makespan and tail latency.
 
 **The challenge.** Prior RL approaches to scheduling (Decima, DeepRM) require simulator pre-training, which is unavailable for build systems with their real compiler binaries and noisy hardware. The literature offers a less-explored alternative: *contextual multi-armed bandits*. A contextual bandit treats each scheduling decision as a one-step decision problem, learns from observed rewards online, and has theoretical regret bounds (Chu et al. 2011). The most studied algorithm in this family is LinUCB (Li et al. 2010).
 
@@ -29,7 +29,7 @@ The classical literature on R||C_max (unrelated parallel machines, Lenstra et al
 - **C3.** An empirical comparison on a real workload (CPython compilation) over a Docker-based heterogeneous cluster, with explicit characterisation of the failure modes that arise: *cold-start trap*, *dispatch concentration*, *target leakage in reward attribution*.
 - **C4.** A design-space study — α tuning, reward function ablation, feature-subset ablation — that quantifies the sensitivity of LinUCB to its hyperparameters in the online build-scheduling regime, providing concrete recommendations for practitioners.
 
-**Findings preview.** P2C achieves the best wall-clock makespan among the static heuristics (1.62× speedup vs. LeastLoaded on 5 workers, matching Mitzenmacher 2001's theoretical prediction). Naive ε-greedy underperforms every heuristic because of feature-blindness. LinUCB at default α=1.0 *also* underperformed because of three implementation traps we identified and fixed: feature-vector reconstruction at update time used post-completion worker state (target leakage), build-type one-hot dimensions were perfectly collinear with the bias under the current Compile() path, and reward magnitudes dwarfed the exploration bonus during warm-up. After fixing these, **the corrected LinUCB matches P2C on wall-clock makespan (94 s tie at 5w-hetero) and beats P2C on tail latency (P99 compile_time 18 896 ms vs 19 347 ms, −2.3%).** The 64 s recovery from 158 s to 94 s is attributable entirely to the implementation fixes; no algorithmic redesign was required.
+**Findings preview.** Naive ε-greedy underperforms every heuristic because of feature-blindness. LinUCB at default α=1.0 *also* underperformed because of three implementation traps we identified and fixed: feature-vector reconstruction at update time used post-completion worker state (target leakage), build-type one-hot dimensions were perfectly collinear with the bias under the current Compile() path, and reward magnitudes dwarfed the exploration bonus during warm-up. The 64 s recovery from 158 s to 94 s (single-run) is attributable entirely to these fixes; no algorithmic redesign was required. **Crucially, our headline evaluation is confound-controlled** (randomized complete block design, 10 reps, paired Wilcoxon + Holm + Cliff's delta; §5.2). Under that protocol the corrected hybrid-LinUCB **ties LeastLoaded** on makespan (median 40.5 s vs 40.2 s, $p=0.65$) and significantly beats only the weaker learners P2C and pure LinUCB ($p=0.003$, large effect) — and only at light load; on a heavier workload even that edge does not survive multiple-comparison correction. An earlier scheduler-major single-run analysis had reported a 7.9% hybrid-over-LeastLoaded win ($p=0.0001$); we show this was a **run-order/thermal artifact** that vanishes under blocking. A warm-bandit ablation (persistent coordinator across sequential builds) confirms the tie is fundamental, not a cold-start effect. The honest finding is therefore two-part: a *negative result* (the bandit matches but does not beat a strong heuristic on this stationary clean-build workload) and a *methodological lesson* (a rigorous design caught a false positive produced by a careless one).
 
 ---
 
@@ -125,21 +125,24 @@ $$A_{a_t} \leftarrow A_{a_t} + x_{t,a_t} x_{t,a_t}^\top, \qquad b_{a_t} \leftarr
 
 Per Li 2010 Eq. (4), the theoretical exploration coefficient is $\alpha = 1 + \sqrt{\ln(2/\delta)/2}$ for confidence $1-\delta$. We default to $\alpha = 1.0$ and report results across $\alpha \in \{0.1, 0.5, 1.0, 2.0\}$ in the ablation (§5.5).
 
-**Feature vector $x_{t,a} \in \mathbb{R}^{d}$, $d = 12$.** Composed of:
+**Feature vector $x_{t,a} \in \mathbb{R}^{d}$, $d = 12$.** The initial design used a three-way build-type one-hot (CPP/Flutter/Unity); because the current `Compile()` path only emits CPP, those dimensions degenerated (the CPP column collinear with the bias, the other two permanently zero) and were removed during the bug-fix pass (§6). The current 12-dim layout (`internal/coordinator/scheduler/linucb.go`, `featureVector`) is:
 
 | Index | Feature | Normalisation |
 |---|---|---|
 | 0 | bias | constant 1.0 |
-| 1 | $\log(1 + \text{source size}) / 16$ | $\le 1.5$ for typical sources |
-| 2–4 | build type one-hot | CPP / Flutter / Unity |
-| 5–6 | target arch one-hot | x86\_64 / arm64 |
-| 7 | worker CPU cores / 16 | clipped at 1.0 |
-| 8 | worker memory / 64 GiB | clipped at 1.0 |
-| 9 | native arch matches target | 0 / 1 |
-| 10 | active tasks / max parallel | $\in [0, 1]$ |
-| 11 | EWMA RPC latency / 100 ms | clipped at 1.0 |
+| 1 | log preprocessed source size | $\log(1+\text{size})/\log(1+4\,\text{MiB})$, clipped at 1 |
+| 2 | target arch = x86\_64 | one-hot 0/1 |
+| 3 | target arch = arm64 | one-hot 0/1 |
+| 4 | worker CPU cores | $\text{cores}/16$, clipped at 1 |
+| 5 | worker memory | $\text{mem}/64\,\text{GiB}$, clipped at 1 |
+| 6 | native arch matches target | 0 / 1 |
+| 7 | active tasks / max parallel | clipped at 1 |
+| 8 | recent RPC latency | $\text{ms}/100$, clipped at 1 |
+| 9 | task is C++ | 0 / 1 |
+| 10 | log raw (unpreprocessed) source size | $\log(1+\text{raw})/\log(1+1\,\text{MiB})$, clipped at 1 |
+| 11 | worker success rate (Laplace-smoothed) | $(\text{s}+1)/(\text{s}+\text{f}+2)$ |
 
-All features are normalised to a roughly bounded scale, matching the linear-payoff convention of Chu et al. 2011 ($\lVert x \rVert$ bounded). We do not enforce $\lVert x \rVert \le 1$ exactly; the normalisations keep all feature values in $[0, 1]$ except for the bias (1) and the log-size feature (which can exceed 1 marginally). We explore the impact of stricter normalisation in §5.5.
+Dimensions [10] and [11] replaced the removed build-type slots after review: a raw-size feature with its own denominator (so it is not compressed to zero under the 4 MiB preprocessed denominator), and a Laplace-smoothed success rate (the raw rate with an optimistic prior is exactly 1.0 for every worker on a fully-successful workload — collinear with the bias — so smoothing keeps the column experience-dependent). All features are normalised to a roughly bounded scale, matching the linear-payoff convention of Chu et al. 2011 ($\lVert x \rVert$ bounded); we do not enforce $\lVert x \rVert \le 1$ exactly. We explore feature-subset ablations in §5.5.
 
 **Sherman–Morrison incremental inverse.** Each update is rank-1: $A_{\text{new}} = A_{\text{old}} + x x^\top$. Naive re-inversion costs $\mathcal{O}(d^3)$; the Sherman–Morrison formula reduces this to $\mathcal{O}(d^2)$:
 
@@ -192,11 +195,11 @@ Files load directly into pandas with `pd.read_json(path, lines=True)` — no tra
 
 ### §5.1 Setup
 
-- **Workload:** CPython 3.x make build (≈ 870 compilation tasks per run)
+- **Workload:** CPython make build (~293 compilation tasks per build; ~870 is the 3-config aggregate)
 - **Cluster:** Docker Compose with `cpus` cgroup limits per worker
 - **Configurations:** 1w-4.0cpu (homogeneous), 3w-hetero (0.8/1.2/2.0 cpu), 5w-hetero (0.5/0.6/0.8/1.0/1.1 cpu)
 - **Metrics:** wall-clock makespan, per-worker dispatch count, P50/P95/P99 compile time
-- **Repetitions:** *TODO* — single-shot for M1 baseline; M3 evaluation needs ≥5 repetitions for variance estimation
+- **Repetitions:** Tables 1/3/4 are single-shot (M1/M3 baseline). The **headline evaluation (§5.2.1)** uses 10 repetitions under a randomized complete block design with paired significance testing — this is the statistically valid comparison and supersedes single-run differences.
 
 ### §5.2 Wall-clock makespan (Table 1)
 
@@ -206,13 +209,32 @@ Files load directly into pandas with `pd.read_json(path, lines=True)` — no tra
 | 3w-hetero | 123 s | 85 s | 142 s | 103 s | 108 s | 135 s |
 | 5w-hetero | 152 s | **94 s** | 119 s | 158 s | **94 s** | 144 s |
 
-(Single-run measurements; statistical repetition in §5.5.4.)
+(Single-run measurements — **not** a valid basis for scheduler comparison; see §5.2.1 for the confound-controlled headline result.)
 
-P2C improves 1.45–1.62× over LeastLoaded on heterogeneous clusters, confirming Mitzenmacher 2001's theoretical prediction. P2C's 1-worker regression (−41%) reflects circuit-breaker filtering overhead, which we address in the bandit implementations with a single-candidate fast path. **The LinUCB column tells two stories.** The "with bugs" column reflects our first implementation: at default $\alpha = 1.0$ LinUCB was the worst scheduler on 5w-hetero (158 s, 1.68× slower than P2C). After an independent code review identified three implementation traps (feature-vector reconstruction leakage, collinear one-hot dims, reward magnitude mismatch — see §6 and `docs/thesis/theory-notes.md`), the corrected implementation **ties P2C at 94 s** on the heterogeneous configuration. The 64 s recovery is attributable to the fixes, not to algorithmic redesign — *the algorithm was correct from the start; the implementation discipline was not*. This is itself a contribution and is reflected in §6 Discussion and §8 Conclusion.
+P2C improves 1.45–1.62× over LeastLoaded on heterogeneous clusters, confirming Mitzenmacher 2001's theoretical prediction. P2C's 1-worker regression (−41%) reflects circuit-breaker filtering overhead, which we address in the bandit implementations with a single-candidate fast path. **The LinUCB column tells two stories.** The "with bugs" column reflects our first implementation: at default $\alpha = 1.0$ LinUCB was the worst scheduler on 5w-hetero (158 s, 1.68× slower than P2C). After an independent code review identified three implementation traps (feature-vector reconstruction leakage, collinear one-hot dims, reward magnitude mismatch — see §6 and `docs/thesis/theory-notes.md`), the corrected implementation recovers to 94 s single-run. The 64 s recovery is attributable to the fixes, not to algorithmic redesign — *the algorithm was correct from the start; the implementation discipline was not*. **However, whether the corrected bandit actually *beats* the heuristics cannot be settled by these single-run numbers** — the differences are within the host noise floor. §5.2.1 settles it.
+
+### §5.2.1 Headline result — confound-controlled comparison (Table 2)
+
+The single-run tables above are confounded: their scheduler-major run order (all repetitions of one scheduler back-to-back) entangles scheduler identity with slow host drift (thermal, background load). We therefore re-measure under a **randomized complete block design**: 10 rounds, each running all four schedulers once in a per-round seeded shuffled order, with a discarded warm-up build, a worker-registration barrier, per-build cooldown, sub-second timing, and per-build cache clearing. Rounds are statistical blocks, enabling **paired** tests. Analysis: Friedman omnibus + one-sided Wilcoxon signed-rank (hybrid $<$ baseline) + Holm–Bonferroni + Cliff's delta + bootstrap CIs. Data: `.sisyphus/evidence/rigorous-v3.14.0/`.
+
+**Table 2 — Makespan (s), 10 blocks, 5w-hetero. Light workload (~293 TU/build).**
+
+| Scheduler | Median | Mean | Std | vs hybrid-LinUCB (paired Wilcoxon, Holm) |
+|---|---|---|---|---|
+| LeastLoaded | 40.24 | 40.38 | 1.02 | **tie** (Δ=+0.09 s, $p=0.65$, $d$=+0.10) |
+| **hybrid-LinUCB** | 40.52 | 40.56 | 1.06 | — |
+| P2C | 45.60 | 46.01 | 1.39 | hybrid **wins** (Δ=−5.26 s, $p=0.003$, $d$=−1.0) |
+| LinUCB | 47.48 | 47.11 | 1.45 | hybrid **wins** (Δ=−6.80 s, $p=0.003$, $d$=−1.0) |
+
+Friedman $\chi^2=24.60$, $p=0.00002$. P99 compile time: Friedman $p=0.169$ (no detectable difference — the single-run "−2.3% tail win" does not survive repetition).
+
+**The apparent hybrid-over-LeastLoaded advantage is an artifact.** A first, scheduler-major analysis of the same data reported hybrid beating LeastLoaded by 7.9% at $p=0.0001$; under blocking the two are statistically indistinguishable ($p=0.65$). On a heavier workload (371 TU; `rigorous-v3.14.0/heavy/`) LeastLoaded is the fastest by median and hybrid's edge over P2C/LinUCB no longer survives Holm correction, while hybrid exhibits a cold-start tail outlier (one run at ~2× normal). Finally, a **warm-bandit ablation** (`warm-bandit-v3.14.0/`) keeps one coordinator alive across 8 sequential builds so the bandit accumulates state: makespan is flat across builds (Spearman $\rho=-0.079$, $p=0.59$) and warm hybrid still ties LeastLoaded — so the tie is fundamental, not a cold-start effect. The bandit converges *within* a single build (293 TU $\gg$ warm-start 100) on this stationary workload, leaving nothing for cross-build persistence to exploit.
+
+**Bottom line.** On this clean-build compilation workload the contextual bandit **matches** a strong, stateless heuristic (LeastLoaded) and **beats** only the weaker learned/randomized baselines, and only at light load. A learned scheduler's advantage requires a setting where LeastLoaded is suboptimal — cache-affinity or non-stationary workers (§7).
 
 ### §5.3 Load balance (per-worker dispatch counts)
 
-5w-hetero scenario, 873 tasks total:
+5w-hetero scenario, ~293 tasks per build:
 
 | Scheduler | top:bottom ratio | top worker share | Exploration rate |
 |---|---|---|---|
@@ -236,7 +258,7 @@ P2C is the most balanced (8.6:1), even though it does not see per-task outcomes 
 | **LinUCB-fixed (α=0.5)** | 826 | **5 676** | **18 896** |
 | HEFT | 995 | 6 919 | 24 143 |
 
-P2C reduces P99 by 19% over LeastLoaded — partly placement, partly less queue contention. The corrected LinUCB delivers an additional 2.3% reduction at P99 (18 896 ms vs P2C 19 347 ms) and a 2.6% reduction at P95. *This is the tail-latency win the bandit framing was designed to deliver.* The wall-clock makespan in §5.2 is dominated by the longest-pending task, which is closer to P2C's average than to the tail; LinUCB's edge therefore appears in tail latency, not in mean makespan, and would translate to greater advantage in workloads with even heavier tails.
+In this single run P2C reduces P99 by 19% over LeastLoaded, and the corrected LinUCB shows a further 2.3% reduction at P99 (18 896 ms vs P2C 19 347 ms). We initially read this as *the tail-latency win the bandit framing was designed to deliver.* **The repeated experiment does not support that claim:** across 10 blocks the P99 differences are not statistically distinguishable (Friedman $p=0.169$; §5.2.1). The single-run tail ordering is within run-to-run variance. We therefore no longer claim a bandit tail-latency advantage on this workload; a genuine tail benefit would require a heavier-tailed workload than CPython and remains an open question (§7).
 
 ### §5.5 Ablations
 
@@ -293,7 +315,7 @@ This last row functionally matches ε-greedy with $\varepsilon \to 0$, so we exp
 
 #### §5.5.4 Statistical repetitions
 
-For the **headline table (§5.2)** we report mean ± standard deviation across 5 independent runs of each scheduler at the 5w-hetero configuration and apply a paired Wilcoxon signed-rank test (Wilcoxon 1945) to test whether LinUCB or P2C significantly outperforms the other. Single-run differences below ≈10 s are within the observed noise floor of our Docker-on-macOS host and should not be claimed as significant without this protocol.
+This protocol is now **executed** (§5.2.1). We went beyond the originally-planned "≥5 runs + Wilcoxon": 10 repetitions under a *randomized complete block design* (removing the run-order/thermal confound that a scheduler-major layout introduces), analysed with Friedman omnibus, one-sided paired Wilcoxon signed-rank (Wilcoxon 1945), Holm–Bonferroni family-wise correction, Cliff's delta effect sizes, and bootstrap confidence intervals. Doing so overturned a single-run conclusion: what looked like a 7.9% hybrid-over-LeastLoaded win ($p=0.0001$) was a run-order artifact and disappears to a statistical tie ($p=0.65$) under blocking. Single-run differences below ≈10 s are within the host noise floor and must not be claimed as significant without this protocol — a lesson the data taught us directly.
 
 ### §5.6 Failure mode injection
 
@@ -350,7 +372,7 @@ Our cluster runs entirely on a single host (Docker Desktop on macOS) with cgroup
 
 ### §7.3 Statistical significance
 
-Most numbers reported in this paper are from *single-shot benchmark runs*. Docker on macOS has nontrivial run-to-run variance (kernel scheduling, JIT warm-up, cgroup contention). We have repeatedly observed P2C take 85–94 s for the same 5w-hetero configuration without intentional change. Our central conclusions — particularly any LinUCB-vs-P2C comparison within ≈10 s — are therefore *suggestive* and require the multi-run protocol described in §5.5.4 (≥5 paired runs + Wilcoxon signed-rank test) for paper-grade confidence.
+The **headline comparison (§5.2.1) is multi-run and confound-controlled** (10-block randomized design + paired tests), and its conclusion — hybrid-LinUCB ties LeastLoaded, beats the weaker learners — is statistically supported. The *ancillary* tables (single-run α-sweep, per-config Table 1, load-balance, tail) remain single-shot and are reported as suggestive context only: Docker on macOS has nontrivial run-to-run variance (we have observed P2C take 85–94 s for the same 5w-hetero config without intentional change), so any single-run difference within the ≈10 s noise floor should not be read as a real effect. The methodological headline of this paper is precisely that repetition under blocking overturned a single-run false positive (§5.2.1, §6).
 
 ### §7.4 Linear realisability
 
@@ -410,11 +432,12 @@ python3 -c "import pandas as pd; df = pd.read_json('tasks.jsonl', lines=True); p
 ## TODO before submission
 
 - [ ] Replace M2/M3 *pending* cells with measured numbers
-- [ ] Add HEFT baseline (§5)
-- [ ] ≥5 repetitions per config; report mean ± stddev
+- [x] Add HEFT baseline (§5)
+- [x] ≥5 repetitions (done: 10-block randomized design, §5.2.1) — report median + CI
+- [x] Statistical significance tests (done: Friedman + paired Wilcoxon + Holm + Cliff's delta, §5.2.1)
 - [ ] Identical-hardware comparison with `docs/BENCHMARK_REPORT_v0.5.md` (currently divergent baselines)
-- [ ] Statistical significance tests (paired t-test or Wilcoxon)
 - [ ] Re-run with diverse workloads (templates-heavy C++, mixed C/CXX)
+- [ ] Cache-aware ablation on an incremental-rebuild workload (§7)
 - [ ] Limitations section finalized after experiments
 - [ ] §6 Discussion drafted
 - [ ] Citations formatted (BibTeX)

@@ -1,0 +1,17 @@
+scheduler,build_idx,count,mean,std,median
+hybrid-linucb,1,6,43.83,2.02,42.76
+hybrid-linucb,2,6,43.22,4.54,41.64
+hybrid-linucb,3,6,43.28,2.9,43.76
+hybrid-linucb,4,6,43.28,1.29,43.43
+hybrid-linucb,5,6,44.11,3.32,42.64
+hybrid-linucb,6,6,44.27,3.87,42.3
+hybrid-linucb,7,6,43.52,5.54,41.46
+hybrid-linucb,8,6,43.44,3.14,42.98
+leastloaded,1,6,45.18,2.41,44.69
+leastloaded,2,6,42.7,1.89,42.08
+leastloaded,3,6,42.3,1.76,42.26
+leastloaded,4,6,41.37,1.63,41.1
+leastloaded,5,6,41.56,2.51,40.64
+leastloaded,6,6,42.76,2.14,41.84
+leastloaded,7,6,41.57,2.16,40.88
+leastloaded,8,6,42.87,3.79,41.02

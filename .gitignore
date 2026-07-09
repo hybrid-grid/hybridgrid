@@ -72,3 +72,8 @@ test/e2e/certs/
 .omc/state/
 .omc/notepad.md
 .omc/project-memory.json
+
+# benchmark analysis venv + caches (local only)
+scripts/.venv-bench/
+__pycache__/
+test/stress/.omc/
