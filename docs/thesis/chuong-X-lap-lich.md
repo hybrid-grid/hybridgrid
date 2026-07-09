@@ -1,13 +1,13 @@
 # Chương X — Thuật toán lập lịch dựa trên Contextual Bandit cho hệ thống biên dịch phân tán Hybrid-Grid
 
-> *Bản thảo gửi giáo viên hướng dẫn — phiên bản ngày 29/04/2026.*
-> Mọi số liệu trong chương được dẫn nguồn từ thư mục `.sisyphus/evidence/m1/` và các paper trong `docs/thesis/theory-notes.md`. Các đoạn còn để trống cờ "kết quả M3" sẽ được bổ sung khi benchmark LinUCB hoàn tất.
+> *Bản thảo gửi giáo viên hướng dẫn — phiên bản ngày 09/07/2026.*
+> Mọi số liệu trong chương được dẫn nguồn từ các thư mục `.sisyphus/evidence/` và các paper trong `docs/thesis/theory-notes.md`. Bảng X.1–X.2 (mục X.4.2) là số liệu chạy đơn (single-run) ban đầu; mục **X.4.5** trình bày kết quả đo lường lại có kiểm soát nhiễu thí nghiệm (randomized block, 10 lần lặp) — đây là số liệu **có giá trị kết luận** và thay thế các so sánh single-run. Mục **X.4.6** trình bày ablation warm-bandit. Kết luận trung thực: contextual bandit **ngang** heuristic LeastLoaded trên workload này, vượt trội các baseline yếu hơn (P2C, LinUCB thuần) chỉ ở tải nhẹ.
 
 ## X.1 Đặt vấn đề
 
 ### X.1.1 Bối cảnh hệ thống
 
-Hệ thống Hybrid-Grid Build chia một quá trình biên dịch C/C++ thành hàng trăm tới hàng nghìn task độc lập (mỗi file `.c`/`.cpp` là một task) và phân phối chúng tới một cụm worker khác chủng (heterogeneous). Trong cấu hình điển hình mà chúng tôi đã đo (xem `.sisyphus/evidence/m1/findings.md`), một build CPython gồm 873 task được phân bố trên 1, 3 hoặc 5 worker với tổng dung lượng CPU cố định 4.0 lõi nhưng phân chia không đều. Các worker khác nhau về số lõi CPU, dung lượng bộ nhớ, kiến trúc tập lệnh, và cấu hình mạng. Do đó thời gian biên dịch cho cùng một file có thể lệch nhau đáng kể giữa các worker — đo lường thực nghiệm cho thấy tỉ số P99/P50 thời gian biên dịch lên tới 29 lần.
+Hệ thống Hybrid-Grid Build chia một quá trình biên dịch C/C++ thành hàng trăm task độc lập (mỗi file `.c`/`.cpp` là một task) và phân phối chúng tới một cụm worker khác chủng (heterogeneous). Trong cấu hình điển hình mà chúng tôi đã đo (xem `.sisyphus/evidence/m1/findings.md`), một build CPython đơn lẻ sinh ra khoảng **293 translation unit** (task); con số 873 xuất hiện trong các tài liệu M1 ban đầu là **tổng cộng dồn trên ba cấu hình cluster** (1 + 3 + 5 worker, mỗi cấu hình ~291 task), không phải số task của một build. Tổng dung lượng CPU được cố định ở 4.0 lõi cho mọi cấu hình nhưng phân chia không đều giữa các worker. Các worker khác nhau về số lõi CPU, dung lượng bộ nhớ, kiến trúc tập lệnh, và cấu hình mạng. Do đó thời gian biên dịch cho cùng một file có thể lệch nhau đáng kể giữa các worker — đo lường thực nghiệm cho thấy tỉ số P99/P50 thời gian biên dịch lên tới 29 lần.
 
 Coordinator (`hg-coord`) giữ một sổ đăng ký (registry) các worker đang sống và quyết định gửi task nào tới worker nào thông qua một thuật toán lập lịch (scheduler). Đây là điểm có ảnh hưởng lớn nhất tới tổng thời gian build (makespan) và là trọng tâm nghiên cứu của đồ án này.
 
@@ -26,13 +26,15 @@ Hai heuristic phổ biến đã được hiện thực trong Hybrid-Grid:
 
 Cả hai đều **không học từ dữ liệu thực thi**. Đo lường thực nghiệm (Bảng X.1) trên cùng cấu hình 5 worker khác chủng cho thấy:
 
-**Bảng X.1 — Makespan (giây) trên benchmark CPython, 873 task, đo đơn vị giây.**
+**Bảng X.1 — Makespan (giây) trên benchmark CPython (~293 task/build), chạy đơn (single-run).**
 
 | Cấu hình  | LeastLoaded | P2C  | ε-greedy | LinUCB α=1 (lỗi) | LinUCB-fixed α=0.5 | HEFT |
 |-----------|-------------|------|----------|------|--------------------|------|
 | 1w-4.0CPU | 92          | 130  | 146      | 129  | 131                | 129  |
 | 3w-hetero | 123         | 85   | 142      | 103  | 108                | 135  |
 | 5w-hetero | 152         | **94** | 119    | 158  | **94**             | 144  |
+
+> ⚠️ **Lưu ý về độ tin cậy của Bảng X.1:** các số trên đến từ *một* lần chạy mỗi cấu hình, không kiểm soát nhiễu thí nghiệm (thứ tự chạy, thermal drift). Mục **X.4.5** cho thấy khi lặp 10 lần với thiết kế randomized block và kiểm định thống kê ghép cặp, một số chênh lệch trong Bảng X.1 **biến mất** (đặc biệt ưu thế biểu kiến của bandit so với LeastLoaded là *artifact* của thứ tự chạy). Bảng X.1 được giữ lại như bối cảnh lịch sử; kết luận định lượng lấy từ X.4.5.
 
 **Bảng X.2 — Tỉ lệ phân phối task top:bottom (lệch tải) trên 5w-hetero.**
 
@@ -144,6 +146,46 @@ Phân bố Q tại dispatch (`q_value_at_dispatch` trong log): trung bình −6.
 
 Tỉ lệ `was_exploration = true` trong log ε-greedy: 0.084 — sát với mục tiêu $\varepsilon = 0.10$, sai lệch nhỏ là do fast-path đơn-ứng-viên trong cấu hình 1-worker.
 
+### X.4.5 Đo lường lại có kiểm soát nhiễu (rigorous, randomized block)
+
+Các số liệu Bảng X.1 đến từ một lần chạy mỗi cấu hình. Vì chênh lệch giữa các scheduler ở cùng cấu hình có thể nhỏ hơn biên độ nhiễu của môi trường (sàn nhiễu Docker/macOS quan sát được ±25 giây trên bản host cũ), một lần chạy đơn *không đủ* để rút kết luận thống kê. Chúng tôi thiết kế lại thí nghiệm theo chuẩn **randomized complete block design** (`scripts/benchmark_rigorous.sh`):
+
+- **Khối hoá (blocking):** mỗi *round* chạy cả bốn scheduler đúng một lần, theo thứ tự **xáo trộn ngẫu nhiên có seed** riêng cho từng round. Nhờ vậy mỗi scheduler đều nếm đủ dải trạng thái của host (mát/nóng), triệt tiêu confound giữa "danh tính scheduler" và "trôi nhiệt/thời gian". Mỗi round trở thành một khối thống kê, cho phép dùng kiểm định **ghép cặp** (paired) mạnh hơn.
+- **Loại các nhiễu khác:** một build khởi động bị loại bỏ (warm-up), rào chắn chờ đủ 5/5 worker đăng ký, cooldown cố định trước mỗi build, đo thời gian dưới-giây (sub-second), xóa cache biên dịch mỗi build.
+- **Quy mô:** 10 round × 4 scheduler = 40 build, trên cấu hình 5w-hetero. Phân tích bằng Friedman omnibus + Wilcoxon signed-rank ghép cặp + hiệu chỉnh Holm–Bonferroni + effect size Cliff's delta + khoảng tin cậy bootstrap (`scripts/analyze_rigorous.py`). Số liệu thô: `.sisyphus/evidence/rigorous-v3.14.0/`.
+
+**Bảng X.3 — Makespan (giây), 10 round, 5w-hetero, workload nhẹ ~293 task. Median [KTC 95%].**
+
+| Scheduler | Median (s) | Mean | Std | So với hybrid-linucb (Wilcoxon ghép cặp + Holm) |
+|---|---|---|---|---|
+| LeastLoaded | 40.24 | 40.38 | 1.02 | **hòa** (Δ=+0.09 s, p=0.65, Cliff d=+0.10) |
+| **hybrid-linucb** | 40.52 | 40.56 | 1.06 | — |
+| P2C | 45.60 | 46.01 | 1.39 | hybrid **thắng** (Δ=−5.26 s, p=0.003, d=−1.0) |
+| LinUCB | 47.48 | 47.11 | 1.45 | hybrid **thắng** (Δ=−6.80 s, p=0.003, d=−1.0) |
+
+Friedman omnibus: $\chi^2 = 24.60$, $p = 0.00002$ (các scheduler khác nhau có ý nghĩa). Về độ trễ đuôi P99: Friedman $p = 0.169$ — **không** phát hiện khác biệt.
+
+**Phát hiện cốt lõi và bài học phương pháp luận.** Trong lần chạy single-run ban đầu (thiết kế "scheduler-major": chạy toàn bộ 10 lần lặp của một scheduler liên tiếp rồi mới sang scheduler khác), hybrid-linucb *dường như* vượt LeastLoaded 7.9% với $p = 0.0001$. Khi loại confound thứ tự bằng randomized block, ưu thế đó **biến mất hoàn toàn**: hai scheduler thống kê **ngang nhau** ($p = 0.65$). Chênh lệch biểu kiến trước đó là *artifact thí nghiệm* — LeastLoaded bị đo khi máy ở trạng thái tải khác. Đây là minh chứng trực tiếp rằng một thiết kế thí nghiệm nghiêm ngặt có thể **bắt được kết quả dương tính giả** do một thiết kế cẩu thả sinh ra; bản thân điều này là một đóng góp phương pháp luận của đồ án.
+
+**Bảng X.4 — Makespan trên workload nặng hơn (~371 task, bỏ cờ `--disable-test-modules`).**
+
+| Scheduler | Median (s) | Mean | Std | So với hybrid-linucb |
+|---|---|---|---|---|
+| **LeastLoaded** | 48.65 | 51.36 | 6.78 | hybrid **hòa/thua nhẹ** (Δ=+0.10 s, p=0.82) |
+| hybrid-linucb | 50.64 | 55.42 | 16.60 | — |
+| P2C | 53.48 | 55.22 | 5.08 | Δ=−3.12 s, p_holm=0.16 (không đủ ý nghĩa sau hiệu chỉnh) |
+| LinUCB | 60.20 | 59.45 | 6.35 | Δ=−7.61 s, p_holm=0.16 (không đủ ý nghĩa sau hiệu chỉnh) |
+
+Ở tải nặng hơn, LeastLoaded thậm chí **nhanh nhất** theo median, và ưu thế của hybrid so với P2C/LinUCB không còn đủ ý nghĩa sau hiệu chỉnh Holm. Độ lệch chuẩn lớn của hybrid (16.6) đến từ **một** outlier (round 10 = 101.93 s, gấp đôi bình thường): bandit khởi động lạnh thỉnh thoảng ra một chuỗi quyết định khám phá tệ, bộc lộ **rủi ro đuôi (tail risk)** của bandit — đúng với hạn chế drift ở §X.5.2.
+
+### X.4.6 Ablation warm-bandit — persistence không thay đổi kết luận
+
+Giả thuyết tự nhiên để giải thích thế hòa: benchmark rigorous khởi động lại coordinator ở *mỗi* build, nên bandit **khởi động lạnh mỗi lần** và không tích lũy học qua ~293 task của một build. Chúng tôi kiểm chứng bằng cách loại bỏ chính giả thuyết này (`scripts/benchmark_warm.sh`): giữ **một** coordinator sống qua K=8 build tuần tự (bandit tích lũy trạng thái xuyên suốt — đã xác minh qua đọc mã: trạng thái bandit là singleton in-memory, tạo một lần, không bao giờ reset), lặp 6 session độc lập, đo makespan theo chỉ số build.
+
+**Kết quả: giả thuyết bị bác bỏ.** Xu hướng học (Spearman giữa chỉ số build và makespan): $\rho = -0.079$, $p = 0.59$ — **phẳng, không học**. So sánh build 1 với build 8 (Wilcoxon ghép cặp, n=6): $\Delta = +0.21$ s, $p = 0.42$ (không nhanh lên). Warm-bandit ở build 8 so với LeastLoaded: $\Delta = -0.19$ s, $p = 0.50$ (vẫn hòa). Số liệu: `.sisyphus/evidence/warm-bandit-v3.14.0/`.
+
+**Vì sao.** Mỗi build có ~293 task, trong khi warm-start $N = 100$ — bandit đã đi qua cửa sổ khởi động và hội tụ **ngay trong một build**. Với không gian đặc trưng nhỏ (9–12 chiều) và workload **dừng (stationary)**, ma trận $A_a$ bão hòa trong build đầu; các build sau không còn thông tin mới để học. Do đó khởi động lạnh **không** phải nguyên nhân của thế hòa — thế hòa là **bản chất**: trên workload biên dịch này (task đồng nhất, worker tĩnh trong một build), LeastLoaded đã gần tối ưu, và một bandit có ngữ cảnh hội tụ về đúng chất lượng đó nhưng không có cấu trúc ẩn nào để khai thác vượt lên.
+
 ## X.5 Thảo luận và hạn chế
 
 ### X.5.1 Phần đã đạt và bằng chứng đi kèm
@@ -157,20 +199,24 @@ Tỉ lệ `was_exploration = true` trong log ε-greedy: 0.084 — sát với m�
 - **Giả thiết tuyến tính của LinUCB.** Thời gian biên dịch không tuyến tính theo kích thước nguồn (xét compiler tối ưu hoá nhiều cấp); khi giả thiết bị vi phạm, regret bound của Chu 2011 không còn áp dụng. Lattimore & Szepesvári 2020 Ch. 24.4 cho thấy regret tăng cộng theo $\mathcal{O}(\varepsilon\sqrt{T})$ với mức độ vi phạm $\varepsilon$.
 - **Dòng chảy phân bố (drift).** Worker có thể bị giảm hiệu năng do thermal throttling hoặc tải nền. LinUCB chuẩn không có đảm bảo dưới drift; phương pháp giảm thiểu (sliding window, change-point) là chủ đề nghiên cứu mở.
 - **Bộ ba chết của Sutton–Barto.** Phân tích §11.3 (Sutton & Barto 2018) cảnh báo divergence khi kết hợp xấp xỉ hàm + bootstrapping + off-policy. LinUCB không chạm bộ ba này (không có bootstrap); nếu mở rộng sang Q-learning đa-bước với xấp xỉ tuyến tính, vấn đề trở nên nghiêm trọng và cần được giải quyết riêng.
-- **Mẫu thực nghiệm còn nhỏ.** Chỉ có một workload (CPython) và một host (Docker macOS). Để công bố cần đa dạng workload (ưa template như Boost/Qt) và lặp ≥ 5 lần để có khoảng tin cậy.
+- **Mẫu thực nghiệm còn hạn chế về đa dạng workload.** Số lần lặp đã được nâng lên 10 (rigorous, X.4.5) với thiết kế thống kê nghiêm ngặt, nhưng vẫn chỉ trên một họ workload (CPython) và một host (Docker macOS). Để công bố cần đa dạng workload — đặc biệt các codebase nặng template (Boost/Qt/Eigen) có phân phối nặng đuôi hơn, nơi thứ tự tương đối giữa các scheduler *có thể* thay đổi.
+- **LeastLoaded là baseline mạnh trên workload dừng.** Kết quả X.4.5–X.4.6 cho thấy bandit không vượt được LeastLoaded khi task đồng nhất và worker tĩnh trong một build. Đây không phải hạn chế của riêng LinUCB mà là đặc điểm của bài toán: giá trị của lập lịch học chỉ bộc lộ khi môi trường có cấu trúc ẩn (cache-affinity, drift, task cost dị biệt) mà heuristic đơn giản bỏ qua (xem X.5.3).
 
 ### X.5.3 Hướng mở rộng
 
 1. **Phần thưởng dựa Định luật Little**: Triển khai $r_k = -(t_k - t_{k-1})J_k$ kiểu Decima như một biến thể có dẫn chứng, so sánh ablation với phần thưởng log.
-2. **Cache-aware scheduling**: bổ sung đặc trưng "đã có cache" cho mỗi cặp (worker, file). Đây là khoảng trống chưa có công bố nào lấp trong lập lịch biên dịch phân tán.
+2. **Cache-aware scheduling** — hướng mở rộng có triển vọng nhất và được chính kết quả X.4.6 chỉ ra. Vì bandit đã hội tụ về chất lượng của LeastLoaded trên workload dừng, bandit chỉ có thể *vượt* LeastLoaded ở một môi trường mà LeastLoaded **dưới tối ưu** — tức có cấu trúc ẩn tương quan với đặc trưng mà LeastLoaded bỏ qua. Cache-affinity là ứng viên rõ ràng: nếu worker $w$ đã có sẵn artifact biên dịch của file $f$ trong cache, gửi $f$ tới $w$ cho một cache hit (gần như tức thời) thay vì biên dịch lại ở worker khác. Thiết kế cụ thể: thêm chiều đặc trưng thứ 13 "worker $w$ đã có $f$ trong cache" — có thể hiện thực **không cần RPC mới** bằng cách để coordinator theo dõi lịch sử dispatch per-(worker, filename) (coordinator vốn định tuyến mọi task, và `SourceFilename` đã có trong `TaskContext` tại thời điểm Select).
+
+   **Điều kiện tiên quyết quan trọng (phát hiện từ khảo sát mã nguồn):** đặc trưng cache-affinity **bất hoạt trong kịch bản clean-build** hiện đang đo — vì benchmark xóa cache mỗi build và trong một clean-build mỗi file chỉ biên dịch đúng một lần, nên **không** worker nào từng "đã có file trong cache" trong lúc build. Cache-affinity chỉ có ý nghĩa khi có **tái sử dụng cache**, tức kịch bản **incremental build** (lập trình viên sửa vài file rồi biên dịch lại — phần lớn file là cache hit). Do đó ablation cache-aware đòi hỏi một khung bài toán mới (incremental rebuild, không xóa cache) — một thiết lập *khác* với makespan clean-build mà chương này đo. Đây là khoảng trống chưa có công bố nào lấp trong lập lịch biên dịch phân tán, và là nội dung nghiên cứu độc lập cho giai đoạn tiếp theo.
 3. **Detection of drift**: thêm cơ chế phát hiện chuyển dịch (CUSUM, Page–Hinkley) và reset cục bộ $A_a, b_a$ khi cần.
 4. **Mở rộng đa-loại task**: hiện đã hỗ trợ Flutter và Unity ở mức compile entry point; tương lai có thể tích hợp đặc trưng theo loại build vào véc-tơ ngữ cảnh.
 
 ## X.6 Kết luận
 
-Đồ án đã hoàn thiện ba milestone (M1–M3) gồm: hạ tầng đo lường có thể tái lập, một bộ học bandit cơ sở (ε-greedy), và một bộ học có ngữ cảnh (LinUCB) cùng với một baseline kinh điển (HEFT) đã được điều chỉnh cho luồng task trực tuyến. Bằng chứng thực nghiệm đầu (M1, M2) đã khẳng định:
+Đồ án đã hoàn thiện ba milestone (M1–M3) gồm: hạ tầng đo lường có thể tái lập, một bộ học bandit cơ sở (ε-greedy), và một bộ học có ngữ cảnh (LinUCB) cùng một baseline kinh điển (HEFT) đã được điều chỉnh cho luồng task trực tuyến. Sáu scheduler được so sánh dưới một quy trình đo lường nghiêm ngặt (randomized block, 10 lần lặp, kiểm định ghép cặp). Các kết luận đã được kiểm chứng:
 
-- P2C vượt LeastLoaded 1.62× trên cluster khác chủng — phù hợp lý thuyết.
-- ε-greedy không vượt P2C trên cluster khác chủng — biểu hiện khoảng trống mà LinUCB nhắm tới.
+- **P2C vượt LeastLoaded** trên cluster khác chủng ở lần đo single-run (Bảng X.1), phù hợp lý thuyết Mitzenmacher; tuy nhiên ưu thế này thu hẹp trên workload nhẹ khi đo lại rigorous (Bảng X.3).
+- **ε-greedy và LinUCB thuần** (mù/yếu về ngữ cảnh) thua P2C và LeastLoaded — biểu hiện chi phí exploration không được đền bù trên workload dừng.
+- **hybrid-linucb ngang bằng LeastLoaded** về makespan trên cả hai mức tải (Bảng X.3, X.4), và chỉ **vượt trội có ý nghĩa** so với P2C và LinUCB thuần ở tải nhẹ. Ablation warm-bandit (X.4.6) chứng minh thế hòa này là **bản chất** chứ không phải do khởi động lạnh.
 
-Kết quả LinUCB và HEFT sẽ được bổ sung khi benchmark hoàn tất. Với regret bound lý thuyết và bằng chứng thực nghiệm M1/M2 đã có, đồ án chứng minh giá trị nghiên cứu của hướng tiếp cận và mở đường cho các mở rộng cache-aware và drift-aware ở các giai đoạn tiếp theo.
+Đóng góp trung thực của đồ án do đó có **hai mặt**. Thứ nhất về *kết quả*: một contextual bandit có thể sánh ngang heuristic tốt nhất và vượt các baseline yếu hơn, nhưng **chưa** vượt LeastLoaded trên workload biên dịch dừng — một kết quả âm (negative result) được củng cố bởi ba lớp bằng chứng độc lập (rigorous, tải nặng, warm-bandit) đã loại trừ các phản biện hiển nhiên. Thứ hai về *phương pháp luận*: quy trình thí nghiệm nghiêm ngặt đã tự phát hiện và loại bỏ một kết quả dương tính giả do thiết kế cẩu thả sinh ra — một bài học có giá trị giáo dục độc lập. Cùng với regret bound lý thuyết làm bối cảnh, đồ án xác lập rõ *khi nào* lập lịch học có giá trị và mở đường có cơ sở cho các mở rộng **cache-aware** (X.5.3) và **drift-aware** ở giai đoạn tiếp theo — chính là các môi trường nơi heuristic tĩnh dưới tối ưu và bandit được kỳ vọng thắng thật sự.
