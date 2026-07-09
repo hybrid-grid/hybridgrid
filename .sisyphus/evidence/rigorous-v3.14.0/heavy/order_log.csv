@@ -1,0 +1,11 @@
+round,order
+1,p2c|linucb|hybrid-linucb|leastloaded
+2,p2c|linucb|leastloaded|hybrid-linucb
+3,leastloaded|p2c|linucb|hybrid-linucb
+4,p2c|linucb|leastloaded|hybrid-linucb
+5,leastloaded|linucb|p2c|hybrid-linucb
+6,p2c|hybrid-linucb|leastloaded|linucb
+7,p2c|hybrid-linucb|linucb|leastloaded
+8,linucb|leastloaded|p2c|hybrid-linucb
+9,linucb|hybrid-linucb|leastloaded|p2c
+10,hybrid-linucb|leastloaded|linucb|p2c
