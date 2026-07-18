@@ -1,10 +1,10 @@
 # Hybrid-Grid: Hệ thống biên dịch phân tán với lập lịch tác vụ dựa trên Contextual Bandit trên cụm máy không đồng nhất
 
-**Lê Đức Hiếuᵃ, Nguyễn Trung Kiênᵃ, Nguyễn Trọng Khánhᵃ,\***
+**Lê Đức Hiếuᵃ,\* Nguyễn Trung Kiênᵃ, Nguyễn Trọng Khánhᵃ**
 
 ᵃ *Học viện Công nghệ Bưu chính Viễn thông, Hà Nội, Việt Nam*
 
-\* Tác giả liên hệ (giảng viên hướng dẫn). Email: *[email liên hệ]*
+\* Tác giả liên hệ. Email: *leduchieu101@gmail.com*
 
 ---
 
