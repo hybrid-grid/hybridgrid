@@ -169,7 +169,7 @@ Every completed \texttt{Compile()} invocation emits one 27-field JSON Lines reco
 
 \subsection{Setup}
 
-\textbf{Workload:} a clean CPython build via \texttt{make} with \texttt{hgbuild} as the compiler driver --- $\sim$293 translation units per build (light load) and a $\sim$371-unit variant (heavy load). \textbf{Cluster:} Docker Compose on a single host, with total CPU fixed at 4.0 cores divided unequally across 5 workers (0.5/0.6/0.8/1.0/1.1 cpu) via cgroup limits; 1-worker and 3-worker configurations serve the preliminary measurements. \textbf{Metrics:} makespan (wall-clock), per-worker dispatch distribution, and P50/P95/P99 compile-time percentiles.
+\textbf{Workload:} a clean CPython build via \texttt{make} with \texttt{hgbuild} as the compiler driver --- $\sim$293 translation units per build (light load) and a $\sim$371-unit variant (heavy load); the preliminary single-run measurements (Table~\ref{tab:singlerun}) used an earlier, heavier $\sim$873-unit snapshot, reported as context only. \textbf{Cluster:} Docker Compose on a single host, with total CPU fixed at 4.0 cores divided unequally across 5 workers (0.5/0.6/0.8/1.0/1.1 cpu) via cgroup limits; 1-worker and 3-worker configurations serve the preliminary measurements. \textbf{Metrics:} makespan (wall-clock), per-worker dispatch distribution, and P50/P95/P99 compile-time percentiles.
 
 \subsection{Randomized Block Design and Statistical Analysis}
 
@@ -196,7 +196,7 @@ Config & LL & P2C & $\varepsilon$-g & LinUCB$^{\text{bug}}$ & LinUCB$^{\text{fix
 \end{tabular}
 \end{table}
 
-Three observations from Table~\ref{tab:singlerun}: (i) P2C improves 1.45--1.62$\times$ over LeastLoaded on heterogeneous clusters, matching the theoretical prediction~\cite{mitzenmacher2001}; (ii) feature-blind $\varepsilon$-greedy loses to \emph{every} heuristic --- the learner faithfully identifies ``the worker with the best mean reward'' and floods it, skewing load worse than LeastLoaded (top:bottom dispatch ratio 13.2:1 versus P2C's 8.6:1); (iii) buggy LinUCB was the worst scheduler on 5 workers (158\,s), recovering to 94\,s after the three implementation fixes (Section~4.3) --- with the exploration rate rising from 1.7\% to 25.1\% and load skew dropping from 97:1 to 13.9:1.
+These single-run figures come from an earlier, heavier $\sim$873-task CPython snapshot --- a different measurement phase from the $\sim$293/371-task blocked experiments of Tables~\ref{tab:rigorous}--\ref{tab:heavy} --- and their absolute makespans are \textbf{not comparable} to those tables: the larger task count, not the scheduler, is why LeastLoaded reads 152\,s here versus $\sim$40\,s there. They establish only the qualitative ordering of schedulers, never head-to-head evidence. Three observations from Table~\ref{tab:singlerun}: (i) P2C improves 1.45--1.62$\times$ over LeastLoaded on heterogeneous clusters, matching the theoretical prediction~\cite{mitzenmacher2001}; (ii) feature-blind $\varepsilon$-greedy loses to \emph{every} heuristic --- the learner faithfully identifies ``the worker with the best mean reward'' and floods it, skewing load worse than LeastLoaded (top:bottom dispatch ratio 13.2:1 versus P2C's 8.6:1); (iii) buggy LinUCB was the worst scheduler on 5 workers (158\,s), recovering to 94\,s after the three implementation fixes (Section~4.3) --- with the exploration rate rising from 1.7\% to 25.1\% and load skew dropping from 97:1 to 13.9:1.
 
 \subsection{Headline Result: The Confound-Controlled Comparison}
 
@@ -240,7 +240,7 @@ LinUCB & 60.20 & 59.45 & 6.35 & $p_{\text{holm}}=0.16$ \\
 \end{tabular}
 \end{table}
 
-Under heavier load (Table~\ref{tab:heavy}), LeastLoaded is fastest by median and the hybrid's edge over P2C/LinUCB does not survive Holm correction. The hybrid's large standard deviation (16.6) comes from exactly one outlier (one round at 101.93\,s, roughly double the norm): a bad sequence of exploratory decisions during cold start exposes a \textbf{tail risk} of the bandit that static heuristics simply do not have.
+The Friedman omnibus gives $\chi^2=10.58$, $p=0.014$ (schedulers differ, driven by LinUCB lagging). Under heavier load (Table~\ref{tab:heavy}), LeastLoaded is fastest by median and the hybrid's edge over P2C/LinUCB does not survive Holm correction. The hybrid's large standard deviation (16.6) comes from exactly one outlier (one round at 101.93\,s, roughly double the norm): a bad sequence of exploratory decisions during cold start exposes a \textbf{tail risk} of the bandit that static heuristics simply do not have.
 
 \subsection{Warm-Bandit Ablation: The Tie Is Intrinsic}
 

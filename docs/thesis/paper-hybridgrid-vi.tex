@@ -174,7 +174,7 @@ Mỗi lời gọi \texttt{Compile()} hoàn tất phát sinh một bản ghi JSON
 
 \subsection{Thiết lập}
 
-\textbf{Workload:} build sạch CPython qua \texttt{make} với \texttt{hgbuild} làm compiler driver --- $\sim$293 đơn vị dịch/build (tải nhẹ) và biến thể $\sim$371 đơn vị dịch (tải nặng). \textbf{Cụm máy:} Docker Compose trên một host, tổng CPU cố định 4,0 lõi chia không đều cho 5 worker (0,5/0,6/0,8/1,0/1,1 cpu) qua giới hạn cgroup; các cấu hình 1 worker và 3 worker dùng cho đo sơ bộ. \textbf{Chỉ số:} makespan (wall-clock), phân phối dispatch theo worker, phân vị P50/P95/P99 thời gian biên dịch.
+\textbf{Workload:} build sạch CPython qua \texttt{make} với \texttt{hgbuild} làm compiler driver --- $\sim$293 đơn vị dịch/build (tải nhẹ) và biến thể $\sim$371 đơn vị dịch (tải nặng); các đo lường đơn-lần sơ bộ (Bảng~\ref{tab:singlerun}) dùng một snapshot cũ, nặng hơn ($\sim$873 đơn vị dịch), chỉ báo cáo làm bối cảnh. \textbf{Cụm máy:} Docker Compose trên một host, tổng CPU cố định 4,0 lõi chia không đều cho 5 worker (0,5/0,6/0,8/1,0/1,1 cpu) qua giới hạn cgroup; các cấu hình 1 worker và 3 worker dùng cho đo sơ bộ. \textbf{Chỉ số:} makespan (wall-clock), phân phối dispatch theo worker, phân vị P50/P95/P99 thời gian biên dịch.
 
 \subsection{Thiết kế khối ngẫu nhiên hoá và phân tích thống kê}
 
@@ -201,7 +201,7 @@ Cấu hình & LL & P2C & $\varepsilon$-g & LinUCB$^{\text{lỗi}}$ & LinUCB$^{\t
 \end{tabular}
 \end{table}
 
-Ba quan sát từ Bảng~\ref{tab:singlerun}: (i)~P2C cải thiện 1,45--1,62$\times$ so với LeastLoaded trên cụm không đồng nhất, khớp dự đoán lý thuyết~\cite{mitzenmacher2001}; (ii)~$\varepsilon$-greedy mù đặc trưng thua \emph{mọi} heuristic --- bộ học trung thành với ``worker có trung bình phần thưởng tốt nhất'' rồi dồn việc vào đó, làm lệch tải nặng hơn cả LeastLoaded (tỉ số dispatch top:bottom 13,2:1 so với P2C 8,6:1); (iii)~LinUCB có lỗi là scheduler tệ nhất trên 5 worker (158\,s), phục hồi về 94\,s sau ba bản vá triển khai (Mục~4.3) --- với tỉ lệ exploration tăng từ 1,7\% lên 25,1\% và lệch tải giảm từ 97:1 về 13,9:1.
+Các số đơn-lần này lấy từ một snapshot CPython cũ và nặng hơn ($\sim$873 tác vụ) --- một giai đoạn đo khác với các thí nghiệm khối $\sim$293/371 tác vụ ở Bảng~\ref{tab:rigorous}--\ref{tab:heavy} --- nên makespan tuyệt đối \textbf{không so sánh được} với các bảng đó: chính số tác vụ lớn hơn, không phải bộ lập lịch, là lý do LeastLoaded ở đây là 152\,s so với $\sim$40\,s ở Bảng~\ref{tab:rigorous}. Ba quan sát từ Bảng~\ref{tab:singlerun}: (i)~P2C cải thiện 1,45--1,62$\times$ so với LeastLoaded trên cụm không đồng nhất, khớp dự đoán lý thuyết~\cite{mitzenmacher2001}; (ii)~$\varepsilon$-greedy mù đặc trưng thua \emph{mọi} heuristic --- bộ học trung thành với ``worker có trung bình phần thưởng tốt nhất'' rồi dồn việc vào đó, làm lệch tải nặng hơn cả LeastLoaded (tỉ số dispatch top:bottom 13,2:1 so với P2C 8,6:1); (iii)~LinUCB có lỗi là scheduler tệ nhất trên 5 worker (158\,s), phục hồi về 94\,s sau ba bản vá triển khai (Mục~4.3) --- với tỉ lệ exploration tăng từ 1,7\% lên 25,1\% và lệch tải giảm từ 97:1 về 13,9:1.
 
 \subsection{Kết quả chính: so sánh có kiểm soát nhiễu}
 
@@ -245,7 +245,7 @@ LinUCB & 60,20 & 59,45 & 6,35 & $p_{\text{holm}}=0{,}16$ \\
 \end{tabular}
 \end{table}
 
-Ở tải nặng (Bảng~\ref{tab:heavy}), LeastLoaded nhanh nhất theo median và ưu thế của hybrid trước P2C/LinUCB không sống sót qua hiệu chỉnh Holm. Độ lệch chuẩn lớn của hybrid (16,6) đến từ đúng một outlier (một round đạt 101,93\,s, gấp đôi bình thường): chuỗi quyết định khám phá tệ lúc khởi động lạnh bộc lộ \textbf{rủi ro đuôi} của bandit mà heuristic tĩnh không có.
+Kiểm định Friedman cho $\chi^2=10{,}58$, $p=0{,}014$ (các scheduler khác biệt, do LinUCB tụt lại). Ở tải nặng (Bảng~\ref{tab:heavy}), LeastLoaded nhanh nhất theo median và ưu thế của hybrid trước P2C/LinUCB không sống sót qua hiệu chỉnh Holm. Độ lệch chuẩn lớn của hybrid (16,6) đến từ đúng một outlier (một round đạt 101,93\,s, gấp đôi bình thường): chuỗi quyết định khám phá tệ lúc khởi động lạnh bộc lộ \textbf{rủi ro đuôi} của bandit mà heuristic tĩnh không có.
 
 \subsection{Ablation warm-bandit: thế hoà là bản chất}
 

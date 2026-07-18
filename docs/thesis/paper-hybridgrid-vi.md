@@ -151,7 +151,7 @@ Mỗi lời gọi `Compile()` hoàn tất phát sinh một bản ghi JSON Lines 
 
 ### 5.1. Thiết lập
 
-- **Workload:** build sạch CPython qua `make` với `hgbuild` làm compiler driver — ~293 đơn vị dịch/build (tải nhẹ) và biến thể ~371 đơn vị dịch (tải nặng, giữ các module test).
+- **Workload:** build sạch CPython qua `make` với `hgbuild` làm compiler driver — ~293 đơn vị dịch/build (tải nhẹ) và biến thể ~371 đơn vị dịch (tải nặng, giữ các module test); các đo lường đơn-lần sơ bộ (Bảng 2) dùng một snapshot cũ, nặng hơn (~873 đơn vị dịch) và chỉ báo cáo làm bối cảnh.
 - **Cụm máy:** Docker Compose trên một host, tổng CPU cố định 4,0 lõi chia không đều cho 5 worker (0,5/0,6/0,8/1,0/1,1 cpu) qua giới hạn cgroup; các cấu hình 1 worker (4,0 cpu) và 3 worker (0,8/1,2/2,0) dùng cho đo sơ bộ.
 - **Chỉ số:** makespan (wall-clock), phân phối dispatch theo worker, phân vị P50/P95/P99 thời gian biên dịch.
 
@@ -170,6 +170,8 @@ Mỗi lời gọi `Compile()` hoàn tất phát sinh một bản ghi JSON Lines 
 | 1w-4.0cpu | 92 | 130 | 146 | 129 | 131 | 129 |
 | 3w-hetero | 123 | 85 | 142 | 103 | 108 | 135 |
 | 5w-hetero | 152 | **94** | 119 | 158 | **94** | 144 |
+
+Các số đơn-lần này lấy từ một snapshot CPython cũ và nặng hơn (~873 tác vụ) — một giai đoạn đo khác với các thí nghiệm khối ~293/371 tác vụ ở Bảng 3–4 — nên makespan tuyệt đối **không so sánh được** với các bảng đó: chính số tác vụ lớn hơn, không phải bộ lập lịch, là lý do LeastLoaded ở đây là 152 s so với ~40 s ở Bảng 3. Chúng chỉ thiết lập thứ tự định tính giữa các bộ lập lịch, không bao giờ làm bằng chứng đối đầu trực tiếp.
 
 Ba quan sát: (i) P2C cải thiện 1,45–1,62× so với LeastLoaded trên cụm không đồng nhất, khớp dự đoán lý thuyết [3]; (ii) ε-greedy mù đặc trưng thua *mọi* heuristic — bộ học trung thành với "worker có trung bình phần thưởng tốt nhất" rồi dồn việc vào đó, làm lệch tải nặng hơn cả LeastLoaded (tỉ số dispatch top:bottom 13,2:1 so với P2C 8,6:1); (iii) LinUCB có lỗi là scheduler tệ nhất trên 5 worker (158 s), phục hồi về 94 s sau ba bản vá triển khai (Mục 4.3) — với tỉ lệ exploration tăng từ 1,7% lên 25,1% và lệch tải giảm từ 97:1 về 13,9:1.
 
@@ -197,7 +199,7 @@ Friedman omnibus $\chi^2 = 24{,}60$, $p = 2\times10^{-5}$: các scheduler khác 
 | P2C | 53,48 | 55,22 | 5,08 | Δ = −3,12 s; p_holm = 0,16 (không ý nghĩa) |
 | LinUCB | 60,20 | 59,45 | 6,35 | Δ = −7,61 s; p_holm = 0,16 (không ý nghĩa) |
 
-Ở tải nặng, LeastLoaded nhanh nhất theo median và ưu thế của hybrid trước P2C/LinUCB không sống sót qua hiệu chỉnh Holm. Độ lệch chuẩn lớn của hybrid (16,6) đến từ đúng một outlier (một round đạt 101,93 s, gấp đôi bình thường): chuỗi quyết định khám phá tệ lúc khởi động lạnh bộc lộ **rủi ro đuôi** của bandit mà heuristic tĩnh không có.
+Kiểm định Friedman cho $\chi^2 = 10{,}58$, $p = 0{,}014$ (các scheduler khác biệt, do LinUCB tụt lại). Ở tải nặng, LeastLoaded nhanh nhất theo median và ưu thế của hybrid trước P2C/LinUCB không sống sót qua hiệu chỉnh Holm. Độ lệch chuẩn lớn của hybrid (16,6) đến từ đúng một outlier (một round đạt 101,93 s, gấp đôi bình thường): chuỗi quyết định khám phá tệ lúc khởi động lạnh bộc lộ **rủi ro đuôi** của bandit mà heuristic tĩnh không có.
 
 ### 6.3. Ablation warm-bandit: thế hoà là bản chất
 

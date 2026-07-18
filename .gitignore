@@ -77,3 +77,13 @@ test/e2e/certs/
 scripts/.venv-bench/
 __pycache__/
 test/stress/.omc/
+
+# LaTeX build artifacts (papers are built on Overleaf / via pdflatex)
+docs/thesis/_texbuild/
+docs/thesis/*.pdf
+*.aux
+*.spl
+*.out
+*.toc
+*.bbl
+*.blg
