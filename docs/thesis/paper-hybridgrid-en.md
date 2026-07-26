@@ -12,8 +12,6 @@
 
 This paper presents Hybrid-Grid, an open-source distributed compilation system for C/C++ on heterogeneous worker clusters, with online task scheduling as its central research focus. Existing distributed build systems (distcc, Bazel RBE, Incredibuild) rely on static heuristics — round-robin, least-loaded, or capability scoring — and never learn from execution outcomes, even though our measurements show that compile times on heterogeneous clusters exhibit extreme variance (a P99/P50 ratio of approximately 29×). To exploit this signal, we model the scheduling decision as a contextual bandit problem and implement and compare six schedulers inside a single real system: three heuristics (LeastLoaded, Power-of-Two-Choices, HEFT) and three online learners (ε-greedy, LinUCB, and Hybrid-LinUCB — our proposed variant, which augments the UCB score with a heuristic warm-start phase and a real-time load-penalty term). Experiments on a CPython compilation workload (~293 tasks per build) over a 5-worker heterogeneous Docker cluster, under a randomized complete block design with 10 repetitions and paired statistical testing (one-sided Wilcoxon signed-rank, Holm–Bonferroni correction, Cliff's delta effect sizes), yield a two-sided result: Hybrid-LinUCB significantly outperforms the weaker learners (5.26 s faster than P2C and 6.80 s faster than pure LinUCB, p = 0.003, |d| = 1.0) but only ties the LeastLoaded heuristic (p = 0.65) — an honest negative result reinforced by a warm-bandit ablation demonstrating that the tie is intrinsic to the stationary workload rather than a cold-start artifact. An equally important methodological contribution: the rigorous protocol detected and eliminated a false positive (an apparent 7.9% advantage at p = 0.0001) that a simpler experimental design had produced through run-order confounding. These results delineate the conditions under which learned scheduling delivers real value in distributed build systems, identifying cache affinity and non-stationary environments as the most promising directions.
 
-**Keywords:** distributed compilation, task scheduling, contextual bandit, LinUCB, heterogeneous machines, online reinforcement learning
-
 ---
 
 ## 1. Introduction
@@ -236,10 +234,6 @@ Future work follows directly from the diagnosis of "when the learner wins": (i) 
 ## Acknowledgment
 
 [Add funding, institutional support, and advisor acknowledgments here.]
-
-## Declaration of Generative AI and AI-assisted Technologies in the Writing Process
-
-During the preparation of this work, the authors used AI-assisted tools to improve language quality and writing clarity. The authors reviewed and edited the content as needed and take full responsibility for the content of this publication.
 
 ## References
 

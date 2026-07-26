@@ -12,8 +12,6 @@
 
 Bài báo này trình bày Hybrid-Grid, một hệ thống biên dịch phân tán mã nguồn mở cho C/C++ trên cụm máy trạm (worker) không đồng nhất, với trọng tâm nghiên cứu là bài toán lập lịch tác vụ trực tuyến. Các hệ thống build phân tán hiện có (distcc, Bazel RBE, Incredibuild) đều dựa vào heuristic tĩnh — round-robin, least-loaded, hoặc chấm điểm năng lực — và không học từ kết quả thực thi, trong khi đo lường của chúng tôi cho thấy thời gian biên dịch trên cụm không đồng nhất có phương sai rất lớn (tỉ số P99/P50 xấp xỉ 29 lần). Để khai thác tín hiệu này, chúng tôi mô hình hoá quyết định lập lịch như một bài toán contextual bandit và triển khai, so sánh sáu bộ lập lịch trong cùng một hệ thống thực: ba heuristic (LeastLoaded, Power-of-Two-Choices, HEFT) và ba bộ học trực tuyến (ε-greedy, LinUCB, và Hybrid-LinUCB — biến thể do chúng tôi đề xuất, kết hợp warm-start theo heuristic và thành phần phạt tải thời gian thực vào điểm UCB). Thí nghiệm trên workload biên dịch CPython (~293 tác vụ/build) chạy trên cụm Docker 5 worker không đồng nhất, theo thiết kế khối ngẫu nhiên hoá đầy đủ (randomized complete block design) với 10 lần lặp và kiểm định ghép cặp (Wilcoxon signed-rank, hiệu chỉnh Holm–Bonferroni, effect size Cliff's delta), cho kết quả hai mặt: Hybrid-LinUCB vượt có ý nghĩa thống kê các bộ học yếu hơn (nhanh hơn P2C 5,26 s và LinUCB thuần 6,80 s, p = 0,003, |d| = 1,0) nhưng chỉ ngang bằng heuristic LeastLoaded (p = 0,65) — một kết quả âm trung thực được củng cố bằng ablation warm-bandit chứng minh thế hoà là bản chất của workload dừng chứ không phải do khởi động lạnh. Đóng góp phương pháp luận quan trọng không kém: quy trình đo nghiêm ngặt đã phát hiện và loại bỏ một kết quả dương tính giả (ưu thế biểu kiến 7,9%, p = 0,0001) mà thiết kế thí nghiệm đơn giản hơn đã sinh ra do nhiễu thứ tự chạy. Các kết quả này xác định rõ điều kiện để lập lịch học máy có giá trị thực trong hệ thống build phân tán, và chỉ ra cache-affinity cùng môi trường không dừng là hướng khai thác triển vọng nhất.
 
-**Từ khoá:** biên dịch phân tán, lập lịch tác vụ, contextual bandit, LinUCB, máy không đồng nhất, học tăng cường trực tuyến
-
 ---
 
 ## 1. Giới thiệu
@@ -236,10 +234,6 @@ Hướng phát triển bám sát chẩn đoán "khi nào bộ học thắng": (i
 ## Lời cảm ơn
 
 [Bổ sung thông tin tài trợ, hỗ trợ của đơn vị và giáo viên hướng dẫn tại đây.]
-
-## Tuyên bố về sử dụng AI tạo sinh trong quá trình viết
-
-Trong quá trình chuẩn bị công trình này, nhóm tác giả có sử dụng công cụ hỗ trợ AI để cải thiện chất lượng ngôn ngữ và độ rõ ràng của văn bản. Nhóm tác giả đã rà soát, biên tập nội dung khi cần và chịu hoàn toàn trách nhiệm về nội dung của công bố.
 
 ## Tài liệu tham khảo
 
