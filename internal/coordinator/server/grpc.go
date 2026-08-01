@@ -173,6 +173,11 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 			Registry:       reg,
 			CircuitChecker: cm,
 		})
+	case "icecc-fastest":
+		return scheduler.NewIceccFastestScheduler(scheduler.IceccConfig{
+			Registry:       reg,
+			CircuitChecker: cm,
+		})
 	case "leastloaded", "":
 		return scheduler.NewLeastLoadedScheduler(reg)
 	default:

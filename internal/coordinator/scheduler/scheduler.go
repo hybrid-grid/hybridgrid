@@ -354,6 +354,64 @@ func cryptoRandInt(n int) int {
 	return int(big.Int64())
 }
 
+// eligibleCandidates applies the shared admission rules: capability and OS
+// match, then healthy, circuit-closed workers with spare parallelism. When
+// that leaves nothing it relaxes to any worker under its parallelism cap,
+// so a cluster whose circuits have all tripped still makes progress.
+//
+// Every scheduler under evaluation admits candidates identically; keeping
+// the rule in one place is what makes the comparison apples-to-apples.
+func eligibleCandidates(reg registry.Registry, cc CircuitChecker, buildType pb.BuildType, arch pb.Architecture, clientOS string) ([]*registry.WorkerInfo, error) {
+	workers := reg.ListByCapability(buildType, arch)
+	if len(workers) == 0 {
+		if reg.Count() == 0 {
+			return nil, ErrNoWorkers
+		}
+		return nil, ErrNoMatchingWorkers
+	}
+	if clientOS != "" {
+		workers = filterByOS(workers, clientOS)
+		if len(workers) == 0 {
+			return nil, ErrNoMatchingWorkers
+		}
+	}
+
+	hasRoom := func(w *registry.WorkerInfo) bool {
+		maxP := w.MaxParallel
+		if maxP <= 0 {
+			maxP = 4
+		}
+		return w.ActiveTasks < maxP
+	}
+
+	cands := make([]*registry.WorkerInfo, 0, len(workers))
+	for _, w := range workers {
+		if w.State == registry.WorkerStateUnhealthy {
+			continue
+		}
+		if cc != nil && cc.IsOpen(w.ID) {
+			continue
+		}
+		if hasRoom(w) {
+			cands = append(cands, w)
+		}
+	}
+	if len(cands) == 0 {
+		for _, w := range workers {
+			if w.State == registry.WorkerStateUnhealthy {
+				continue
+			}
+			if hasRoom(w) {
+				cands = append(cands, w)
+			}
+		}
+	}
+	if len(cands) == 0 {
+		return nil, ErrNoMatchingWorkers
+	}
+	return cands, nil
+}
+
 // filterByOS filters workers by matching operating system.
 // Workers with matching OS can compile natively.
 // Workers with Docker can compile preprocessed source from any OS
