@@ -36,6 +36,16 @@ type TaskLogRecord struct {
 	WorkerArch                  string    `json:"worker_arch"`
 	WorkerNativeArch            string    `json:"worker_native_arch"`
 	WorkerCPUCores              int32     `json:"worker_cpu_cores"`
+	// WorkerCPUMillis is the cgroup-aware effective CPU limit in
+	// milli-cores (0 = no cgroup limit detected, i.e. WorkerCPUCores is
+	// the true value). Logged separately from WorkerCPUCores — which
+	// keeps reporting the raw host core count even under a Docker
+	// --cpus/Kubernetes limits.cpu quota — so offline analysis can
+	// verify the cgroup-detection fix actually took effect (see
+	// undersubscription-explains-tie / cgroup-fix-verified-live) instead
+	// of trusting it blindly: a benchmark run where every worker still
+	// logs the same WorkerCPUMillis would mean the fix regressed.
+	WorkerCPUMillis             int32     `json:"worker_cpu_millis"`
 	WorkerMemBytes              int64     `json:"worker_mem_bytes"`
 	WorkerActiveTasksAtDispatch int32     `json:"worker_active_tasks_at_dispatch"`
 	WorkerMaxParallel           int32     `json:"worker_max_parallel"`

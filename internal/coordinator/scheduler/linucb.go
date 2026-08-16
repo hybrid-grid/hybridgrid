@@ -460,8 +460,8 @@ func (s *LinUCBScheduler) eligibleWorkers(buildType pb.BuildType, arch pb.Archit
 //	[1]   log(1 + source_size_bytes) / log(1 + 4 MiB)               (≈ [0, 1])
 //	[2]   target_arch == X86_64
 //	[3]   target_arch == ARM64
-//	[4]   worker.cpu_cores / 16                                     (capped at 1.0)
-//	[5]   worker.mem_bytes / (64 * 2^30)                            (capped at 1.0)
+//	[4]   log(1 + cpu_millis) / log(1 + 16000)                      (≈ [0, 1])
+//	[5]   log(1 + mem_bytes) / log(1 + 64 * 2^30)                   (≈ [0, 1])
 //	[6]   worker.native_arch == target_arch                         (1.0 / 0.0)
 //	[7]   worker.active_tasks / max_parallel
 //	[8]   worker.recent_rpc_latency_ms / 100                        (capped at 1.0)
@@ -485,6 +485,40 @@ var sizeNormDenom = math.Log1p(4 * 1024 * 1024)
 // instead of clustering near zero under the 4 MiB preprocessed
 // denominator.
 var rawSizeNormDenom = math.Log1p(1024 * 1024)
+
+// cpuMillisNormDenom is log1p of 16000 milli-cores (16 full cores),
+// chosen as a "large build worker" reference ceiling — the same 16-core
+// ceiling the prior linear cpu_cores/16 normalization used. Log-scaling
+// (rather than dividing by this ceiling directly) is what makes the
+// feature distinguish sub-1-core cgroup quotas at all: linearly, 0.5 and
+// 1.1 cores map to 0.03 and 0.07 of a 16-core scale — a gap of 0.04 that
+// a Sherman–Morrison update can barely resolve against float noise. Log
+// space compresses the top of the range and expands the bottom, so the
+// same two values map to roughly 0.64 and 0.72 — an 8x larger gap. This
+// is the same class of fix as sizeNormDenom above (MED-4): a compressed,
+// near-constant feature was silently starving the bandit of signal.
+var cpuMillisNormDenom = math.Log1p(16000)
+
+// memNormDenom is log1p of 64 GiB, the memory analogue of
+// cpuMillisNormDenom above — same log-scaling rationale, same 64 GiB
+// reference ceiling the prior linear mem_bytes/(64*2^30) normalization
+// used.
+var memNormDenom = math.Log1p(64.0 * 1024 * 1024 * 1024)
+
+// effectiveCPUMillis returns the worker's CPU limit in milli-cores,
+// preferring the cgroup-detected value (caps.CpuMillis, precise down to
+// fractional cores) and falling back to whole-core cpu_cores * 1000 when
+// no cgroup limit was detected (bare-metal workers, or platforms without
+// cgroups). A worker that reports neither yields 0.
+func effectiveCPUMillis(caps *pb.WorkerCapabilities) float64 {
+	if caps == nil {
+		return 0
+	}
+	if caps.CpuMillis > 0 {
+		return float64(caps.CpuMillis)
+	}
+	return float64(caps.CpuCores) * 1000
+}
 
 // cppExtensions are the file extensions (lowercased) that identify a
 // C++ translation unit. ".C" (uppercase) is handled separately since
@@ -550,11 +584,11 @@ func (s *LinUCBScheduler) featureVector(w *registry.WorkerInfo, targetArch pb.Ar
 	caps := w.Capabilities
 	var cpuCores, memBytes float64
 	if caps != nil {
-		cpuCores = float64(caps.CpuCores) / 16.0
+		cpuCores = math.Log1p(effectiveCPUMillis(caps)) / cpuMillisNormDenom
 		if cpuCores > 1.0 {
 			cpuCores = 1.0
 		}
-		memBytes = float64(caps.MemoryBytes) / (64.0 * 1024 * 1024 * 1024)
+		memBytes = math.Log1p(float64(caps.MemoryBytes)) / memNormDenom
 		if memBytes > 1.0 {
 			memBytes = 1.0
 		}

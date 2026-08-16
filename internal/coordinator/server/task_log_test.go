@@ -132,6 +132,7 @@ func TestCompile_EmitsTaskLogRecord(t *testing.T) {
 		Capabilities: &pb.WorkerCapabilities{
 			NativeArch: pb.Architecture_ARCH_X86_64,
 			CpuCores:   8,
+			CpuMillis:  500, // e.g. a Docker --cpus=0.5 container reporting a host core count of 8
 			Cpp:        &pb.CppCapability{Compilers: []string{"gcc"}},
 		},
 		MaxParallel:     4,
@@ -164,6 +165,13 @@ func TestCompile_EmitsTaskLogRecord(t *testing.T) {
 	assert.Equal(t, "worker-X", rec.WorkerID)
 	assert.Equal(t, "mdns", rec.WorkerDiscoverySource)
 	assert.Equal(t, int32(8), rec.WorkerCPUCores)
+	// Regression check for undersubscription-explains-tie: WorkerCPUCores
+	// alone can't distinguish workers under a cgroup CPU quota (it stays
+	// the host core count regardless of the quota), so WorkerCPUMillis
+	// must independently reach the log record — proving the cgroup-aware
+	// value flows from registry.WorkerInfo through to offline analysis,
+	// not just internally to the scheduler.
+	assert.Equal(t, int32(500), rec.WorkerCPUMillis)
 	assert.False(t, rec.Success)
 	// PreprocessedSource length is the only source data sent.
 	assert.Equal(t, len("int main() { return 0; }"), rec.PreprocessedSizeBytes)

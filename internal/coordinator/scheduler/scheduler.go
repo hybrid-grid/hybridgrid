@@ -111,7 +111,28 @@ func NewLeastLoadedScheduler(reg registry.Registry) *LeastLoadedScheduler {
 	}
 }
 
-// Select chooses the worker with the least load.
+// Select chooses the worker with the least load among those that still
+// have spare capacity (ActiveTasks < MaxParallel).
+//
+// The capacity check matters on a heterogeneous cluster (workers with
+// different MaxParallel values): comparing raw ActiveTasks without it
+// can pick an already-full worker whenever its absolute count is still
+// numerically smaller than a higher-capacity worker's count — e.g.
+// worker-1 (MaxParallel=1, ActiveTasks=1, full) vs worker-5
+// (MaxParallel=3, ActiveTasks=2, has room): 1 < 2 would pick the full
+// one. Every other scheduler in this package (SimpleScheduler, P2C,
+// LinUCB, epsilon-greedy, HEFT) already excludes over-capacity workers
+// before comparing load; this brings LeastLoaded in line with that
+// established pattern. Confirmed to be a no-op for every prior
+// benchmark run: those always had an idle (ActiveTasks=0) worker
+// available, which the old code already picked as the global minimum —
+// see undersubscription-explains-tie / cgroup-fix-verified-live.
+//
+// Unlike P2CScheduler.Select, there is no second, relaxed filtering
+// pass here: LeastLoadedScheduler does not consider circuit-breaker
+// state at all (it has no CircuitChecker field, unlike the schedulers
+// above), so there is no extra criterion left to relax once capacity
+// is respected — a worker either has spare capacity or it doesn't.
 func (s *LeastLoadedScheduler) Select(buildType pb.BuildType, arch pb.Architecture, clientOS string) (*registry.WorkerInfo, error) {
 	workers := s.registry.ListByCapability(buildType, arch)
 	if len(workers) == 0 {
@@ -132,6 +153,16 @@ func (s *LeastLoadedScheduler) Select(buildType pb.BuildType, arch pb.Architectu
 	var best *registry.WorkerInfo
 	for _, w := range workers {
 		if w.State == registry.WorkerStateUnhealthy {
+			continue
+		}
+
+		// Use worker's reported MaxParallel (default to 4 if not set),
+		// matching every other scheduler's convention.
+		maxParallel := w.MaxParallel
+		if maxParallel <= 0 {
+			maxParallel = 4
+		}
+		if w.ActiveTasks >= maxParallel {
 			continue
 		}
 
@@ -289,8 +320,15 @@ func (s *P2CScheduler) scoreWorker(w *registry.WorkerInfo, targetArch pb.Archite
 		score += ScoreCrossCompile
 	}
 
-	// CPU cores (normalized, max 16 cores contribute)
-	cpuContrib := float64(caps.CpuCores)
+	// CPU cores (normalized, max 16 cores contribute). Uses
+	// effectiveCPUMillis (cgroup-aware, see linucb.go) rather than the
+	// raw caps.CpuCores host core count: under a Docker/Kubernetes CPU
+	// quota, CpuCores reports the host's full core count for every
+	// container regardless of its --cpus limit, which made this term a
+	// worker-independent constant on a resource-constrained cluster —
+	// the same degenerate-feature bug fixed for LinUCB in
+	// undersubscription-explains-tie.
+	cpuContrib := effectiveCPUMillis(caps) / 1000.0
 	if cpuContrib > 16 {
 		cpuContrib = 16
 	}

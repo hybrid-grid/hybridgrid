@@ -3,7 +3,7 @@ services:
     build:
       context: ../..
       dockerfile: test/stress/Dockerfile.base
-    command: hg-coord serve --grpc-port=9000 --http-port=8080 --scheduler=hybrid-linucb --alpha=0.5 --epsilon=0.1 --warm-start=100 --load-penalty=0.5 --task-log=/tmp/tasks.jsonl
+    command: hg-coord serve --grpc-port=9000 --http-port=8080 --scheduler=p2c --alpha=0.5 --epsilon=0.1 --warm-start=100 --load-penalty=0.5 --task-log=/tmp/tasks.jsonl
     volumes:
       - task-logs:/tmp
     ports:
