@@ -196,8 +196,8 @@ func TestLinUCB_FeatureVectorDimensions(t *testing.T) {
 	// dim 1: log size feature; just check it is in the expected band.
 	assert.Greater(t, x.AtVec(1), 0.5)
 	assert.LessOrEqual(t, x.AtVec(1), 1.0)
-	assert.Equal(t, 1.0, x.AtVec(3))         // ARM64 target
-	assert.Equal(t, 1.0, x.AtVec(6))         // native arch matches target
+	assert.Equal(t, 1.0, x.AtVec(3)) // ARM64 target
+	assert.Equal(t, 1.0, x.AtVec(6)) // native arch matches target
 	// dim 4: log-scale cpu_millis feature. No CpuMillis set on this test
 	// worker (cgroup-less), so effectiveCPUMillis falls back to
 	// CpuCores*1000 = 8000; log1p(8000)/log1p(16000).

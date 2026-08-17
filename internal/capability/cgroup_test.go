@@ -35,9 +35,9 @@ func TestDetectCPUMillisFrom_CgroupV2_FractionalCores(t *testing.T) {
 		quotaPeriod string
 		wantMillis  int32
 	}{
-		{"50000 100000", 500},  // --cpus=0.5
-		{"60000 100000", 600},  // --cpus=0.6
-		{"80000 100000", 800},  // --cpus=0.8
+		{"50000 100000", 500},   // --cpus=0.5
+		{"60000 100000", 600},   // --cpus=0.6
+		{"80000 100000", 800},   // --cpus=0.8
 		{"100000 100000", 1000}, // --cpus=1.0
 		{"110000 100000", 1100}, // --cpus=1.1
 	}
