@@ -30,6 +30,116 @@ import (
 
 const maxGRPCMessageSize = 512 * 1024 * 1024
 
+// dispatchQueueSize bounds how many pending selection requests may queue
+// up behind the single dispatchLoop goroutine before Compile() callers
+// block trying to submit one. Generously sized relative to any burst
+// this system exercises (make -jN cold starts up to a few dozen) so a
+// legitimate burst never blocks on channel capacity itself — only on
+// dispatchLoop's own (sub-microsecond) processing rate.
+const dispatchQueueSize = 256
+
+// dispatchRequest is one pending "pick a worker and book it" decision.
+// Compile() submits these to s.dispatchCh instead of calling
+// scheduler.SelectWith and s.registry.IncrementTasks directly, so every
+// selection decision across every concurrent RPC handler is funneled
+// through the single dispatchLoop goroutine below.
+//
+// Why: SelectWith (reads a worker's ActiveTasks) and IncrementTasks
+// (books the decision by writing it back) are two separate registry
+// operations. When Compile() called them inline, concurrent handler
+// goroutines could each read the same pre-booking ActiveTasks value
+// before any of them had written their own increment — a classic
+// check-then-act race. Under `make -jN` for N large enough relative to
+// total worker capacity (empirically N ≳ 7 on a 5-worker/10-slot
+// cluster — see undersubscription-explains-tie / cgroup-fix-verified-
+// live), this let multiple in-flight decisions overbook the same
+// (especially low-max_parallel) worker, which then rejected the excess
+// with ResourceExhausted; a bounded reselection-with-backoff retry
+// (maxDispatchAttempts) mitigated but did not eliminate the failures.
+//
+// Routing every decision through one goroutine removes the race
+// entirely: only dispatchLoop ever reads or books a worker's
+// ActiveTasks for a Compile() dispatch, so no two decisions can ever
+// observe the same stale value. This does not add meaningful latency —
+// a selection decision is a few in-memory comparisons (sub-microsecond)
+// against ~10-500ms compile times — and does not serialize the actual
+// compiles, which still run concurrently across all workers exactly as
+// before; only the brief "who gets this file" moment is serialized.
+//
+// Scope: only the C/C++ Compile() path is routed through this queue.
+// The Flutter/Unity build paths (selectFlutterWorker/selectUnityWorker)
+// use the plain scheduler.Select (not the learning-aware SelectWith)
+// and are outside this benchmark's scope per the paper's own stated
+// scope; they are not touched here.
+type dispatchRequest struct {
+	buildType pb.BuildType
+	arch      pb.Architecture
+	clientOS  string
+	ctx       scheduler.TaskContext
+	result    chan dispatchResult
+}
+
+// dispatchResult is dispatchLoop's answer to a dispatchRequest.
+// activeAtDispatch mirrors the semantics the inline code used to
+// provide: the worker's ActiveTasks read immediately before
+// IncrementTasks booked this decision, i.e. load at decision time, not
+// after. It must travel back through this struct rather than have the
+// caller re-read worker.ActiveTasks after the fact, because by the time
+// dispatch() returns, IncrementTasks has already run — a fresh read
+// would see the post-booking count, not the pre-booking one the offline
+// analysis field (worker_active_tasks_at_dispatch) is documented to mean.
+type dispatchResult struct {
+	worker           *registry.WorkerInfo
+	info             scheduler.DispatchInfo
+	activeAtDispatch int32
+	err              error
+}
+
+// dispatchLoop is the single goroutine that owns worker selection and
+// booking for the Compile() path. It runs for the coordinator's
+// lifetime, started once in New() and stopped by closing s.dispatchCh
+// in Stop(). See dispatchRequest's doc comment for why this exists.
+func (s *Server) dispatchLoop() {
+	for req := range s.dispatchCh {
+		worker, info, err := scheduler.SelectWith(s.scheduler, req.buildType, req.arch, req.clientOS, req.ctx)
+		var activeAtDispatch int32
+		if err == nil {
+			// Read-then-book, both on this single goroutine: no other
+			// goroutine can interleave a SelectWith between this read
+			// and the IncrementTasks call below, because dispatchLoop
+			// is the only caller of either for the Compile() path.
+			activeAtDispatch = worker.ActiveTasks
+			s.registry.IncrementTasks(worker.ID)
+		}
+		req.result <- dispatchResult{worker: worker, info: info, activeAtDispatch: activeAtDispatch, err: err}
+	}
+}
+
+// dispatch submits a selection request to dispatchLoop and blocks for
+// its result. Safe to call from any number of concurrent goroutines —
+// that concurrency is exactly what dispatchLoop serializes away.
+//
+// Registered on s.dispatchWG for the whole send-then-wait-for-result
+// span (not just the send): Stop() waits on this WaitGroup before
+// closing s.dispatchCh, so a close can never race a concurrent send —
+// see Stop()'s comment for why this can't just rely on the gRPC
+// server's GracefulStop() to provide that guarantee.
+func (s *Server) dispatch(buildType pb.BuildType, arch pb.Architecture, clientOS string, ctx scheduler.TaskContext) (*registry.WorkerInfo, scheduler.DispatchInfo, int32, error) {
+	s.dispatchWG.Add(1)
+	defer s.dispatchWG.Done()
+
+	req := dispatchRequest{
+		buildType: buildType,
+		arch:      arch,
+		clientOS:  clientOS,
+		ctx:       ctx,
+		result:    make(chan dispatchResult, 1),
+	}
+	s.dispatchCh <- &req
+	res := <-req.result
+	return res.worker, res.info, res.activeAtDispatch, res.err
+}
+
 // connPool caches gRPC client connections to workers by address.
 type connPool struct {
 	mu       sync.Mutex
@@ -173,6 +283,11 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 			Registry:       reg,
 			CircuitChecker: cm,
 		})
+	case "icecc-fastest":
+		return scheduler.NewIceccFastestScheduler(scheduler.IceccConfig{
+			Registry:       reg,
+			CircuitChecker: cm,
+		})
 	case "leastloaded", "":
 		return scheduler.NewLeastLoadedScheduler(reg)
 	default:
@@ -213,6 +328,9 @@ type Server struct {
 	eventNotifier  EventNotifier
 	workerConns    *connPool
 	taskLogger     *TaskLogger
+	dispatchCh     chan *dispatchRequest
+	dispatchWG     sync.WaitGroup
+	dispatchOnce   sync.Once
 
 	activeTasks         int64
 	queuedTasks         int64
@@ -297,7 +415,7 @@ func New(cfg Config) *Server {
 		dialOpts = append(dialOpts, tracing.DialOptions()...)
 	}
 
-	return &Server{
+	s := &Server{
 		config:         cfg,
 		registry:       reg,
 		scheduler:      sched,
@@ -306,7 +424,10 @@ func New(cfg Config) *Server {
 		taskLogger:     taskLogger,
 		flutterCache:   make(map[string]*flutterCacheEntry),
 		unityCache:     make(map[string]*unityCacheEntry),
+		dispatchCh:     make(chan *dispatchRequest, dispatchQueueSize),
 	}
+	go s.dispatchLoop()
+	return s
 }
 
 // Start starts the gRPC server.
@@ -359,6 +480,25 @@ func (s *Server) Start() error {
 func (s *Server) Stop() {
 	if s.server != nil {
 		s.server.GracefulStop()
+	}
+	// GracefulStop above waits for in-flight RPCs to finish when this
+	// Server is fronted by its own s.server (the real cmd/hg-coord
+	// path). It does NOT cover callers that reach dispatch() without
+	// going through s.server — e.g. tests that register this Server on
+	// a separately-constructed grpc.Server (bufconn-based test harnesses
+	// never set s.server at all, since they never call s.Start()), or
+	// any future direct dispatch() caller. dispatchWG closes that gap
+	// unconditionally: every dispatch() call is registered on it for its
+	// full send-plus-wait-for-result span, so waiting for it to drain
+	// here guarantees no goroutine can still be sending to dispatchCh
+	// when we close it, regardless of how this Server was wired up.
+	s.dispatchWG.Wait()
+	// sync.Once guards against a double Stop() call panicking on a
+	// second close of an already-closed channel — cmd/hg-coord's
+	// shutdown path only calls Stop() once today, but this is cheap
+	// insurance against that changing (or a test calling it twice).
+	if s.dispatchCh != nil {
+		s.dispatchOnce.Do(func() { close(s.dispatchCh) })
 	}
 	if s.workerConns != nil {
 		s.workerConns.closeAll()
@@ -510,7 +650,30 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	// is a genuine overload signal for the worker's stats. The learner
 	// sees no RecordOutcome for aborted attempts — re-Select overwrites
 	// the pendingX entry for this TaskID.
-	const maxDispatchAttempts = 3
+	//
+	// maxDispatchAttempts was 3, tuned for modest bursts. Empirically
+	// (undersubscription-explains-tie / cgroup-fix-verified-live
+	// follow-up), a 5-worker cluster with 10 total max_parallel slots
+	// hard-fails builds under `make -j7` and above with 3 attempts: the
+	// linear backoff below (25ms, 50ms) doesn't span enough of the
+	// dispatch storm at build-start cold start, when make launches all
+	// -jN local hgcc processes near-simultaneously. Raised to 8, which
+	// extends the cumulative backoff window to ~700ms (25+50+...+175ms
+	// across the 7 retries between 8 attempts) — comfortably above the
+	// ~10ms median compile time this cluster observes, so a slot should
+	// free up well before attempts run out.
+	// The race this originally compensated for (SelectWith/IncrementTasks
+	// reading and writing on separate, unsynchronized goroutines) is now
+	// eliminated at the source: selection is funneled through the single
+	// dispatchLoop goroutine (see dispatch()/dispatchRequest below), so
+	// the registry's ActiveTasks is always consistent at decision time —
+	// no two concurrent Compile() calls can ever read the same stale
+	// value. A ResourceExhausted here now means every eligible worker is
+	// genuinely at capacity, not a bookkeeping race, so this retry loop's
+	// remaining job is simply: wait a beat for a real slot to free up
+	// (compiles are typically ~10-500ms) and try again. Left at 8 with
+	// backoff for that legitimate case.
+	const maxDispatchAttempts = 8
 	var (
 		worker           *registry.WorkerInfo
 		dispatchInfo     scheduler.DispatchInfo
@@ -524,8 +687,32 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	atomic.AddInt64(&s.activeTasks, 1)
 	defer atomic.AddInt64(&s.activeTasks, -1)
 	for attempt := 1; ; attempt++ {
-		worker, dispatchInfo, err = scheduler.SelectWith(s.scheduler, pb.BuildType_BUILD_TYPE_CPP, req.TargetArch, clientOSFilter, taskCtx)
+		worker, dispatchInfo, activeAtDispatch, err = s.dispatch(pb.BuildType_BUILD_TYPE_CPP, req.TargetArch, clientOSFilter, taskCtx)
 		if err != nil {
+			// dispatch() itself found no eligible worker — every worker is
+			// genuinely at MaxParallel right now (this is the schedulers'
+			// own admission check, e.g. ErrNoMatchingWorkers; distinct from
+			// the ResourceExhausted branch below, which fires only after a
+			// worker WAS selected and its own admission control rejected
+			// the forwarded compile). Previously this returned FAILED
+			// immediately with no retry at all, which made properly
+			// capacity-aware schedulers (P2C, LinUCB, epsilon-greedy, HEFT,
+			// and — since the fix above — LeastLoaded) fail builds outright
+			// under a burst that a brief wait would have resolved: compiles
+			// finish in ~10-500ms, so a worker often frees a slot within a
+			// couple of backoff cycles. Retried with the same budget and
+			// backoff as the ResourceExhausted branch below, so a single
+			// Compile() call never waits longer in total than before this
+			// change — see undersubscription-explains-tie /
+			// cgroup-fix-verified-live.
+			if attempt < maxDispatchAttempts {
+				log.Warn().
+					Str("task_id", req.TaskId).
+					Int("attempt", attempt).
+					Msg("No worker currently has capacity; retrying")
+				time.Sleep(time.Duration(attempt) * 25 * time.Millisecond)
+				continue
+			}
 			span.SetStatus(otelcodes.Error, "no worker available")
 			tracing.RecordError(ctx, err)
 			log.Error().Err(err).
@@ -542,13 +729,9 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 		tracing.AddEvent(ctx, "scheduler.select.done")
 		span.SetAttributes(tracing.AttrWorkerID.String(worker.ID))
 
-		// Snapshot dispatch-time worker state for offline analysis. Captured
-		// before IncrementTasks so the value reflects load at the scheduling
-		// decision, not after this task has been booked. The read races with
-		// concurrent dispatches but the log is for offline analysis only.
-		activeAtDispatch = worker.ActiveTasks
-
-		s.registry.IncrementTasks(worker.ID)
+		// activeAtDispatch was captured inside dispatch(), before
+		// IncrementTasks booked this decision — see dispatchResult's doc
+		// comment for why it can't be re-read from worker.ActiveTasks here.
 		val, _ := s.activeTasksByWorker.LoadOrStore(worker.ID, new(int64))
 		count := atomic.AddInt64(val.(*int64), 1)
 		m.SetActiveTaskCount(worker.ID, float64(count))
@@ -654,11 +837,13 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	if s.taskLogger != nil {
 		var (
 			workerCPUCores   int32
+			workerCPUMillis  int32
 			workerMemBytes   int64
 			workerNativeArch string
 		)
 		if worker.Capabilities != nil {
 			workerCPUCores = worker.Capabilities.CpuCores
+			workerCPUMillis = worker.Capabilities.CpuMillis
 			workerMemBytes = worker.Capabilities.MemoryBytes
 			workerNativeArch = worker.Capabilities.NativeArch.String()
 		}
@@ -680,6 +865,7 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 			WorkerArch:                  workerNativeArch,
 			WorkerNativeArch:            workerNativeArch,
 			WorkerCPUCores:              workerCPUCores,
+			WorkerCPUMillis:             workerCPUMillis,
 			WorkerMemBytes:              workerMemBytes,
 			WorkerActiveTasksAtDispatch: activeAtDispatch,
 			WorkerMaxParallel:           worker.MaxParallel,

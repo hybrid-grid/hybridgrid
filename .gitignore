@@ -87,3 +87,8 @@ docs/thesis/*.pdf
 *.toc
 *.bbl
 *.blg
+
+# Benchmark run output (task logs, CSVs, charts) — regenerated per run,
+# not source; was accidentally committed once in e953795, see .gitignore
+# history if you need to recover it.
+scratch/

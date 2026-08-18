@@ -7,7 +7,7 @@ that control for round-level nuisance (thermal drift, background load):
 
   - Friedman test           omnibus: do schedulers differ at all?
   - Wilcoxon signed-rank     paired, one-sided: hybrid-linucb < baseline?
-  - Holm-Bonferroni          family-wise correction over the 3 pairwise tests
+  - Holm-Bonferroni          family-wise correction over the pairwise tests
   - Cliff's delta            non-parametric effect size per pair
   - Bootstrap 95% CI         for per-scheduler median and paired differences
 
@@ -45,7 +45,15 @@ except ImportError:
     HAVE_MPL = False
 
 HYBRID = "hybrid-linucb"
-BASELINES = ["leastloaded", "p2c", "linucb"]
+# Preferred report order. Any other scheduler present in results.csv is
+# appended automatically, so extending the benchmark — e.g. with
+# icecc-fastest, the in-tree port of icecream's selection rule — needs no
+# edit here. Hardcoding the list previously meant a new scheduler was
+# silently dropped from every pairwise test while still appearing in the
+# per-scheduler summary, which is the kind of gap that produces a table
+# nobody can reconcile.
+BASELINE_ORDER = ["leastloaded", "p2c", "linucb", "heft", "epsilon-greedy",
+                  "icecc-fastest", "simple"]
 ALPHA_LEVEL = 0.05
 BOOT_N = 10000
 BOOT_SEED = 20260709
@@ -54,6 +62,14 @@ BOOT_SEED = 20260709
 # --------------------------------------------------------------------------
 # effect size + bootstrap helpers
 # --------------------------------------------------------------------------
+def baselines_in(wide):
+    """Every scheduler in the data except HYBRID, known ones in report order."""
+    known = [s for s in BASELINE_ORDER if s in wide.columns]
+    extra = sorted(s for s in wide.columns
+                   if s != HYBRID and s not in BASELINE_ORDER)
+    return known + extra
+
+
 def cliffs_delta(a, b):
     """P(a>b) - P(a<b). Negative => a tends to be smaller (better for time)."""
     a = np.asarray(a, float)
@@ -149,7 +165,7 @@ def to_blocks(long_df, value_col):
 # --------------------------------------------------------------------------
 def analyze_metric(name, wide, unit, rng, out_dir):
     print(f"\n{'=' * 70}\n{name} — paired analysis ({len(wide)} complete blocks)\n{'=' * 70}")
-    scheds = [s for s in [HYBRID] + BASELINES if s in wide.columns]
+    scheds = [s for s in [HYBRID] + baselines_in(wide) if s in wide.columns]
     if not scheds:
         print("  no schedulers present")
         return
@@ -178,7 +194,7 @@ def analyze_metric(name, wide, unit, rng, out_dir):
         print(f"[skip] no paired Wilcoxon for {name}")
         return
     pairs, raw_p = [], []
-    for base in BASELINES:
+    for base in baselines_in(wide):
         if base not in wide.columns:
             continue
         h, b = wide[HYBRID].values, wide[base].values
@@ -208,7 +224,7 @@ def analyze_metric(name, wide, unit, rng, out_dir):
 def plot_makespan(wide, out_dir):
     if not HAVE_MPL:
         return
-    scheds = [s for s in [HYBRID] + BASELINES if s in wide.columns]
+    scheds = [s for s in [HYBRID] + baselines_in(wide) if s in wide.columns]
     order = list(wide[scheds].median().sort_values().index)
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))

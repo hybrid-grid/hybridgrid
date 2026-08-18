@@ -196,14 +196,71 @@ func TestLinUCB_FeatureVectorDimensions(t *testing.T) {
 	// dim 1: log size feature; just check it is in the expected band.
 	assert.Greater(t, x.AtVec(1), 0.5)
 	assert.LessOrEqual(t, x.AtVec(1), 1.0)
-	assert.Equal(t, 1.0, x.AtVec(3))         // ARM64 target
-	assert.Equal(t, 1.0, x.AtVec(6))         // native arch matches target
-	assert.InDelta(t, 0.5, x.AtVec(4), 1e-9) // 8/16 cpu cores
-	assert.InDelta(t, 32.0/64.0, x.AtVec(5), 1e-9)
+	assert.Equal(t, 1.0, x.AtVec(3)) // ARM64 target
+	assert.Equal(t, 1.0, x.AtVec(6)) // native arch matches target
+	// dim 4: log-scale cpu_millis feature. No CpuMillis set on this test
+	// worker (cgroup-less), so effectiveCPUMillis falls back to
+	// CpuCores*1000 = 8000; log1p(8000)/log1p(16000).
+	assert.InDelta(t, math.Log1p(8000)/math.Log1p(16000), x.AtVec(4), 1e-9)
+	// dim 5: log-scale mem_bytes feature; log1p(32GiB)/log1p(64GiB).
+	assert.InDelta(t, math.Log1p(32*1024*1024*1024)/math.Log1p(64*1024*1024*1024), x.AtVec(5), 1e-9)
 	assert.InDelta(t, 0.5, x.AtVec(7), 1e-9) // 2/4 active tasks
 	assert.Equal(t, 1.0, x.AtVec(9))         // .cpp is C++
 	assert.InDelta(t, math.Log1p(32*1024)/math.Log1p(1024*1024), x.AtVec(10), 1e-9)
 	assert.InDelta(t, 4.0/6.0, x.AtVec(11), 1e-9) // Laplace (3+1)/(3+1+2)
+}
+
+// TestLinUCB_FeatureVector_DistinguishesFractionalCPUQuotas is a
+// regression test for the degenerate-feature bug documented in
+// undersubscription-explains-tie: workers under Docker --cpus quotas of
+// 0.5/0.6/0.8/1.0/1.1 (see test/stress/docker-compose-hetero.yml) all
+// reported cpu_cores=<host core count> before capability.Detect() read
+// cgroup limits, so dim [4] was bit-for-bit identical (variance 0) across
+// all five workers — the bandit had no CPU signal to learn from. This
+// test asserts dim [4] now has strictly increasing, pairwise-distinct
+// values across the same five real quotas, expressed as CpuMillis (what
+// a cgroup-aware worker now reports).
+func TestLinUCB_FeatureVector_DistinguishesFractionalCPUQuotas(t *testing.T) {
+	reg := newRegistryWithWorkers(t, 1)
+	s := NewLinUCBScheduler(LinUCBConfig{Registry: reg})
+	ctx := TaskContext{SourceSizeBytes: 1 << 16, SourceFilename: "obj.c"}
+
+	quotasMillis := []int32{500, 600, 800, 1000, 1100}
+	var dims []float64
+	for _, millis := range quotasMillis {
+		w := &registry.WorkerInfo{
+			ID: "w",
+			Capabilities: &pb.WorkerCapabilities{
+				NativeArch: pb.Architecture_ARCH_ARM64,
+				CpuCores:   10, // host-reported core count — identical across all 5, as observed
+				CpuMillis:  millis,
+			},
+			MaxParallel: 2,
+		}
+		x := s.featureVector(w, pb.Architecture_ARCH_ARM64, ctx)
+		dims = append(dims, x.AtVec(4))
+	}
+
+	for i := 1; i < len(dims); i++ {
+		assert.Greater(t, dims[i], dims[i-1],
+			"dim[4] must strictly increase with CPU quota (%d millis -> %f, %d millis -> %f)",
+			quotasMillis[i-1], dims[i-1], quotasMillis[i], dims[i])
+	}
+
+	// The old bug: with CpuMillis unset, all 5 collapse to whatever
+	// cpu_cores/16 (or now, the fallback cpu_cores*1000 log-scaled)
+	// gives — identical for identical cpu_cores. Assert that path is
+	// still distinct from the cgroup-aware path for at least one quota,
+	// so a future change that silently ignores CpuMillis again would
+	// fail this test.
+	fallback := &registry.WorkerInfo{
+		ID:           "w",
+		Capabilities: &pb.WorkerCapabilities{NativeArch: pb.Architecture_ARCH_ARM64, CpuCores: 10},
+		MaxParallel:  2,
+	}
+	fallbackDim := s.featureVector(fallback, pb.Architecture_ARCH_ARM64, ctx).AtVec(4)
+	assert.NotEqual(t, dims[0], fallbackDim,
+		"a worker with real CpuMillis=500 must score differently from one reporting no cgroup limit at all")
 }
 
 // TestLinUCB_RewardMonotonicity verifies that giving better rewards to

@@ -184,6 +184,91 @@ func TestLeastLoadedScheduler_SkipsUnhealthy(t *testing.T) {
 	}
 }
 
+// TestLeastLoadedScheduler_RespectsCapacityOnHeterogeneousCluster is a
+// regression test for the bug documented in undersubscription-explains-tie
+// / cgroup-fix-verified-live: on a heterogeneous cluster (workers with
+// different MaxParallel), comparing raw ActiveTasks without a capacity
+// check picks an already-full low-capacity worker whenever its absolute
+// count is still numerically smaller than a higher-capacity worker's
+// count. Mirrors the exact scenario from the fix's doc comment: a
+// MaxParallel=1 worker already at 1/1 (full) vs a MaxParallel=3 worker at
+// 2/3 (has room) — 1 < 2 would wrongly pick the full one.
+func TestLeastLoadedScheduler_RespectsCapacityOnHeterogeneousCluster(t *testing.T) {
+	reg := newTestRegistry()
+	defer reg.Stop()
+
+	if err := reg.Add(&registry.WorkerInfo{
+		ID:      "worker-1",
+		Address: "localhost:50051",
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch: pb.Architecture_ARCH_X86_64,
+			Cpp:        &pb.CppCapability{Compilers: []string{"gcc"}},
+		},
+		MaxParallel: 1,
+		ActiveTasks: 1, // full
+	}); err != nil {
+		t.Fatalf("failed to add worker-1: %v", err)
+	}
+	if err := reg.Add(&registry.WorkerInfo{
+		ID:      "worker-5",
+		Address: "localhost:50051",
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch: pb.Architecture_ARCH_X86_64,
+			Cpp:        &pb.CppCapability{Compilers: []string{"gcc"}},
+		},
+		MaxParallel: 3,
+		ActiveTasks: 2, // has room (2 < 3)
+	}); err != nil {
+		t.Fatalf("failed to add worker-5: %v", err)
+	}
+
+	s := NewLeastLoadedScheduler(reg)
+
+	worker, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
+	if err != nil {
+		t.Fatalf("Select failed: %v", err)
+	}
+	if worker.ID != "worker-5" {
+		t.Errorf("Expected worker-5 (has room), got %s — must skip worker-1 (full at 1/1) even though its raw ActiveTasks (1) is numerically smaller than worker-5's (2/3, has room)", worker.ID)
+	}
+}
+
+// TestLeastLoadedScheduler_ErrorsWhenAllWorkersFull confirms the new
+// capacity check causes a clean ErrNoMatchingWorkers when every worker is
+// genuinely at capacity, instead of silently overbooking one of them (the
+// old behavior, which pushed the failure downstream to the worker's own
+// admission control as a ResourceExhausted rejection instead).
+func TestLeastLoadedScheduler_ErrorsWhenAllWorkersFull(t *testing.T) {
+	reg := newTestRegistry()
+	defer reg.Stop()
+
+	if err := reg.Add(&registry.WorkerInfo{
+		ID:           "worker-1",
+		Address:      "localhost:50051",
+		Capabilities: &pb.WorkerCapabilities{NativeArch: pb.Architecture_ARCH_X86_64, Cpp: &pb.CppCapability{Compilers: []string{"gcc"}}},
+		MaxParallel:  1,
+		ActiveTasks:  1,
+	}); err != nil {
+		t.Fatalf("failed to add worker-1: %v", err)
+	}
+	if err := reg.Add(&registry.WorkerInfo{
+		ID:           "worker-2",
+		Address:      "localhost:50051",
+		Capabilities: &pb.WorkerCapabilities{NativeArch: pb.Architecture_ARCH_X86_64, Cpp: &pb.CppCapability{Compilers: []string{"gcc"}}},
+		MaxParallel:  2,
+		ActiveTasks:  2,
+	}); err != nil {
+		t.Fatalf("failed to add worker-2: %v", err)
+	}
+
+	s := NewLeastLoadedScheduler(reg)
+
+	_, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "")
+	if err != ErrNoMatchingWorkers {
+		t.Errorf("Expected ErrNoMatchingWorkers, got %v", err)
+	}
+}
+
 // P2C Scheduler Tests
 
 func addDetailedCppWorker(r *registry.InMemoryRegistry, id string, cpuCores int32, memGB int64, activeTasks int32, source string) error {
@@ -259,6 +344,55 @@ func TestP2CScheduler_PrefersBetterWorker(t *testing.T) {
 	// Worker-2 should be selected most of the time due to higher score
 	if counts["worker-2"] < counts["worker-1"] {
 		t.Errorf("Expected worker-2 to be preferred, got counts: %v", counts)
+	}
+}
+
+// TestP2CScheduler_ScoreDistinguishesFractionalCPUQuotas is a regression
+// test mirroring TestLinUCB_FeatureVector_DistinguishesFractionalCPUQuotas
+// (see undersubscription-explains-tie): P2C's CPU scoring term used the
+// raw, cgroup-blind caps.CpuCores, which is identical across every
+// worker on a Docker --cpus-limited cluster (host core count), making
+// the term a worker-independent constant. Asserts the CPU contribution
+// to scoreWorker now strictly increases across the same five real
+// quotas from test/stress/docker-compose-hetero.yml.
+func TestP2CScheduler_ScoreDistinguishesFractionalCPUQuotas(t *testing.T) {
+	reg := newTestRegistry()
+	defer reg.Stop()
+	s := NewP2CScheduler(P2CConfig{Registry: reg})
+
+	quotasMillis := []int32{500, 600, 800, 1000, 1100}
+	var scores []float64
+	for _, millis := range quotasMillis {
+		w := &registry.WorkerInfo{
+			ID: "w",
+			Capabilities: &pb.WorkerCapabilities{
+				NativeArch: pb.Architecture_ARCH_X86_64,
+				CpuCores:   10, // host-reported core count — identical across all 5, as observed
+				CpuMillis:  millis,
+			},
+		}
+		scores = append(scores, s.scoreWorker(w, pb.Architecture_ARCH_X86_64))
+	}
+
+	for i := 1; i < len(scores); i++ {
+		if scores[i] <= scores[i-1] {
+			t.Errorf("score must strictly increase with CPU quota (%d millis -> %f, %d millis -> %f)",
+				quotasMillis[i-1], scores[i-1], quotasMillis[i], scores[i])
+		}
+	}
+
+	// The old bug: with CpuMillis unset, a worker's score depended only
+	// on the (identical, host-reported) cpu_cores. Assert a worker
+	// reporting no cgroup limit at all scores differently from one at
+	// the lowest real quota, so a future change that silently drops
+	// CpuMillis again would fail this test.
+	fallback := &registry.WorkerInfo{
+		ID:           "w",
+		Capabilities: &pb.WorkerCapabilities{NativeArch: pb.Architecture_ARCH_X86_64, CpuCores: 10},
+	}
+	fallbackScore := s.scoreWorker(fallback, pb.Architecture_ARCH_X86_64)
+	if scores[0] == fallbackScore {
+		t.Errorf("a worker with real CpuMillis=500 must score differently from one reporting no cgroup limit at all")
 	}
 }
 
