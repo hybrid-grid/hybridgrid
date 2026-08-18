@@ -59,6 +59,29 @@ Chúng em vì vậy **chỉ khẳng định cơ chế này trên workload nhẹ*
 
 ---
 
+### 1.5. Nguyên nhân thứ hai: đặc trưng CPU bị thoái hoá
+
+Trong quá trình chuẩn bị phần so sánh với icecream, chúng em phát hiện thêm một lỗi độc lập, ảnh hưởng còn trực tiếp hơn.
+
+- Khi worker chạy dưới giới hạn CPU của Docker, trường `cpu_cores` mà worker báo về **là số lõi của máy chủ**, không phải phần được cấp. Giới hạn `--cpus` không được phản ánh.
+- Cụm thí nghiệm giới hạn 0,5 / 0,6 / 0,8 / 1,0 / 1,1 lõi, nên **cả 5 worker đều báo cùng một giá trị**.
+- Hệ quả: thành phần CPU trong vector đặc trưng của LinUCB là một **hằng số không phân biệt được worker**. Bộ học không hề quan sát được sự không đồng nhất mà nó được thiết kế để khai thác. Hàm chấm điểm năng lực của HEFT mắc cùng lỗi này.
+
+Chúng em đã sửa: bổ sung trường `cpu_millis` đọc trực tiếp hạn ngạch cgroup (giữ được phần lẻ dưới một lõi), và chuyển chuẩn hoá đặc trưng CPU cùng bộ nhớ từ tuyến tính sang thang log. Lý do đổi sang log: với thang tuyến tính trên 16 lõi, 0,5 và 1,1 lõi rơi vào 0,03 và 0,07 — chênh lệch 0,04, gần như tan trong sai số dấu phẩy động khi cập nhật ma trận theo công thức Sherman–Morrison. Trong thang log, hai giá trị này thành khoảng 0,64 và 0,72, tức khoảng cách rộng gấp tám lần.
+
+### 1.6. Hệ quả chung của hai nguyên nhân
+
+Hai lỗi trên độc lập với nhau và cùng làm sai lệch kết quả theo hướng bất lợi cho bộ lập lịch học:
+
+- Bài toán quá dễ, không có gì để tối ưu (mục 1.1).
+- Bộ học không nhìn thấy dữ liệu cần thiết để ra quyết định (mục 1.5).
+
+Vì vậy chúng em cho rằng kết luận *"bộ lập lịch học chỉ đạt ngang heuristic"* **chưa đủ căn cứ** với tư cách một phát biểu về thuật toán: nó được đo trên một bộ học bị che mất tín hiệu đầu vào, trong một bài toán không còn quyết định nào để tối ưu.
+
+Toàn bộ thí nghiệm cần chạy lại sau khi hai lỗi này được khắc phục. Kết quả có thể khác so với những gì đã báo cáo trước đây.
+
+---
+
 ## 2. Đính chính một khẳng định sai trong phần khảo sát
 
 Khi rà soát lại phần công trình liên quan, chúng em phát hiện bài báo đang khẳng định sai rằng chưa có hệ thống build phân tán nào học trực tuyến. Thực tế có ít nhất hai hệ thống:
@@ -110,8 +133,9 @@ Chúng em **chưa chạy** phần thí nghiệm này nên chưa khẳng định 
 
 ## 5. Các hạng mục còn tồn đọng
 
-1. Chạy loạt thí nghiệm bốn mức tải nêu ở mục 4.
-2. Làm rõ nguyên nhân phương sai lớn trên workload nặng, đặc biệt lần chạy ngoại lai 101,9 giây.
+1. Kiểm tra trực tiếp trên cụm rằng 5 worker báo đúng 500 / 600 / 800 / 1000 / 1100 milli-core sau khi sửa lỗi ở mục 1.5. Đây là điều kiện tiên quyết: nếu bước này sai thì mọi số liệu đo sau đều không dùng được.
+2. Chạy lại toàn bộ thí nghiệm ở bốn mức tải nêu ở mục 4, sau khi đã khắc phục cả hai nguyên nhân.
+3. Làm rõ nguyên nhân phương sai lớn trên workload nặng, đặc biệt lần chạy ngoại lai 101,9 giây.
 
 Về tính tái lập: toàn bộ số liệu trong báo cáo này sinh ra từ `scripts/analyze_idle_skip.py`, chạy trên dữ liệu thô đã lưu trong kho mã nguồn. Thầy có thể kiểm chứng bằng lệnh:
 
