@@ -67,7 +67,19 @@ Trong quá trình chuẩn bị phần so sánh với icecream, chúng em phát h
 - Cụm thí nghiệm giới hạn 0,5 / 0,6 / 0,8 / 1,0 / 1,1 lõi, nên **cả 5 worker đều báo cùng một giá trị**.
 - Hệ quả: thành phần CPU trong vector đặc trưng của LinUCB là một **hằng số không phân biệt được worker**. Bộ học không hề quan sát được sự không đồng nhất mà nó được thiết kế để khai thác. Hàm chấm điểm năng lực của HEFT mắc cùng lỗi này.
 
-Chúng em đã sửa: bổ sung trường `cpu_millis` đọc trực tiếp hạn ngạch cgroup (giữ được phần lẻ dưới một lõi), và chuyển chuẩn hoá đặc trưng CPU cùng bộ nhớ từ tuyến tính sang thang log. Lý do đổi sang log: với thang tuyến tính trên 16 lõi, 0,5 và 1,1 lõi rơi vào 0,03 và 0,07 — chênh lệch 0,04, gần như tan trong sai số dấu phẩy động khi cập nhật ma trận theo công thức Sherman–Morrison. Trong thang log, hai giá trị này thành khoảng 0,64 và 0,72, tức khoảng cách rộng gấp tám lần.
+Lỗi này đã được xác nhận trực tiếp trên cụm thật ngày 18/08/2026. Dựng cụm 5 worker với hạn ngạch 0,5 / 0,6 / 0,8 / 1,0 / 1,1 lõi rồi chạy 190 tác vụ biên dịch, kết quả ghi trong nhật ký tác vụ:
+
+| Hạn ngạch cgroup | `cpu_cores` báo về | `cpu_millis` báo về |
+|---|---:|---:|
+| 0,5 lõi | 8 | 500 |
+| 0,6 lõi | 8 | 600 |
+| 0,8 lõi | 8 | 800 |
+| 1,0 lõi | 8 | 1000 |
+| 1,1 lõi | 8 | 1100 |
+
+Cột `cpu_cores` cho giá trị **8 ở cả năm worker** — đúng bằng số lõi của máy chủ, không phải phần được cấp — trong khi năng lực thật giữa chúng chênh nhau tới 2,2 lần. Bộ nhớ không dính lỗi này, `memory_gb` báo đúng theo giới hạn container. Bằng chứng đầy đủ lưu tại `.sisyphus/evidence/cgroup-smoke-260818/`.
+
+Chúng em đã sửa: bổ sung trường `cpu_millis` đọc trực tiếp hạn ngạch cgroup (giữ được phần lẻ dưới một lõi), và chuyển chuẩn hoá đặc trưng CPU cùng bộ nhớ từ tuyến tính sang thang log. Cột `cpu_millis` trong bảng trên xác nhận bản sửa hoạt động đúng trên toàn bộ chuỗi: worker đọc cgroup, báo qua gRPC, coordinator ghi nhận. Lý do đổi sang log: với thang tuyến tính trên 16 lõi, 0,5 và 1,1 lõi rơi vào 0,03 và 0,07 — chênh lệch 0,04, gần như tan trong sai số dấu phẩy động khi cập nhật ma trận theo công thức Sherman–Morrison. Trong thang log, hai giá trị này thành khoảng 0,64 và 0,72, tức khoảng cách rộng gấp tám lần.
 
 ### 1.6. Hệ quả chung của hai nguyên nhân
 
@@ -133,8 +145,8 @@ Chúng em **chưa chạy** phần thí nghiệm này nên chưa khẳng định 
 
 ## 5. Các hạng mục còn tồn đọng
 
-1. Kiểm tra trực tiếp trên cụm rằng 5 worker báo đúng 500 / 600 / 800 / 1000 / 1100 milli-core sau khi sửa lỗi ở mục 1.5. Đây là điều kiện tiên quyết: nếu bước này sai thì mọi số liệu đo sau đều không dùng được.
-2. Chạy lại toàn bộ thí nghiệm ở bốn mức tải nêu ở mục 4, sau khi đã khắc phục cả hai nguyên nhân.
+1. ~~Kiểm tra trực tiếp trên cụm rằng 5 worker báo đúng 500 / 600 / 800 / 1000 / 1100 milli-core.~~ **Đã xong ngày 18/08/2026** — kết quả ở mục 1.5, bằng chứng tại `.sisyphus/evidence/cgroup-smoke-260818/`.
+2. Chạy lại toàn bộ thí nghiệm ở bốn mức tải nêu ở mục 4, sau khi đã khắc phục cả hai nguyên nhân. Việc này cần một máy đủ rảnh: máy dùng cho smoke test đang có tải nền cao (load average ~35 trên 8 lõi do các tiến trình đồng bộ của hệ điều hành), không đạt yêu cầu về nhiễu nêu ở §7.4 của bài báo.
 3. Làm rõ nguyên nhân phương sai lớn trên workload nặng, đặc biệt lần chạy ngoại lai 101,9 giây.
 
 Về tính tái lập: toàn bộ số liệu trong báo cáo này sinh ra từ `scripts/analyze_idle_skip.py`, chạy trên dữ liệu thô đã lưu trong kho mã nguồn. Thầy có thể kiểm chứng bằng lệnh:
