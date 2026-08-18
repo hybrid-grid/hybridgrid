@@ -14,7 +14,7 @@ env:
   # (previously 1.25.8) let the toolchain drift behind security fixes,
   # and govulncheck scans the stdlib of the toolchain in use — three
   # patch releases of stdlib CVEs turned the Security Scan red.
-  GO_VERSION: "1.25.x"
+  GO_VERSION: "1.25.13"
 
 jobs:
   # ============================================
