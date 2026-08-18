@@ -27,31 +27,41 @@ type TaskLogger struct {
 // evaluation and bandit/RL training. Field names use snake_case so pandas
 // can ingest the file with pd.read_json(path, lines=True) without renaming.
 type TaskLogRecord struct {
-	TS                          time.Time `json:"ts"`
-	Event                       string    `json:"event"`
-	TaskID                      string    `json:"task_id"`
-	BuildType                   string    `json:"build_type"`
-	Scheduler                   string    `json:"scheduler"`
-	WorkerID                    string    `json:"worker_id"`
-	WorkerArch                  string    `json:"worker_arch"`
-	WorkerNativeArch            string    `json:"worker_native_arch"`
-	WorkerCPUCores              int32     `json:"worker_cpu_cores"`
-	WorkerMemBytes              int64     `json:"worker_mem_bytes"`
-	WorkerActiveTasksAtDispatch int32     `json:"worker_active_tasks_at_dispatch"`
-	WorkerMaxParallel           int32     `json:"worker_max_parallel"`
-	WorkerDiscoverySource       string    `json:"worker_discovery_source"`
-	TargetArch                  string    `json:"target_arch"`
-	ClientOS                    string    `json:"client_os"`
-	SourceSizeBytes             int       `json:"source_size_bytes"`
-	PreprocessedSizeBytes       int       `json:"preprocessed_size_bytes"`
-	RawSourceSizeBytes          int       `json:"raw_source_size_bytes"`
-	QueueTimeMs                 int64     `json:"queue_time_ms"`
-	CompileTimeMs               int64     `json:"compile_time_ms"`
-	WorkerRPCLatencyMs          int64     `json:"worker_rpc_latency_ms"`
-	TotalDurationMs             int64     `json:"total_duration_ms"`
-	Success                     bool      `json:"success"`
-	ExitCode                    int32     `json:"exit_code"`
-	FromCache                   bool      `json:"from_cache"`
+	TS               time.Time `json:"ts"`
+	Event            string    `json:"event"`
+	TaskID           string    `json:"task_id"`
+	BuildType        string    `json:"build_type"`
+	Scheduler        string    `json:"scheduler"`
+	WorkerID         string    `json:"worker_id"`
+	WorkerArch       string    `json:"worker_arch"`
+	WorkerNativeArch string    `json:"worker_native_arch"`
+	WorkerCPUCores   int32     `json:"worker_cpu_cores"`
+	// WorkerCPUMillis is the cgroup-aware effective CPU limit in
+	// milli-cores (0 = no cgroup limit detected, i.e. WorkerCPUCores is
+	// the true value). Logged separately from WorkerCPUCores — which
+	// keeps reporting the raw host core count even under a Docker
+	// --cpus/Kubernetes limits.cpu quota — so offline analysis can
+	// verify the cgroup-detection fix actually took effect (see
+	// undersubscription-explains-tie / cgroup-fix-verified-live) instead
+	// of trusting it blindly: a benchmark run where every worker still
+	// logs the same WorkerCPUMillis would mean the fix regressed.
+	WorkerCPUMillis             int32  `json:"worker_cpu_millis"`
+	WorkerMemBytes              int64  `json:"worker_mem_bytes"`
+	WorkerActiveTasksAtDispatch int32  `json:"worker_active_tasks_at_dispatch"`
+	WorkerMaxParallel           int32  `json:"worker_max_parallel"`
+	WorkerDiscoverySource       string `json:"worker_discovery_source"`
+	TargetArch                  string `json:"target_arch"`
+	ClientOS                    string `json:"client_os"`
+	SourceSizeBytes             int    `json:"source_size_bytes"`
+	PreprocessedSizeBytes       int    `json:"preprocessed_size_bytes"`
+	RawSourceSizeBytes          int    `json:"raw_source_size_bytes"`
+	QueueTimeMs                 int64  `json:"queue_time_ms"`
+	CompileTimeMs               int64  `json:"compile_time_ms"`
+	WorkerRPCLatencyMs          int64  `json:"worker_rpc_latency_ms"`
+	TotalDurationMs             int64  `json:"total_duration_ms"`
+	Success                     bool   `json:"success"`
+	ExitCode                    int32  `json:"exit_code"`
+	FromCache                   bool   `json:"from_cache"`
 
 	// Learner introspection (populated only by LearningScheduler
 	// implementations; zero/false otherwise).

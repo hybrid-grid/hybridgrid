@@ -159,6 +159,15 @@ message WorkerCapabilities {
   int32 max_parallel_tasks = 10;
   string version = 11;
 
+  // cpu_millis is the effective CPU limit in milli-cores (1000 = 1 full
+  // core), read from the container/cgroup quota when the worker runs
+  // under a resource limit (Docker --cpus, Kubernetes limits.cpu). Unlike
+  // cpu_cores (whole cores only — a 0.5-core cgroup quota rounds to 0 or
+  // 1 and collapses distinct workers to the same value), this preserves
+  // fractional limits. 0 means "no cgroup limit detected"; callers should
+  // fall back to cpu_cores * 1000 in that case.
+  int32 cpu_millis = 12;
+
   // Multi-platform capabilities
   CppCapability cpp = 20;
   FlutterCapability flutter = 21;

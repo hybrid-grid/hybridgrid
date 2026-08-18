@@ -30,6 +30,22 @@ func Detect() *pb.WorkerCapabilities {
 		DockerAvailable: detectDocker(),
 	}
 
+	// cgroup limits (Linux only — Docker/Kubernetes containers run a
+	// Linux kernel even when the host is Windows or macOS, so this
+	// checks the container's own filesystem, not the host's). NumCPU()
+	// and detectMemory() above see the *host's* full capacity even when
+	// this process is confined to a fraction of it by --cpus/limits.cpu;
+	// a 0 result here means "no cgroup limit found", so the whole-machine
+	// values already set above are left as the correct fallback.
+	if runtime.GOOS == "linux" {
+		if millis := detectCPUMillis(); millis > 0 {
+			caps.CpuMillis = millis
+		}
+		if memLimit := detectMemoryLimit(); memLimit > 0 {
+			caps.MemoryBytes = memLimit
+		}
+	}
+
 	// Detect C/C++ capabilities
 	caps.Cpp = detectCpp()
 

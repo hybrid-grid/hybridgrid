@@ -158,52 +158,5 @@ func (s *HEFTScheduler) wbarLocked(workerID string) *metrics.EWMA {
 // eligibleWorkers mirrors the admission rules of the other schedulers
 // for apples-to-apples comparison.
 func (s *HEFTScheduler) eligibleWorkers(buildType pb.BuildType, arch pb.Architecture, clientOS string) ([]*registry.WorkerInfo, error) {
-	workers := s.registry.ListByCapability(buildType, arch)
-	if len(workers) == 0 {
-		if s.registry.Count() == 0 {
-			return nil, ErrNoWorkers
-		}
-		return nil, ErrNoMatchingWorkers
-	}
-	if clientOS != "" {
-		workers = filterByOS(workers, clientOS)
-		if len(workers) == 0 {
-			return nil, ErrNoMatchingWorkers
-		}
-	}
-	cands := make([]*registry.WorkerInfo, 0, len(workers))
-	for _, w := range workers {
-		if w.State == registry.WorkerStateUnhealthy {
-			continue
-		}
-		if s.circuitChecker != nil && s.circuitChecker.IsOpen(w.ID) {
-			continue
-		}
-		maxP := w.MaxParallel
-		if maxP <= 0 {
-			maxP = 4
-		}
-		if w.ActiveTasks >= maxP {
-			continue
-		}
-		cands = append(cands, w)
-	}
-	if len(cands) == 0 {
-		for _, w := range workers {
-			if w.State == registry.WorkerStateUnhealthy {
-				continue
-			}
-			maxP := w.MaxParallel
-			if maxP <= 0 {
-				maxP = 4
-			}
-			if w.ActiveTasks < maxP {
-				cands = append(cands, w)
-			}
-		}
-	}
-	if len(cands) == 0 {
-		return nil, ErrNoMatchingWorkers
-	}
-	return cands, nil
+	return eligibleCandidates(s.registry, s.circuitChecker, buildType, arch, clientOS)
 }

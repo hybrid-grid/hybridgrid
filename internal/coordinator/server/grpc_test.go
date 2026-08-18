@@ -370,6 +370,55 @@ func TestCompile_NoWorkersAvailable(t *testing.T) {
 	assert.Contains(t, resp.Stderr, "no worker available")
 }
 
+// TestCompile_RetriesWhenNoWorkerHasCapacity is a regression test for the
+// gap documented in undersubscription-explains-tie /
+// cgroup-fix-verified-live: previously, when dispatch() itself found no
+// eligible worker (every worker genuinely at MaxParallel — distinct from a
+// selected worker's own admission control rejecting a forwarded compile
+// with ResourceExhausted), Compile() returned STATUS_FAILED immediately,
+// with zero retries. This left properly capacity-aware schedulers (P2C,
+// LinUCB, epsilon-greedy, HEFT, and LeastLoaded after its own capacity-
+// check fix) unable to recover from a transient burst that a brief wait
+// would resolve.
+//
+// This registers a worker that is permanently at capacity (MaxParallel=1,
+// ActiveTasks=1, never freed) so dispatch() fails on every attempt, and
+// asserts Compile() (a) still eventually returns STATUS_FAILED — the
+// retry budget is bounded, not infinite — and (b) took long enough to do
+// so that retries with backoff must have happened, not an instant
+// give-up. With maxDispatchAttempts=8 and the existing `attempt*25ms`
+// backoff, a permanently-stuck dispatch sleeps ~700ms total (25+50+...+
+// 175ms across 7 retries) before giving up on the 8th attempt.
+func TestCompile_RetriesWhenNoWorkerHasCapacity(t *testing.T) {
+	s, client, cleanup := setupTestServer(t, Config{Port: 0, HeartbeatTTL: 30 * time.Second})
+	defer cleanup()
+
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "worker-full",
+		Address: "127.0.0.1:0",
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch: pb.Architecture_ARCH_X86_64,
+			Cpp:        &pb.CppCapability{Compilers: []string{"gcc"}},
+		},
+		MaxParallel: 1,
+		ActiveTasks: 1, // full; never freed during this test
+	}))
+
+	start := time.Now()
+	resp, err := client.Compile(context.Background(), &pb.CompileRequest{
+		TaskId:             "task-retry-1",
+		PreprocessedSource: []byte("int main() {}"),
+		Compiler:           "gcc",
+	})
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	assert.Equal(t, pb.TaskStatus_STATUS_FAILED, resp.Status)
+	assert.Contains(t, resp.Stderr, "no worker available")
+	assert.GreaterOrEqual(t, elapsed, 500*time.Millisecond,
+		"expected multiple backoff-and-retry cycles (~700ms) before giving up, got %s — did the retry loop skip straight to failure?", elapsed)
+}
+
 func TestCompile_TracksMetrics(t *testing.T) {
 	s, _, cleanup := setupTestServer(t, Config{Port: 0, HeartbeatTTL: 30 * time.Second})
 	defer cleanup()
