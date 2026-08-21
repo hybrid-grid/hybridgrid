@@ -2,6 +2,14 @@
 
 *Ngày 09/08/2026*
 
+> **Lưu ý về hiệu lực.** Báo cáo này giữ nguyên như bản đã gửi ngày 09/08/2026. Một số nội dung đã được đính chính bằng dữ liệu đo ngày 21/08/2026, trình bày trong `bao-cao-tien-do-260821.md`:
+>
+> - **Mục 1.2 sai.** Khẳng định "không bộ lập lịch nào có thể vượt LeastLoaded" khi cụm dư tải đã bị bác bỏ: tại đúng mức chiếm dụng 50%, bộ lập lịch đề xuất vượt LeastLoaded 1,11 s (p = 0,042). Lập luận cũ đánh đồng *máy rảnh* với *máy tương đương*, trong khi năng lực giữa các worker chênh 2,2 lần.
+> - **Mục 1.6 do đó cũng sai một nửa.** Trong hai nguyên nhân của thế hoà, chỉ nguyên nhân thứ hai — đặc trưng CPU thoái hoá (mục 1.5) — là thật.
+> - **Mục 4 không thực hiện được như kế hoạch.** Hai mức `-j16` và `-j24` không chạy được do giới hạn kiến trúc của bộ điều phối, không phải do cấu hình.
+>
+> Các mục 1.3, 1.4, 1.5, 2 và 3 vẫn còn hiệu lực.
+
 Kính gửi thầy,
 
 Sau buổi làm việc trước, chúng em đã rà soát lại toàn bộ dữ liệu đo và xác định được nguyên nhân vì sao bộ lập lịch do chúng em đề xuất chỉ đạt kết quả ngang bằng với heuristic LeastLoaded. Báo cáo này trình bày kết quả chẩn đoán, một đính chính quan trọng trong phần khảo sát, và hướng viết lại bài báo theo góp ý của thầy.
