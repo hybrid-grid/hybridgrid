@@ -27,6 +27,15 @@ type MSVCExecutor struct {
 }
 
 // NewMSVCExecutor creates a new MSVC executor.
+// initMSVC installs the MSVC executor when this Windows host actually has a
+// usable toolchain. A missing toolchain is not an error: the manager simply
+// goes without it, exactly as before.
+func (m *Manager) initMSVC() {
+	if msvc, err := NewMSVCExecutor(); err == nil {
+		m.msvc = msvc
+	}
+}
+
 func NewMSVCExecutor() (*MSVCExecutor, error) {
 	if runtime.GOOS != "windows" {
 		return nil, fmt.Errorf("MSVC executor only available on Windows")
