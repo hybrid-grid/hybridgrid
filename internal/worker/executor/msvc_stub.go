@@ -17,6 +17,12 @@ func NewMSVCExecutor() (*MSVCExecutor, error) {
 	return nil, fmt.Errorf("MSVC executor only available on Windows")
 }
 
+// initMSVC is a no-op off Windows: NewMSVCExecutor above can only fail here,
+// so attempting it would be a branch that never runs. Keeping the attempt in
+// the shared NewManager instead made staticcheck flag the `err == nil` test
+// as unreachable (SA4023), which it was.
+func (m *Manager) initMSVC() {}
+
 // Name returns the executor name.
 func (e *MSVCExecutor) Name() string {
 	return "msvc-stub"
