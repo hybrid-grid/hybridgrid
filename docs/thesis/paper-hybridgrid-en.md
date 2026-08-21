@@ -1,8 +1,10 @@
 # Hybrid-Grid: A Distributed Compilation System with Contextual-Bandit Task Scheduling on Heterogeneous Clusters
 
-**Le Duc Hieuᵃ, Nguyen Trung Kienᵃ, Nguyen Trong Khanhᵃ**
+**Le Duc Hieuᵃ˒\*, Nguyen Trung Kienᵃ, Nguyen Trong Khanhᵃ**
 
 ᵃ *Posts and Telecommunications Institute of Technology, Hanoi, Vietnam*
+
+\* *Corresponding author:* leduchieu101@gmail.com
 
 ---
 
@@ -60,7 +62,7 @@ Production build systems fall into three classes: *cache-first* systems (ccache,
 
 ### 3.1. Architecture
 
-The system comprises three components communicating over gRPC on HTTP/2 (optional TLS/mTLS):
+The system comprises three components communicating over gRPC on HTTP/2 (optional TLS/mTLS), laid out as in Figure 1:
 
 - **`hgbuild` (CLI):** a drop-in gcc/clang replacement that also wraps `make`/`ninja`. It preprocesses source locally, hashes the preprocessed output with xxhash for cache lookup, submits the task to the coordinator, and automatically *falls back* to local compilation when the coordinator is unavailable — so an infrastructure failure slows a build down rather than breaking it.
 - **`hg-coord` (Coordinator):** the central orchestrator, comprising the worker registry (gRPC handshake registration, 10-second heartbeats), the **scheduler** (the primary object of study, Sections 4–6), the serialised dispatch path (Section 3.3), per-worker circuit breakers for fault isolation, Prometheus metrics, OpenTelemetry tracing, and a real-time WebSocket dashboard.
@@ -120,7 +122,7 @@ Two properties of this lifecycle shape the entire algorithm design in Section 5.
 
 ### 3.3. The coordinator's dispatch path
 
-Steps ④–⑤ of Figure 2 must withstand many concurrent `Compile()` calls: with a `make -jN` flag, up to $N$ tasks request a decision simultaneously. The scheduling decision reads worker state (`ActiveTasks`) and the dispatch writes it back; if these are two separate operations across concurrent goroutines, two dispatches can read the same stale `ActiveTasks`, pick the same low-capacity worker, and overbook it.
+Steps ④–⑤ of Figure 2 must withstand many concurrent `Compile()` calls: with a `make -jN` flag, up to $N$ tasks request a decision simultaneously. The scheduling decision reads worker state (`ActiveTasks`) and the dispatch writes it back; if these are two separate operations across concurrent goroutines, two dispatches can read the same stale `ActiveTasks`, pick the same low-capacity worker, and overbook it. We rule that out by confining all three operations — reading worker state, selecting a worker, and recording the dispatch — to a single goroutine (Figure 3), so they are atomic with respect to one another by construction, with no explicit locking.
 
 Hybrid-Grid therefore serialises the entire decision path through **a single `dispatchLoop` goroutine** that owns every `SelectWith`+`IncrementTasks` pair for the coordinator's lifetime. Each `Compile()` call submits a request into a `dispatchCh` channel and waits for the result. We use a Go channel rather than a hand-rolled queue because a channel already *is* a synchronised FIFO queue, whereas a manual linked list touched by many goroutines would merely relocate rather than eliminate the same locking requirement.
 
@@ -285,7 +287,7 @@ RECORDOUTCOME(τ, worker a, compile time t_c, success):
 ─────────────────────────────────────────────────────────────
 ```
 
-**Sherman–Morrison inverse update.** Each update is rank-1: $A_{\text{new}} = A_{\text{old}} + xx^\top$. Recomputing the inverse from scratch costs $O(d^3)$; the Sherman–Morrison formula [17] at line 15 reduces this to $O(d^2)$:
+**Sherman–Morrison inverse update.** Each update is rank-1: $A_{\text{new}} = A_{\text{old}} + xx^\top$. Recomputing the inverse from scratch costs $O(d^3)$; the Sherman–Morrison formula [17] at line 15 of Algorithm 1 reduces this to $O(d^2)$:
 
 $$A_{\text{new}}^{-1} = A_{\text{old}}^{-1} - \frac{A_{\text{old}}^{-1} x x^\top A_{\text{old}}^{-1}}{1 + x^\top A_{\text{old}}^{-1} x}.$$
 
@@ -293,11 +295,11 @@ A unit test compares the cached inverse against a fresh inversion via `gonum/mat
 
 **Complexity.** With $d = 12$ and $|\mathcal{W}_t| \le m$: each `Select` costs $O(m d^2)$, each `RecordOutcome` $O(d^2)$, with $O(m d^2)$ memory. Concretely, with $d = 12$ and $m = 5$ a decision costs a few hundred floating-point operations, against the millisecond-scale gRPC round-trip that the dispatch itself incurs. We did not instrument the scoring step separately: the two are three orders of magnitude apart, and no plausible measurement would reverse that ordering.
 
-**The single-candidate fast path** (line 1) exists for a practical reason: when only one eligible worker remains there is no *decision* to make, so all the matrix algebra is pure waste. We added it after measuring a 41% penalty from P2C's filtering pipeline on a one-worker cluster; all three learning schedulers share this fast path.
+**The single-candidate fast path** (line 1 of Algorithm 1) exists for a practical reason: when only one eligible worker remains there is no *decision* to make, so all the matrix algebra is pure waste. We added it after measuring a 41% penalty from P2C's filtering pipeline on a one-worker cluster; all three learning schedulers share this fast path.
 
 ### 5.7. Four mandatory implementation requirements
 
-While bringing the algorithm into a real running system, we identified four requirements whose violation turns an *algorithmically correct* LinUCB implementation into the worst scheduler in the system — 158 s against 94 s for P2C on the 5-worker cluster, i.e. slower than a policy that ignores every signal the bandit was designed to exploit. The makespans, exploration rates and dispatch ratios quoted in this section and in Section 5.8 are **single-run measurements** taken while the implementation was being brought up; we report them to convey the size of the effect, not as controlled comparisons. Every controlled comparison in this paper is in Section 7. None is a defect of LinUCB; all four are state-management, scale-normalisation and instrumentation issues that surface only when the bandit is wired into a real, concurrent system rather than a simulator. We present them as design requirements because we believe they transfer to any bandit deployment in a distributed system.
+While bringing the algorithm into a real running system, we identified four requirements whose violation turns an *algorithmically correct* LinUCB implementation into the worst scheduler in the system — 158 s against 94 s for P2C on the 5-worker cluster, i.e. slower than a policy that ignores every signal the bandit was designed to exploit. The makespans, exploration rates and dispatch ratios quoted in this section and in Section 5.8 are **single-run measurements** taken while the implementation was being brought up; we report them to convey the size of the effect, not as controlled comparisons. Every controlled comparison in this paper is in Section 7. None is a defect of LinUCB; all four are state-management, scale-normalisation and instrumentation issues that surface only when the bandit is wired into a real, concurrent system rather than a simulator. We present them as design requirements because we believe they transfer to any bandit deployment in a distributed system. Table 2 summarises all four together with the measured evidence for each.
 
 **Table 2.** Four implementation requirements, the consequence of violating each, and the measured evidence.
 
@@ -421,7 +423,7 @@ The result rules the hypothesis out: the makespan trend against build index is *
 
 Load skew tells the same story as Table 5 from a different angle. Because container identities change between rounds, the ratio must be computed within a round; the medians over the ten `-j5` blocks are 1.9:1 for LeastLoaded, 2.7:1 for HG-LinUCB, 2.8:1 for P2C and 5.0:1 for plain LinUCB, with the busiest worker taking 24.7%, 28.6%, 30.5% and 33.6% of a round's 295 dispatches respectively (an even split would be 20%). Plain LinUCB concentrates dispatches roughly twice as hard as the two front-runners, and it is the only scheduler whose skew is visibly above the others — the same ordering as makespan, and the same ordering as the skip rate.
 
-Skew on its own does not say whether a scheduler concentrates work in the *right* place, so we compared each dispatch distribution against the one the cluster's capacities imply. The five workers hold 12.5 / 15.0 / 20.0 / 25.0 / 27.5% of the cluster's 4,000 milli-cores, and a scheduler allocating strictly in proportion to capacity would reproduce those shares exactly. This is not the same as the slot layout, which is 10 / 20 / 20 / 20 / 30% (`MaxParallel` of 1, 2, 2, 2, 3) — so neither an even split across workers nor an even split across slots is capacity-proportional.
+Skew on its own does not say whether a scheduler concentrates work in the *right* place, so we compared each dispatch distribution against the one the cluster's capacities imply. The five workers hold 12.5 / 15.0 / 20.0 / 25.0 / 27.5% of the cluster's 4,000 milli-cores, and a scheduler allocating strictly in proportion to capacity would reproduce those shares exactly. This is not the same as the slot layout, which is 10 / 20 / 20 / 20 / 30% (`MaxParallel` of 1, 2, 2, 2, 3) — so neither an even split across workers nor an even split across slots is capacity-proportional. Table 6 sets the measured distributions against that capacity-proportional allocation.
 
 **Table 6.** Share of a round's 295 dispatches received by each worker, averaged over the ten `-j5` blocks, against the capacity-proportional allocation. MAD is the mean absolute deviation from that allocation, in percentage points.
 

@@ -24,9 +24,11 @@
 
 \title{Hybrid-Grid: Hệ thống biên dịch phân tán với lập lịch tác vụ dựa trên Contextual Bandit trên cụm máy không đồng nhất}
 
-\author[a]{Lê Đức Hiếu}
+\author[a]{Lê Đức Hiếu\corref{cor1}}
+\ead{leduchieu101@gmail.com}
 \author[a]{Nguyễn Trung Kiên}
 \author[a]{Nguyễn Trọng Khánh}
+\cortext[cor1]{Tác giả liên hệ}
 \affiliation[a]{organization={Học viện Công nghệ Bưu chính Viễn thông}, city={Hà Nội}, country={Việt Nam}}
 
 \begin{abstract}
@@ -90,7 +92,7 @@ Các hệ thống build sản xuất chia ba lớp: hệ \emph{cache-first} (cca
 
 \subsection{Kiến trúc}
 
-Hệ thống gồm ba thành phần giao tiếp qua gRPC trên HTTP/2 (tuỳ chọn TLS/mTLS):
+Hệ thống gồm ba thành phần giao tiếp qua gRPC trên HTTP/2 (tuỳ chọn TLS/mTLS), bố cục như Hình~\ref{fig:arch}:
 
 \begin{itemize}
 \item \textbf{\texttt{hgbuild} (CLI):} thay thế trực tiếp gcc/clang, đồng thời bọc \texttt{make}/\texttt{ninja}. Nó tiền xử lý mã nguồn cục bộ, băm đầu ra tiền xử lý bằng xxhash để tra cứu cache, gửi tác vụ tới coordinator, và tự động \emph{rơi về} biên dịch cục bộ khi coordinator không sẵn sàng - nên một lỗi hạ tầng làm build chậm đi chứ không làm build hỏng.
@@ -176,7 +178,7 @@ Hai đặc điểm của vòng đời này định hình toàn bộ thiết kế
 \subsection{Đường dispatch của coordinator}
 \label{sec:dispatch}
 
-Bước 4--5 trong Hình~\ref{fig:lifecycle} phải chịu được nhiều lời gọi \texttt{Compile()} đồng thời: với cờ \texttt{make -jN}, có tới $N$ tác vụ cùng lúc yêu cầu một quyết định. Quyết định lập lịch đọc trạng thái worker (\texttt{ActiveTasks}) và việc dispatch ghi lại trạng thái đó; nếu hai bước là hai thao tác tách rời giữa các goroutine đồng thời, hai dispatch có thể cùng đọc một giá trị \texttt{ActiveTasks} cũ, cùng chọn một worker năng lực thấp và gây overbook.
+Bước 4--5 trong Hình~\ref{fig:lifecycle} phải chịu được nhiều lời gọi \texttt{Compile()} đồng thời: với cờ \texttt{make -jN}, có tới $N$ tác vụ cùng lúc yêu cầu một quyết định. Quyết định lập lịch đọc trạng thái worker (\texttt{ActiveTasks}) và việc dispatch ghi lại trạng thái đó; nếu hai bước là hai thao tác tách rời giữa các goroutine đồng thời, hai dispatch có thể cùng đọc một giá trị \texttt{ActiveTasks} cũ, cùng chọn một worker năng lực thấp và gây overbook. Chúng tôi loại bỏ khả năng đó bằng cách gom cả ba thao tác --- đọc trạng thái, chọn worker, ghi nhận dispatch --- vào một goroutine duy nhất (Hình~\ref{fig:dispatch}), nên chúng nguyên tử với nhau theo thiết kế mà không cần khoá tường minh.
 
 Hybrid-Grid vì vậy tuần tự hoá toàn bộ đường quyết định qua \textbf{một goroutine \texttt{dispatchLoop} duy nhất}, sở hữu mọi cặp \texttt{SelectWith}+\texttt{IncrementTasks} trong suốt vòng đời coordinator. Mỗi lời gọi \texttt{Compile()} gửi yêu cầu vào một channel \texttt{dispatchCh} rồi chờ kết quả. Chúng tôi dùng channel của Go chứ không tự cài hàng đợi, vì channel vốn đã \emph{là} một hàng đợi FIFO đồng bộ, còn một linked list thủ công bị nhiều goroutine chạm vào chỉ dời chỗ chứ không xoá bỏ yêu cầu khoá tương tự.
 
@@ -385,7 +387,7 @@ Chúng tôi ràng buộc $\lambda\in[0,5]$: $\lambda$ quá lớn khiến số h�
 \label{alg:hglinucb}
 \end{figure}
 
-\textbf{Cập nhật nghịch đảo Sherman--Morrison.} Mỗi cập nhật là hạng-1: $A_{\text{new}}=A_{\text{old}}+xx^\top$. Nghịch đảo lại từ đầu tốn $O(d^3)$; công thức Sherman--Morrison~\cite{sherman1950} ở dòng 15 giảm còn $O(d^2)$:
+\textbf{Cập nhật nghịch đảo Sherman--Morrison.} Mỗi cập nhật là hạng-1: $A_{\text{new}}=A_{\text{old}}+xx^\top$. Nghịch đảo lại từ đầu tốn $O(d^3)$; công thức Sherman--Morrison~\cite{sherman1950} ở dòng 15 của Thuật toán 1 giảm còn $O(d^2)$:
 \begin{equation}
 A_{\text{new}}^{-1}=A_{\text{old}}^{-1}-\frac{A_{\text{old}}^{-1}xx^\top A_{\text{old}}^{-1}}{1+x^\top A_{\text{old}}^{-1}x}.
 \end{equation}
@@ -393,12 +395,12 @@ Một unit test đối chiếu nghịch đảo được cache với phép nghị
 
 \textbf{Độ phức tạp.} Với $d=12$ và $|\mathcal{W}_t|\le m$: mỗi lần \texttt{Select} tốn $O(md^2)$, mỗi lần \texttt{RecordOutcome} tốn $O(d^2)$, bộ nhớ $O(md^2)$. Cụ thể, với $d=12$ và $m=5$, một quyết định tốn vài trăm phép tính dấu phẩy động, so với RTT gRPC cỡ mili-giây mà bản thân thao tác dispatch phải chịu. Chúng tôi không đo riêng bước chấm điểm: hai đại lượng cách nhau ba bậc độ lớn, và không phép đo hợp lý nào có thể đảo ngược thứ tự đó.
 
-\textbf{Fast-path đơn ứng viên} (dòng 1) tồn tại vì lý do thực tế: khi chỉ còn một worker hợp lệ, không có \emph{quyết định} nào để đưa ra, nên toàn bộ đại số ma trận là lãng phí thuần tuý. Chúng tôi thêm nó sau khi đo được mức phạt 41\% của pipeline lọc P2C trên cụm một worker; cả ba bộ lập lịch học đều dùng chung fast-path này.
+\textbf{Fast-path đơn ứng viên} (dòng 1 của Thuật toán 1) tồn tại vì lý do thực tế: khi chỉ còn một worker hợp lệ, không có \emph{quyết định} nào để đưa ra, nên toàn bộ đại số ma trận là lãng phí thuần tuý. Chúng tôi thêm nó sau khi đo được mức phạt 41\% của pipeline lọc P2C trên cụm một worker; cả ba bộ lập lịch học đều dùng chung fast-path này.
 
 \subsection{Bốn yêu cầu triển khai bắt buộc}
 \label{sec:reqs}
 
-Trong quá trình đưa thuật toán vào hệ thống chạy thật, chúng tôi phát hiện bốn yêu cầu mà nếu vi phạm sẽ khiến một cài đặt LinUCB \emph{đúng về mặt thuật toán} trở thành bộ lập lịch tệ nhất trong cả hệ - 158\,s so với 94\,s của P2C trên cụm 5 worker, tức chậm hơn cả một chính sách bỏ qua mọi tín hiệu mà bandit được thiết kế để khai thác. Các giá trị makespan, tỉ lệ khám phá và tỉ số dispatch nêu trong Mục này và Mục~\ref{sec:sensitivity} là \textbf{phép đo chạy đơn}, thực hiện trong lúc dựng hệ thống; chúng tôi báo cáo để cho thấy độ lớn của hiệu ứng, không phải như một phép so sánh có kiểm soát. Mọi so sánh có kiểm soát của bài báo đều nằm ở Mục~\ref{sec:eval}. Không cái nào là lỗi của LinUCB; cả bốn thuộc loại quản lý trạng thái, chuẩn hoá thang đo và đo lường, và chỉ bộc lộ khi bandit được nối vào một hệ thống thật chạy đồng thời thay vì một trình mô phỏng. Chúng tôi trình bày chúng như yêu cầu thiết kế vì tin rằng chúng chuyển giao được sang mọi triển khai bandit trong hệ thống phân tán.
+Trong quá trình đưa thuật toán vào hệ thống chạy thật, chúng tôi phát hiện bốn yêu cầu mà nếu vi phạm sẽ khiến một cài đặt LinUCB \emph{đúng về mặt thuật toán} trở thành bộ lập lịch tệ nhất trong cả hệ - 158\,s so với 94\,s của P2C trên cụm 5 worker, tức chậm hơn cả một chính sách bỏ qua mọi tín hiệu mà bandit được thiết kế để khai thác. Các giá trị makespan, tỉ lệ khám phá và tỉ số dispatch nêu trong Mục này và Mục~\ref{sec:sensitivity} là \textbf{phép đo chạy đơn}, thực hiện trong lúc dựng hệ thống; chúng tôi báo cáo để cho thấy độ lớn của hiệu ứng, không phải như một phép so sánh có kiểm soát. Mọi so sánh có kiểm soát của bài báo đều nằm ở Mục~\ref{sec:eval}. Không cái nào là lỗi của LinUCB; cả bốn thuộc loại quản lý trạng thái, chuẩn hoá thang đo và đo lường, và chỉ bộc lộ khi bandit được nối vào một hệ thống thật chạy đồng thời thay vì một trình mô phỏng. Chúng tôi trình bày chúng như yêu cầu thiết kế vì tin rằng chúng chuyển giao được sang mọi triển khai bandit trong hệ thống phân tán. Bảng~\ref{tab:reqs} tóm tắt cả bốn cùng bằng chứng đo được tương ứng.
 
 \begin{table*}[t]
 \centering
@@ -570,7 +572,7 @@ Kết quả loại trừ giả thuyết này: xu hướng makespan theo chỉ s�
 
 Độ lệch tải kể lại đúng câu chuyện của Bảng~\ref{tab:avail} từ một góc khác. Vì định danh container thay đổi giữa các vòng, tỉ số phải được tính trong phạm vi từng vòng; trung vị qua mười khối \texttt{-j5} là 1,9:1 với LeastLoaded, 2,7:1 với HG-LinUCB, 2,8:1 với P2C và 5,0:1 với LinUCB thuần, còn worker bận nhất lần lượt nhận 24,7\%, 28,6\%, 30,5\% và 33,6\% trong số 295 dispatch của một vòng (chia đều sẽ là 20\%). LinUCB thuần dồn dispatch mạnh gấp khoảng hai lần hai bộ dẫn đầu, và là scheduler duy nhất có độ lệch cao hẳn so với phần còn lại - cùng thứ tự với makespan, và cùng thứ tự với tỉ lệ bỏ qua.
 
-Bản thân độ lệch chưa nói được scheduler có dồn việc vào \emph{đúng chỗ} hay không, nên chúng tôi đối chiếu từng phân phối dispatch với phân phối mà năng lực của cụm hàm ý. Năm worker nắm 12,5\,/\,15,0\,/\,20,0\,/\,25,0\,/\,27,5\% trong tổng 4.000 milli-core của cụm, và một scheduler phân bổ đúng tỉ lệ năng lực sẽ tái hiện chính xác các tỉ lệ đó. Đây không trùng với bố cục slot, vốn là 10\,/\,20\,/\,20\,/\,20\,/\,30\% (\texttt{MaxParallel} bằng 1, 2, 2, 2, 3) - nên chia đều theo worker hay chia đều theo slot đều không phải là chia theo năng lực.
+Bản thân độ lệch chưa nói được scheduler có dồn việc vào \emph{đúng chỗ} hay không, nên chúng tôi đối chiếu từng phân phối dispatch với phân phối mà năng lực của cụm hàm ý. Năm worker nắm 12,5\,/\,15,0\,/\,20,0\,/\,25,0\,/\,27,5\% trong tổng 4.000 milli-core của cụm, và một scheduler phân bổ đúng tỉ lệ năng lực sẽ tái hiện chính xác các tỉ lệ đó. Đây không trùng với bố cục slot, vốn là 10\,/\,20\,/\,20\,/\,20\,/\,30\% (\texttt{MaxParallel} bằng 1, 2, 2, 2, 3) - nên chia đều theo worker hay chia đều theo slot đều không phải là chia theo năng lực. Bảng~\ref{tab:capshare} đối chiếu phân phối đo được với phân bổ theo tỉ lệ năng lực.
 
 \begin{table*}[t]
 \centering

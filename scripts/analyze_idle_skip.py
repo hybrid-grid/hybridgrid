@@ -19,9 +19,18 @@ idle-skip rate
 
 occupancy ceiling
     Concurrent client tasks (make -j) divided by total worker slots. Below
-    100% the cluster can never saturate, every idle-first policy is optimal,
-    and no scheduler can beat LeastLoaded. This is the condition that makes
-    the tie a property of the benchmark rather than of the algorithm.
+    100% the cluster never saturates, so an idle worker is almost always
+    available and the only mistake left is passing one over.
+
+    An earlier version of this docstring went further and claimed no
+    scheduler can beat LeastLoaded below 100% occupancy. Measurement at
+    -j5 (50% occupancy) refuted it: Hybrid-LinUCB won by 1.11 s, p=0.042.
+    The reason is that idle does not mean equivalent -- these workers
+    differ by 2.2x in capacity, so "which idle worker" is still a real
+    decision,
+    and LeastLoaded answers it by task count rather than by capacity.
+    Use scripts/analyze_dispatch_availability.py to measure availability
+    across the whole cluster rather than only the chosen worker.
 
 The regression is reported per workload. A high R-squared means the metric
 explains makespan; a low one means run-to-run variance dominates and the
@@ -110,7 +119,9 @@ def analyze(out_dir):
         print(f"cluster: {len(slots)} workers, {total} slots "
               f"({'+'.join(str(v) for v in sorted(slots.values(), reverse=True))})")
         print(f"         at make -j5 the occupancy ceiling is {500 // total}%"
-              f" -- below 100%, so every idle-first policy is optimal")
+              f" -- below 100%, an idle worker is almost always available,"
+              f"\n         but idle != equivalent: which idle worker still matters"
+              f" on a heterogeneous cluster")
 
     makespan = {}
     with open(results) as fh:
