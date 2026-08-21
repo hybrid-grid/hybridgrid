@@ -1,4 +1,4 @@
-% Hybrid-Grid paper — English version
+﻿% Hybrid-Grid paper - English version
 % Elsevier elsarticle two-column format, mirroring the reference paper layout.
 % Compile with pdflatex (elsarticle package required; available on Overleaf by default).
 \documentclass[final,5p,times,twocolumn]{elsarticle}
@@ -6,7 +6,10 @@
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs}
 \usepackage{graphicx}
+\usepackage{float}
 \usepackage{url}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds,shapes.multipart,shapes.geometric}
 
 \journal{[Journal / Conference Name]}
 
@@ -14,267 +17,626 @@
 
 \begin{frontmatter}
 
-\title{Hybrid-Grid: A Distributed Compilation System with Contextual-Bandit Task Scheduling on Heterogeneous Worker Clusters}
+\title{Hybrid-Grid: A Distributed Compilation System with Contextual-Bandit Task Scheduling on Heterogeneous Clusters}
 
-\author[a]{Le Duc Hieu\corref{cor1}}
-\ead{leduchieu101@gmail.com}
+\author[a]{Le Duc Hieu}
 \author[a]{Nguyen Trung Kien}
 \author[a]{Nguyen Trong Khanh}
-\cortext[cor1]{Corresponding author}
 \affiliation[a]{organization={Posts and Telecommunications Institute of Technology}, city={Hanoi}, country={Vietnam}}
 
 \begin{abstract}
-This paper presents Hybrid-Grid, an open-source distributed compilation system for C/C++ on heterogeneous worker clusters, with online task scheduling as its central research focus. Existing distributed build systems rely on static heuristics --- round-robin, least-loaded, or capability scoring --- and never learn from execution outcomes, even though our measurements show that compile times on heterogeneous clusters exhibit extreme variance (a P99/P50 ratio of approximately $29\times$). To exploit this signal, we model the scheduling decision as a contextual bandit problem and implement and compare six schedulers inside a single real system: three heuristics (LeastLoaded, Power-of-Two-Choices, HEFT) and three online learners ($\varepsilon$-greedy, LinUCB, and Hybrid-LinUCB --- our proposed variant, which augments the UCB score with a heuristic warm-start phase and a real-time load-penalty term). Experiments on a CPython compilation workload ($\sim$293 tasks per build) over a 5-worker heterogeneous Docker cluster, under a randomized complete block design with 10 repetitions and paired statistical testing (one-sided Wilcoxon signed-rank, Holm--Bonferroni correction, Cliff's delta effect sizes), yield a two-sided result: Hybrid-LinUCB significantly outperforms the weaker learners (5.26\,s faster than P2C and 6.80\,s faster than pure LinUCB, $p=0.003$, $|d|=1.0$) but only ties the LeastLoaded heuristic ($p=0.65$) --- an honest negative result reinforced by a warm-bandit ablation demonstrating that the tie is intrinsic to the stationary workload rather than a cold-start artifact. An equally important methodological contribution: the rigorous protocol detected and eliminated a false positive (an apparent 7.9\% advantage at $p=0.0001$) that a simpler experimental design had produced through run-order confounding. These results delineate the conditions under which learned scheduling delivers real value in distributed build systems, identifying cache affinity and non-stationary environments as the most promising directions.
+This paper presents Hybrid-Grid, an open-source distributed compilation system for C/C++ on heterogeneous worker clusters, and \textbf{HG-LinUCB}, the online reinforcement-learning scheduler we propose and adopt as the system's primary scheduling policy. In a distributed compilation system the hardest component is not file transfer or cache management but \emph{deciding which worker each translation unit should go to}: an NP-hard $R||C_{\max}$ problem that must be solved online, over machines differing by up to 2.2$\times$ in capacity, under a compile-time distribution whose P99/P50 ratio reaches 26$\times$. We formulate each dispatch decision as a contextual bandit problem with a 12-dimensional context vector describing the task and the worker jointly, a log-latency reward, and an $O(d^2)$ online Sherman--Morrison update. On top of LinUCB, HG-LinUCB adds two orthogonal mechanisms that target the two failure modes a plain bandit exhibits on a real system: a \textbf{passive-learning warm-start window} (the learner observes and updates its model while deferring the decision to a heuristic) and a \textbf{real-time load-penalty term} $\lambda\cdot\text{LoadRatio}$ subtracted from the UCB score. We also identify four implementation requirements whose violation turns a textbook-correct LinUCB into the worst scheduler in the system (158\,s versus 94\,s) - most notably a cgroup-blind capability detector that silently holds two of twelve context dimensions constant across every containerised worker, a failure mode we have not seen described elsewhere. Evaluation under a full randomised block design (10 blocks, paired tests, Holm correction) on clean CPython builds shows HG-LinUCB beating plain LinUCB by 8.95\,s and Power-of-Two-Choices by 4.66\,s with large effect sizes ($p=0.003$), but not separating from the LeastLoaded heuristic (1.12\,s, $p=0.053$). Reconstructing cluster state at every dispatch instant explains both outcomes through a single mechanism: at typical load, 100\% of decisions are taken with an idle worker available, so the only behaviour that can distinguish policies is whether they skip one - HG-LinUCB 0.1\% and LeastLoaded 0.0\%, versus P2C 22.5\% and plain LinUCB 35.0\%; when the cluster is driven to saturation, the fraction of dispatches with an idle worker falls to 33\%, the two skipping policies' absolute skip rates fall to 5.4\% and 7.1\%, and all four schedulers become statistically indistinguishable (Friedman $p=0.375$). The result precisely delimits the conditions under which context-aware scheduling can pay off, and supplies a cheap diagnostic with which any scheduling study can check whether it is really measuring scheduling at all.
 \end{abstract}
+
+\begin{keyword}
+distributed compilation \sep task scheduling \sep contextual bandit \sep LinUCB \sep online learning \sep heterogeneous cluster
+\end{keyword}
 
 \end{frontmatter}
 
 \section{Introduction}
+\label{sec:intro}
 
-Distributed compilation is an everyday reality of modern software engineering. Large C/C++ projects such as LLVM, Chromium, or the Linux kernel contain tens of thousands of translation units; a clean build on a single machine can take hours. Systems such as distcc~\cite{distcc}, Bazel Remote Build Execution, and Incredibuild address this by pushing compilation tasks onto a pool of remote workers. That pool is inherently \emph{heterogeneous}: a developer's laptop, a Linux CI runner, an ARM cloud node, a dedicated build machine --- differing in CPU cores, memory, instruction-set architecture, and instantaneous load.
+Distributed compilation is an everyday reality of modern software engineering. Large C/C++ projects such as LLVM, Chromium and the Linux kernel contain tens of thousands of translation units; a clean single-machine build can take hours. Systems such as distcc~\cite{distcc}, Bazel Remote Build Execution and Incredibuild address this by offloading compilation tasks to a pool of remote workers. That pool is inherently \emph{heterogeneous}: developer laptops, Linux CI servers, cloud ARM nodes, dedicated build machines - differing in CPU cores, memory, instruction-set architecture and instantaneous load.
 
-Theoretically, assigning tasks to heterogeneous machines to minimize makespan is the $R||C_{\max}$ (unrelated parallel machines) problem: NP-hard, inapproximable below a factor of $3/2$ unless P{\,=\,}NP, with the best known approximation ratio being $2$~\cite{lenstra1990}. In the online setting --- where tasks arrive sequentially and must be dispatched immediately --- the situation is harder still: Graham's list scheduling~\cite{graham1969} achieves a competitive ratio of $2-1/m$ on identical machines, but no tight universal competitive bound exists for unrelated machines. Production systems therefore rely on heuristics: round-robin, least-loaded, or Power-of-Two-Choices (P2C)~\cite{mitzenmacher2001}. What these heuristics share is that they decide from queue lengths or static capability scores and \emph{never learn} from observed outcomes.
+While building Hybrid-Grid, the distributed compilation system presented in this paper, we found that the components usually considered hard - shipping preprocessed source, content-addressed caching, worker discovery, fault isolation - all have well-understood engineering solutions and, once implemented, work reliably. The component that is genuinely hard is the \textbf{scheduler}: the function that decides which worker each translation unit goes to. It is hard for three simultaneous reasons.
 
-Our measurements on a CPython build ($\sim$293 compilation tasks per build) over a 5-worker heterogeneous cluster reveal two striking phenomena: (i) the ratio between the P99 and P50 compile-time percentiles reaches $\mathbf{29\times}$, and (ii) a single ``best'' worker absorbs \textbf{33\% of all dispatches} under both static heuristics. High variance combined with concentrated dispatch suggests that a scheduler that \emph{observes compile outcomes and adjusts future decisions} --- an online learner --- could improve makespan and tail latency.
+First, the underlying problem is theoretically hard. Assigning tasks to heterogeneous machines to minimise makespan is the $R||C_{\max}$ (unrelated parallel machines) problem: NP-hard, inapproximable below ratio $3/2$ unless P{\,=\,}NP, with the best known upper bound at ratio $2$~\cite{lenstra1990}. Second, it must be solved \emph{online}: tasks arrive sequentially and must be assigned immediately, with no knowledge of the remainder of the stream. Graham's list scheduling~\cite{graham1969} achieves a $2-1/m$ competitive ratio on identical machines, but no tight universal competitive bound exists for unrelated machines. Third, measurements on our own system show an environment of very high variance: over a CPython build ($\sim$295 compilation tasks per build) across a 5-worker heterogeneous cluster, the ratio between the P99 and P50 compile-time percentiles reaches $\mathbf{26\times}$ (pooled over 11{,}800 tasks), and the busiest worker in a round absorbs \textbf{25--31\% of all dispatches} under the static heuristics, against the 20\% an even split would give.
 
-However, published reinforcement-learning (RL) approaches to scheduling (Decima~\cite{decima}, DeepRM~\cite{deeprm}) require simulator pre-training --- unavailable for build systems with real compiler binaries and noisy hardware. The \emph{contextual multi-armed bandit} family~\cite{slivkins2019,lattimore2020} is a less-explored alternative: each scheduling decision is a one-step problem, learned online from observed rewards, with theoretical regret bounds of order $O(\sqrt{T})$ under linear-payoff assumptions~\cite{chu2011}. The most studied algorithm in this family is LinUCB~\cite{li2010}.
+That third property motivates our approach. The heuristics production systems rely on - round-robin, least-loaded, or Power-of-Two-Choices (P2C)~\cite{mitzenmacher2001} - share one property: each decision is a function only of queue length or a static capability score, and \emph{the outcome of one dispatch never feeds back into the next}. In an environment with high variance and stable heterogeneous structure, a scheduler that observes compilation outcomes and adjusts future decisions - an online learner - could in principle do better.
 
-In this paper we build a complete distributed compilation system (Hybrid-Grid) and use it as an experimental platform to answer the question: \emph{can a contextual bandit beat static heuristics at scheduling real distributed compilation?} The main contributions of this study are:
+Published deep reinforcement-learning approaches to scheduling (Decima~\cite{decima}, DeepRM~\cite{deeprm}) all require pre-training in a simulator, which does not exist for a build system with real compilers and noisy hardware. We therefore chose the \emph{contextual multi-armed bandit} family~\cite{slivkins2019,lattimore2020}: each scheduling decision is a one-step problem, learned online on the running system from observed rewards, with no offline training phase, and with theoretical $O(\sqrt{T})$ regret bounds under a linearity assumption~\cite{chu2011}. The representative algorithm of this family is LinUCB~\cite{li2010}.
+
+The central contribution of this paper is \textbf{HG-LinUCB}, the LinUCB variant we designed specifically for the worker-selection problem and adopted as Hybrid-Grid's primary scheduler. Putting a textbook bandit into a real system exposed two structural failure modes that the theory does not address: \emph{cold start} - immediately after initialisation the model carries no information, so decisions are essentially random, and a single build lasts only a few hundred decisions; and \emph{delayed feedback} - the reward only returns once compilation finishes, and during that multi-second window the bandit does not know it has just piled work onto a worker and keeps piling more. HG-LinUCB addresses both with two orthogonal mechanisms: a warm-start window in which the learner \emph{observes and updates its model while deferring the decision} to a heuristic, and a real-time load-penalty term added to the UCB score that acts as a hand-specified prior blocking pile-up behaviour before the model has accumulated enough data to discover it. The name follows the system: HG-LinUCB is the LinUCB that Hybrid-Grid runs. What the two mechanisms jointly produce is a score assembled from three ingredients of different provenance - value \emph{learned} from context, plus an \emph{exploration} bonus, minus an \emph{instantaneous} signal only a heuristic can supply.
+
+The specific contributions are:
 
 \begin{itemize}
-\item \textbf{C1.} A complete open-source distributed build system in Go: the \texttt{hgbuild} CLI as a drop-in gcc/clang replacement, the \texttt{hg-coord} coordinator with worker registry, per-worker circuit breakers, and a real-time dashboard, and the \texttt{hg-worker} executor supporting native and Docker cross-compilation; gRPC/HTTP2 communication with optional TLS/mTLS, zero-config worker discovery via mDNS, an xxhash-based content-addressable cache, and full observability (Prometheus, OpenTelemetry).
-\item \textbf{C2.} Six schedulers implemented behind a unified \texttt{LearningScheduler} interface supporting online reward feedback, including \textbf{Hybrid-LinUCB} --- our proposed hybrid variant that adds a passively-learning warm-start window and a real-time load-penalty term $\lambda\cdot\text{LoadRatio}$ to the UCB score, addressing two observed failure modes of the pure bandit (cold start and delayed feedback).
-\item \textbf{C3.} A measurement pipeline emitting one 27-field JSON Lines record per dispatched task --- covering worker context at decision time, latency decomposition, and learner introspection --- enabling reproducible offline analysis.
-\item \textbf{C4.} A confound-controlled empirical evaluation (randomized complete block design, 10 repetitions, paired tests with multiple-comparison correction) plus a warm-bandit ablation, yielding an honest negative result --- the bandit ties the strongest heuristic on a stationary workload --- and a methodological lesson: the rigorous design caught a false positive produced by a careless one.
+\item \textbf{C1. HG-LinUCB} (Section~\ref{sec:hglinucb}): a formulation of the dispatch decision as a contextual bandit with a 12-dimensional context vector describing the task and the worker jointly, plus two mechanisms - passive-learning warm start and real-time load penalty. The design beats plain LinUCB by 8.95\,s and P2C by 4.66\,s with large effect sizes under a rigorous evaluation protocol.
+\item \textbf{C2. Four implementation requirements} for making a contextual bandit work on a containerised cluster (Section~\ref{sec:reqs}), with the measured cost of violating each - including a cgroup-blind capability detector that silently degenerates two context dimensions on any Docker or Kubernetes cluster with differing quotas, a failure mode that raises no error, fails no test, and which we have not seen described elsewhere.
+\item \textbf{C3. Hybrid-Grid} (Section~\ref{sec:system}): a complete open-source distributed compilation system in Go - the \texttt{hgbuild} CLI as a drop-in gcc/clang replacement, the \texttt{hg-coord} coordinator with a registry, a serialised dispatch path, per-worker circuit breakers and a real-time dashboard, and the \texttt{hg-worker} worker supporting native and Docker cross-compilation execution; gRPC/HTTP2 with optional TLS/mTLS, mDNS self-discovery, xxhash content-addressed caching, and full observability (Prometheus, OpenTelemetry).
+\item \textbf{C4. A noise-controlled evaluation} (Section~\ref{sec:eval}): a full randomised block design with 10 blocks, paired tests and Holm correction, at two dispatch-concurrency levels, analysing the four schedulers that bear on the research question out of six implemented behind one unified interface.
+\item \textbf{C5. A dispatch-level mechanism analysis} (Section~\ref{sec:mech}): a reconstruction of worker availability at every decision instant, showing that the entire measurable spread between schedulers reduces to exactly one behaviour. This doubles as a cheap diagnostic with which any scheduling study can check whether its operating point actually permits policies to be distinguished.
 \end{itemize}
 
-The remainder of this paper is structured as follows. Section~2 reviews related work. Section~3 formulates the online scheduling problem under the contextual-bandit framework. Section~4 describes the system architecture and scheduling algorithms, in particular the Hybrid-LinUCB design. Section~5 details the experimental setup and statistical protocol. Section~6 reports quantitative results. Section~7 discusses key findings, practical implications, limitations, and threats to validity. Section~8 concludes.
+The remainder of the paper is organised as follows. Section~\ref{sec:related} reviews related work. Section~\ref{sec:system} describes the architecture and operation of Hybrid-Grid. Section~\ref{sec:problem} states the scheduling problem and casts it as a contextual bandit. Section~\ref{sec:hglinucb} - the core of the paper - presents the design of HG-LinUCB. Section~\ref{sec:baselines} describes the five baseline schedulers. Section~\ref{sec:eval} presents the experimental evaluation. Section~\ref{sec:discussion} discusses, and Section~\ref{sec:conclusion} concludes.
 
 \section{Related Work}
+\label{sec:related}
 
-\subsection{Heuristic Scheduling on Heterogeneous Machines}
+\subsection{Heuristic scheduling on heterogeneous machines}
 
-The $R||C_{\max}$ problem was proven NP-hard by Lenstra, Shmoys, and Tardos~\cite{lenstra1990}, with a $3/2$ inapproximability lower bound and a 2-approximation algorithm; the gap remains open after more than 35 years. In practice, Power-of-Two-Choices~\cite{mitzenmacher2001} is the standout heuristic: sampling two random servers and picking the less loaded one reduces the maximum load from $\Theta(\log n/\log\log n)$ to $\Theta(\log\log n)$ on homogeneous clusters. Sparrow~\cite{sparrow} extends P2C with late binding for low-latency decentralized scheduling. HEFT~\cite{heft} is the classical algorithm for task DAGs on heterogeneous machines, ranking tasks by upward rank and assigning by earliest finish time; we adapt HEFT to an online task stream using EWMA estimates of compile time. The common trait across this group: decisions are based on queue state or static capability, never on per-task outcomes.
+Lenstra, Shmoys and Tardos~\cite{lenstra1990} proved $R||C_{\max}$ NP-hard with a $3/2$ approximation lower bound and gave a ratio-$2$ algorithm; the gap remains open after more than 35 years. In practice Power-of-Two-Choices~\cite{mitzenmacher2001} is the prominent heuristic: sampling two servers at random and choosing the less loaded one reduces maximum load from $\Theta(\log n/\log\log n)$ to $\Theta(\log\log n)$ on homogeneous clusters. Sparrow~\cite{sparrow} extends P2C with late binding for low-latency decentralised scheduling. HEFT~\cite{heft} is the classical algorithm for task DAGs on heterogeneous machines, ranking tasks by upward rank and assigning by earliest finish time; we adapt HEFT to an online task stream using EWMA compile-time estimates. What the whole family shares: decisions based on queue state or static capability, never on per-task outcomes.
 
-\subsection{Multi-Armed and Contextual Bandits}
+\subsection{Multi-armed and contextual bandits}
 
-The classical bandit framework with $\varepsilon$-greedy and incremental sample-mean updates is systematized by Sutton and Barto~\cite{sutton2018}; UCB1 by Auer et al.~\cite{auer2002} introduced optimism-under-uncertainty into arm selection. Slivkins~\cite{slivkins2019} and Lattimore--Szepesv\'ari~\cite{lattimore2020} systematize regret theory. LinUCB~\cite{li2010} extends to the contextual setting: each arm maintains a linear model $(A_a, b_a)$ and is selected by the score $\hat{\theta}_a^\top x + \alpha\sqrt{x^\top A_a^{-1}x}$. The $\tilde{O}(\sqrt{Td})$ regret bound is proven for the SupLinUCB variant~\cite{chu2011}; notably, this bound does \emph{not} directly apply to the LinUCB Algorithm~1 that practical systems (including ours) implement --- a point we state honestly in Section~7.
+The classical bandit framework with $\varepsilon$-greedy and sample-average updates is presented systematically in Sutton and Barto~\cite{sutton2018}; UCB1 by Auer et al.~\cite{auer2002} introduced optimism-under-uncertainty into arm selection. Slivkins~\cite{slivkins2019} and Lattimore--Szepesv\'ari~\cite{lattimore2020} systematise the regret theory. LinUCB~\cite{li2010} extends to the contextual setting: each arm maintains a linear model $(A_a,b_a)$ and is scored by $\hat{\theta}_a^\top x+\alpha\sqrt{x^\top A_a^{-1}x}$. A $\tilde{O}(\sqrt{Td})$ regret bound is proven for the SupLinUCB variant~\cite{chu2011}; notably that bound does \emph{not} apply directly to the LinUCB Algorithm~1 that real systems (including ours) implement - a point we state honestly in Section~\ref{sec:limitations}.
 
-\subsection{Machine Learning for Systems Scheduling}
+\subsection{Machine learning for systems scheduling}
 
-Decima~\cite{decima} uses a graph neural network policy with REINFORCE to schedule Spark jobs, reporting up to $1.5\times$ job-completion-time improvement, but requires thousands of training episodes in a simulator before deployment. DeepRM~\cite{deeprm} was the earliest to apply policy gradients to resource management, likewise simulator-dependent. Quasar~\cite{quasar} uses collaborative filtering (supervised learning, with no exploration) to predict job performance per machine type. Resource Central~\cite{resourcecentral} uses random forests to predict VM lifetimes in Azure --- supervised, offline, deployed at production scale. The gap this work targets: \emph{online learning, with no simulator, applied specifically to distributed compilation} --- to our knowledge, no published work applies contextual bandits to this problem and characterizes the implementation pitfalls that arise from interaction with real compile-latency distributions.
+Decima~\cite{decima} uses a graph neural network with REINFORCE to schedule Spark jobs, achieving up to 1.5$\times$ improvement in job completion time, but requires thousands of training episodes in a simulator before deployment. DeepRM~\cite{deeprm} is the earliest work applying policy gradients to resource management, also simulator-dependent. Quasar~\cite{quasar} uses collaborative filtering (supervised learning, no exploration) to predict job performance on each machine type. Resource Central~\cite{resourcecentral} uses random forests to predict VM lifetimes in Azure - offline supervised learning at production scale. The gap this work targets: \emph{online, simulator-free learning applied specifically to distributed compilation} - to our knowledge no published work applies contextual bandits to this problem and describes the implementation pitfalls that arise when interacting with real compile-latency distributions.
 
-\subsection{Distributed Build Systems}
+\subsection{Distributed build systems}
 
-Production build systems fall into three classes: \emph{cache-first} systems (ccache, sccache, Bazel RBE) prioritize hash-based cache lookup and select workers by round-robin or least-loaded; \emph{capability-scored} systems (distcc~\cite{distcc}) rank workers by static capability; \emph{DAG-aware} systems (Bazel, Buck2) use the build graph to defer decisions but still schedule within each DAG layer by capability. None learn online. The closest published works use offline ML to predict task duration and then dispatch heuristically on those predictions --- supervised-learning scheduling, not bandit learning.
+Production build systems fall into three classes: \emph{cache-first} systems (ccache, sccache, Bazel RBE) prioritise hash-based cache lookup and select workers round-robin or least-loaded; \emph{capability-scoring} systems (distcc~\cite{distcc}) rank workers by static capability; \emph{DAG-aware} systems (Bazel, Buck2) use the build graph to defer decisions but still schedule by capability within each DAG layer. Most do not adapt to observed execution outcomes, though this is not absolute: Buildbarn~\cite{buildbarn}, for instance, learns per-action-digest size-class outcomes across builds using a persisted PageRank-style analyser (\texttt{InitialSizeClassCache}), serving resource-class prediction rather than worker selection. What we have not found in any production build system is worker selection posed as a per-decision contextual bandit with an explicit reward signal and regret reasoning - precisely the gap this paper targets. The nearest works use offline ML to predict task duration and then dispatch heuristically on those predictions: supervised-learning scheduling, not bandit scheduling.
 
-\section{Problem Definition}
+\section{The Hybrid-Grid System}
+\label{sec:system}
 
-\subsection{System Context}
+\subsection{Architecture}
 
-Hybrid-Grid splits a C/C++ build into hundreds of independent tasks (each preprocessed \texttt{.c}/\texttt{.cpp} file is one task) and distributes them to a heterogeneous worker cluster. The coordinator maintains a registry of live workers --- each described by static features (CPU cores, memory, native architecture, OS) and live counters (active tasks, recent RPC latency) --- and decides which task goes to which worker. This decision point has the largest influence on makespan and is the focus of this research.
-
-\subsection{Contextual-Bandit Formulation}
-
-At decision time $t$, the coordinator observes a context vector $x_{t,a}\in\mathbb{R}^d$ for each eligible worker $a$ (after filtering out unhealthy workers, open circuit breakers, and workers at their parallelism cap), selects an action $a_t$, dispatches the task, and upon completion receives the scalar reward
-\begin{equation}
-r_t = -\log\bigl(1 + t_{\text{compile}}^{(t)}\bigr),
-\end{equation}
-where $t_{\text{compile}}^{(t)}$ is the worker-reported compile time in milliseconds. The log transform is an engineering choice to compress the heavy tail of the distribution (P99/P50 $\approx 29\times$): without compression, a single 24-second outlier would dominate sample-mean updates. Failed tasks receive $r=-\log(1+T_{\text{timeout}})$ --- the worst case the system could observe --- so that the learner automatically discounts persistently failing workers. We note honestly that this reward shape has no direct peer-reviewed source; the closest theoretically-motivated formulation is Decima's time-integrated reward~\cite{decima}.
-
-We choose the bandit framing over a full MDP for two reasons. First, compilation tasks are nearly independent --- once queue depth is part of the context vector, the residual state coupling between consecutive decisions is small~\cite{slivkins2019}. Second, an MDP would require attributing the build's makespan back to individual dispatch decisions --- a credit-assignment problem with sparse rewards over hundreds of steps, exactly the regime where policy-gradient methods need a simulator~\cite{deeprm,decima} that we deliberately do not have.
-
-\section{System and Methods}
-
-\subsection{Hybrid-Grid Architecture}
-
-The system comprises three main components communicating via gRPC over HTTP/2 (optional TLS/mTLS):
+The system comprises three components communicating over gRPC on HTTP/2 (optional TLS/mTLS):
 
 \begin{itemize}
-\item \textbf{\texttt{hgbuild} (CLI):} a drop-in replacement for gcc/clang that also wraps \texttt{make}/\texttt{ninja}. It preprocesses sources locally, hashes the preprocessor output with xxhash for cache lookup, submits tasks to the coordinator, and automatically \emph{falls back} to local compilation when the coordinator is unavailable.
-\item \textbf{\texttt{hg-coord} (Coordinator):} the central orchestrator, comprising the worker registry (gRPC handshake registration, 10-second heartbeats), the scheduler (Section~4.2), per-worker circuit breakers for fault isolation, Prometheus metrics, OpenTelemetry tracing, and a real-time WebSocket dashboard.
-\item \textbf{\texttt{hg-worker} (Worker):} executes compilations in two modes --- native (direct gcc/clang invocation) or Docker (cross-compilation via dockcross images); maintains a local content-addressable cache ($\sim$10$\times$ speedup on hits); self-advertises via mDNS for zero-config discovery.
+\item \textbf{\texttt{hgbuild} (CLI):} a drop-in gcc/clang replacement that also wraps \texttt{make}/\texttt{ninja}. It preprocesses source locally, hashes the preprocessed output with xxhash for cache lookup, submits the task to the coordinator, and automatically \emph{falls back} to local compilation when the coordinator is unavailable - so an infrastructure failure slows a build down rather than breaking it.
+\item \textbf{\texttt{hg-coord} (Coordinator):} the central orchestrator, comprising the worker registry (gRPC handshake registration, 10-second heartbeats), the \textbf{scheduler} (the primary object of study, Sections~\ref{sec:problem}--\ref{sec:baselines}), the serialised dispatch path (Section~\ref{sec:dispatch}), per-worker circuit breakers for fault isolation, Prometheus metrics, OpenTelemetry tracing, and a real-time WebSocket dashboard.
+\item \textbf{\texttt{hg-worker} (Worker):} executes compilation in two modes - native (invoking gcc/clang directly) or Docker (cross-compilation via dockcross images); maintains a local content-addressed cache ($\sim$10$\times$ speedup on cache hits); self-advertises via mDNS for zero-configuration discovery.
 \end{itemize}
 
-Beyond the central C/C++ path, the system also supports distributed Flutter Android builds and GCC/Clang-to-MSVC flag translation; these paths do not pass through the learning scheduler and are outside the scope of the evaluation.
-
-\subsection{Unified Scheduling Framework}
-
-The \texttt{Scheduler} interface exposes $\texttt{Select}(\text{buildType},\text{arch},\text{clientOS})\rightarrow(\text{Worker},\text{error})$. The extended \texttt{LearningScheduler} interface adds \texttt{SelectWithDispatchInfo} (also returning the Q-value and an exploration flag for logging) and \texttt{RecordOutcome}. The coordinator's \texttt{Compile()} handler uses a type assertion to feed rewards back only when a learner is configured --- the heuristics require no modification. Six schedulers are selected via the \texttt{--scheduler} CLI flag: (1) \textbf{LeastLoaded}; (2) \textbf{P2C}~\cite{mitzenmacher2001}; (3) \textbf{HEFT} with EWMA compile-time estimates ($\alpha=0.3$)~\cite{heft}; (4) \textbf{$\varepsilon$-greedy} with per-worker sample means and $\varepsilon=0.1$~\cite{sutton2018} --- a \emph{feature-blind} policy; (5) \textbf{LinUCB} (Section~4.3); (6) \textbf{Hybrid-LinUCB} (Section~4.4). All three learners share a single-candidate fast path: when only one eligible worker remains, it is returned immediately without matrix algebra --- eliminating the 41\% penalty observed for P2C's filtering pipeline on 1-worker clusters.
-
-\subsection{The LinUCB Scheduler}
-
-Following Li et al.~\cite{li2010}, for each worker $a$ we maintain $A_a\in\mathbb{R}^{d\times d}$ initialized to $I_d$ and $b_a\in\mathbb{R}^d$ initialized to $\mathbf{0}$. The current ridge-regression estimate is $\hat{\theta}_a = A_a^{-1}b_a$. At round $t$, the UCB score of each eligible worker is
-\begin{equation}
-p_{t,a} = \hat{\theta}_a^\top x_{t,a} + \alpha\sqrt{x_{t,a}^\top A_a^{-1} x_{t,a}},
-\end{equation}
-we select $a_t=\arg\max_a p_{t,a}$, and upon reward arrival update $A_{a_t}\leftarrow A_{a_t}+xx^\top$, $b_{a_t}\leftarrow b_{a_t}+rx$.
-
-\begin{table}[t]
+\begin{figure*}[t]
 \centering
-\caption{The 12-dimensional feature vector of (Hybrid-)LinUCB.}
+\resizebox{0.95\textwidth}{!}{%
+\begin{tikzpicture}[
+  comp/.style={draw, rounded corners, font=\scriptsize, align=center, text width=3.1cm, minimum height=1.3cm},
+  sub/.style={draw, rounded corners, font=\scriptsize, align=center, text width=2.4cm, minimum height=0.92cm, fill=gray!8},
+  arr/.style={-{Latex[length=2mm]}, thick},
+  darr/.style={-{Latex[length=2mm]}, thick, dashed}
+]
+\node[comp] (cli) at (0,0) {\textbf{hgbuild} (CLI)\\gcc/clang replacement\\preprocess $\cdot$ xxhash\\local fallback};
+
+\node[sub] (reg) at (6,2.1) {Registry\\handshake $\cdot$ 10\,s heartbeat};
+\node[sub] (sch) at (6,1.05) {Scheduler\\Select / RecordOutcome};
+\node[sub] (dsp) at (6,0) {Dispatch Loop\\serialises decisions};
+\node[sub] (cb)  at (6,-1.05) {Circuit Breaker\\per worker};
+\node[sub] (obs) at (6,-2.1) {Metrics $\cdot$ Tracing\\Dashboard};
+\begin{scope}[on background layer]
+\node[draw, rounded corners, fit=(reg)(sch)(dsp)(cb)(obs), inner sep=8pt, label={[font=\scriptsize\bfseries]above:hg-coord (Coordinator)}] (coord) {};
+\end{scope}
+
+\node[comp] (w) at (12,0) {\textbf{hg-worker} $\times5$\\native / Docker cross-compile\\local cache $\cdot$ 0.5--1.1 CPU};
+
+\draw[arr] (cli.east) -- node[above, font=\scriptsize, align=center] {\textbf{1} submit preprocessed task\\gRPC/HTTP2} (coord.west);
+\draw[arr] ([yshift=6pt]coord.east) -- node[above, font=\scriptsize] {\textbf{2} dispatch} ([yshift=6pt]w.west);
+\draw[arr] ([yshift=-6pt]w.west) -- node[below, font=\scriptsize, align=center] {\textbf{3} object file\\+ compile time} ([yshift=-6pt]coord.east);
+\draw[arr] (coord.south west) to[out=225,in=315] node[below, font=\scriptsize] {\textbf{4} result} (cli.south east);
+\draw[darr] (w.north) to[out=135,in=45] node[above, font=\scriptsize] {mDNS advertisement} (coord.north east);
+\end{tikzpicture}}
+\caption{Hybrid-Grid architecture. \texttt{hgbuild} submits preprocessed tasks to \texttt{hg-coord}; the scheduler selects one of five heterogeneous workers; the result with its compile time flows back, serving both as the client's answer and as the reward signal for the learning scheduler.}
+\label{fig:arch}
+\end{figure*}
+
+Beyond the C/C++ path that is our focus, the system also supports distributed Flutter Android builds and GCC/Clang-to-MSVC flag translation; these paths do not go through the learning scheduler and are out of the evaluation's scope.
+
+\subsection{Lifecycle of a compilation task}
+\label{sec:lifecycle}
+
+The seven steps below are the full path of one translation unit, and are the context needed to understand what the scheduler sees, and when.
+
+\begin{figure*}[t]
+\centering
+\resizebox{0.97\textwidth}{!}{%
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners, font=\scriptsize, align=center, text width=2.85cm, minimum height=1.15cm},
+  hot/.style={draw, rounded corners, font=\scriptsize, align=center, text width=2.85cm, minimum height=1.15cm, fill=gray!12, very thick},
+  dec/.style={draw, diamond, aspect=2.2, font=\scriptsize, align=center, inner sep=1pt},
+  arr/.style={-{Latex[length=2mm]}, thick}
+]
+\node[box] (s1) at (0,0) {\textbf{1} \texttt{hgbuild} intercepts the gcc/clang call, preprocesses locally (\texttt{-E})};
+\node[box, right=0.6cm of s1] (s2) {\textbf{2} xxhash the preprocessed output + compile flags $\to$ cache key};
+\node[dec, right=0.7cm of s2] (s3) {\textbf{3} cache\\hit?};
+\node[box, right=0.7cm of s3] (s4) {\textbf{4} \texttt{hg-coord} filters eligible workers: healthy $\cdot$ breaker closed $\cdot$ free slot};
+\node[hot, right=0.6cm of s4] (s5) {\textbf{5} \texttt{Scheduler.Select}(context) $\to$ pick worker, record vector $x$};
+
+\node[box, below=1.6cm of s5] (s6) {\textbf{6} worker compiles, returns object file + $t_{\text{compile}}$};
+\node[hot, left=0.6cm of s6] (s7) {\textbf{7} \texttt{RecordOutcome}(worker, $r$) updates the model};
+\node[box, left=0.7cm of s7] (log) {write 27-field task log};
+\node[box, left=0.7cm of log] (ret) {return object file to \texttt{hgbuild}};
+
+\draw[arr] (s1) -- (s2);
+\draw[arr] (s2) -- (s3);
+\draw[arr] (s3) -- node[above, font=\scriptsize] {no} (s4);
+\draw[arr] (s4) -- (s5);
+\draw[arr] (s5) -- (s6);
+\draw[arr] (s6) -- (s7);
+\draw[arr] (s7) -- (log);
+\draw[arr] (s3.south) to[out=250,in=60] node[left, font=\scriptsize, pos=0.35] {yes} (ret.north east);
+\draw[arr] (s6.south) to[out=270,in=270] node[below, font=\scriptsize, pos=0.5] {return result to client} (ret.south);
+\end{tikzpicture}}
+\caption{Lifecycle of one translation unit. The scheduler participates only at step~\textbf{5}, and sees cluster state only \emph{as of that instant}; the reward for that decision returns only at step~\textbf{7}, after compilation completes - that delay is precisely the ``delayed feedback'' failure mode addressed in Section~\ref{sec:mech2}.}
+\label{fig:lifecycle}
+\end{figure*}
+
+Two properties of this lifecycle shape the entire algorithm design in Section~\ref{sec:hglinucb}. First, between steps~5 and~7 there is a gap equal to the compile time (P50 a few hundred milliseconds, P99 up to 5--8 seconds), and within that gap dozens of other decisions may be taken before any of them receives its reward. Second, a clean build produces only 295 decisions - a very short horizon for an online learner, which makes early-stage sample efficiency more important than asymptotic behaviour.
+
+\subsection{The coordinator's dispatch path}
+\label{sec:dispatch}
+
+Steps~4--5 of Figure~\ref{fig:lifecycle} must withstand many concurrent \texttt{Compile()} calls: with a \texttt{make -jN} flag, up to $N$ tasks request a decision simultaneously. The scheduling decision reads worker state (\texttt{ActiveTasks}) and the dispatch writes it back; if these are two separate operations across concurrent goroutines, two dispatches can read the same stale \texttt{ActiveTasks}, pick the same low-capacity worker, and overbook it.
+
+Hybrid-Grid therefore serialises the entire decision path through \textbf{a single \texttt{dispatchLoop} goroutine} that owns every \texttt{SelectWith}+\texttt{IncrementTasks} pair for the coordinator's lifetime. Each \texttt{Compile()} call submits a request into a \texttt{dispatchCh} channel and waits for the result. We use a Go channel rather than a hand-rolled queue because a channel already \emph{is} a synchronised FIFO queue, whereas a manual linked list touched by many goroutines would merely relocate rather than eliminate the same locking requirement.
+
+\begin{figure*}[t]
+\centering
+\resizebox{0.93\textwidth}{!}{%
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners, font=\scriptsize, align=center, text width=3.0cm, minimum height=1.1cm},
+  dstep/.style={draw, rounded corners, font=\scriptsize, align=center, text width=5.2cm, minimum height=1.0cm, fill=gray!8},
+  arr/.style={-{Latex[length=2mm]}, thick},
+  darr/.style={-{Latex[length=2mm]}, thick, dashed}
+]
+\node[box] (n) at (0,0) {$N$ concurrent \texttt{Compile()} calls (\texttt{make -jN})};
+\node[box, right=0.7cm of n] (ch) {\texttt{dispatchCh}\\channel = FIFO queue};
+\node[box, right=0.7cm of ch] (loop) {\texttt{dispatchLoop}\\a single goroutine};
+
+\node[dstep] (f)   at (13.6,1.35) {filter candidates: healthy $\wedge$ breaker closed $\wedge$ \texttt{ActiveTasks} $<$ \texttt{MaxParallel}};
+\node[dstep] (sel) at (13.6,0)  {\texttt{Scheduler.SelectWith}\\(context)};
+\node[dstep] (inc) at (13.6,-1.35){\texttt{registry.IncrementTasks}\\(worker)};
+\draw[arr] (f) -- (sel);
+\draw[arr] (sel) -- (inc);
+\begin{scope}[on background layer]
+\node[draw, rounded corners, fit=(f)(sel)(inc), inner sep=8pt, label={[font=\scriptsize\itshape]above:inside the loop - atomic by construction}] (inner) {};
+\end{scope}
+
+\node[box] (r) at (13.6,-3.8) {return selected worker to the caller};
+\node[box, right=0.8cm of r] (rt) {no eligible worker left: retry within budget, then fail};
+
+\draw[arr] (n) -- (ch);
+\draw[arr] (ch) -- (loop);
+\draw[arr] (loop) -- (inner.west);
+\draw[arr] (inner.south) -- (r);
+\draw[darr] (inner.south east) to[out=300,in=90] (rt.north);
+\end{tikzpicture}}
+\caption{The serialised dispatch path. Reading worker state, selecting a worker and recording the dispatch all sit inside a single goroutine, so they are atomic with respect to one another by construction, without explicit locking.}
+\label{fig:dispatch}
+\end{figure*}
+
+The candidate filter runs \emph{before} the scheduler and is a shared invariant across all six schedulers: a worker must be healthy, its circuit breaker must be closed, and it must have a free slot (\texttt{ActiveTasks} $<$ \texttt{MaxParallel}). As a result no scheduler, not even the simplest heuristic, can ever select a fully loaded worker. We verify the dispatch path's correctness with a dedicated concurrency regression test: 5 workers with \texttt{MaxParallel}${}=1$ each, 40 batches of 5 concurrent dispatch-and-release cycles, and an independent atomic counter asserting that no worker is ever held above capacity; the test passes cleanly over 20 repeated runs.
+
+When every worker is full, \texttt{SelectWith} returns \texttt{ErrNoMatchingWorkers} and the coordinator retries within a bounded budget (\texttt{maxDispatchAttempts}${}=8$, \texttt{attempt}${}\times25$\,ms backoff, roughly 700\,ms total) before reporting failure. This is a known design limitation we state plainly: that budget was set assuming compile times in the $\sim$10--500\,ms range, whereas the measured P99 on our workload is 5--8 seconds - off by one to two orders of magnitude. The consequence is that the coordinator tolerates load up to exactly the cluster's total capacity but has no true backpressure for sustained overload; we return to this in Sections~\ref{sec:setup} and~\ref{sec:limitations}.
+
+\subsection{Observability and the task log}
+\label{sec:log}
+
+Every completed \texttt{Compile()} call emits a 27-field JSON Lines record via \texttt{TaskLogger}: identifiers (task, build type, scheduler), \textbf{worker context as of the dispatch instant} (cores, RAM, architecture, active task count, discovery source), task specification (raw and preprocessed source size, target architecture), latency decomposition (queue / compile / RPC / total), outcome (success, exit code, cache hit), and learner introspection (Q-value at dispatch, exploration flag). Files load directly into pandas via \texttt{read\_json(lines=True)}.
+
+Recording context \emph{as of dispatch} rather than as of completion is a deliberate design decision, and it is precisely what makes the mechanism analysis in Section~\ref{sec:mech} possible: from each task's (dispatch timestamp, total duration) pair we can reconstruct exactly what state the cluster was in when each individual decision was taken.
+
+\section{The Scheduling Problem}
+\label{sec:problem}
+
+\subsection{Statement}
+
+Given a set of heterogeneous workers $\mathcal{W}=\{1,\dots,m\}$ and a stream of compilation tasks $1,2,\dots,T$ arriving sequentially, task $t$ has an execution time $p_{t,a}$ that depends on the assigned worker $a$, is unknown in advance, and is observable only after completion. The scheduler must choose $a_t\in\mathcal{W}_t$ the moment task $t$ arrives, where $\mathcal{W}_t$ is the filtered candidate set of Section~\ref{sec:dispatch}. The objective is to minimise the makespan $C_{\max}=\max_a\sum_{t:a_t=a}p_{t,a}$ - subject to each worker $a$ running at most \texttt{MaxParallel}$_a$ tasks concurrently.
+
+Our evaluation cluster has $m=5$ and $\sum_a$\,\texttt{MaxParallel}$_a=10$ slots; CPU capacity is divided unevenly as 0.5 / 0.6 / 0.8 / 1.0 / 1.1 cores, i.e. a \textbf{2.2$\times$ spread} between the strongest and weakest worker.
+
+\subsection{Why a contextual bandit}
+
+Three properties of the problem determine the modelling choice.
+
+\emph{Rich context is available at decision time.} The coordinator knows the preprocessed source size, the language, the target architecture, and for each worker: CPU/RAM capacity, current queue depth, recent RPC latency, success history. This is exactly the setting contextual bandits were designed for, and exactly what both context-blind $\varepsilon$-greedy and static heuristics discard.
+
+\emph{The reward is directly observable.} The compile time reported back by the worker is a clean scalar signal requiring no credit assignment across multiple steps.
+
+\emph{Coupling between decisions is weak.} Compilation tasks are nearly independent; once a queue-depth feature is in the context vector, the residual state coupling between consecutive decisions is small~\cite{slivkins2019}. A full MDP would require attributing makespan back to individual dispatch decisions - a sparse-reward credit-assignment problem over hundreds of steps, precisely the regime in which policy-gradient methods need the simulator~\cite{deeprm,decima} that we deliberately do without.
+
+\subsection{Formulation}
+
+At decision time $t$, the coordinator observes a context vector $x_{t,a}\in\mathbb{R}^d$ for each eligible worker $a\in\mathcal{W}_t$, selects an action $a_t$, dispatches the task, and upon completion receives a scalar reward
+\begin{equation}
+r_t=-\log\bigl(1+t_{\text{compile}}^{(t)}\bigr),
+\end{equation}
+where $t_{\text{compile}}^{(t)}$ is the worker-reported compile time in milliseconds. The log transform is an engineering choice to compress the distribution's heavy tail (P99/P50 $\approx26\times$): uncompressed, a single 24-second outlier would dominate the model's updates. Failed tasks (timeout, worker error) receive $r=-\log(1+T_{\text{timeout}})$, with $T_{\text{timeout}}=5$ minutes, the client-side task deadline - the worst case the system can observe - so the learner automatically devalues persistently broken workers with no separate error-handling rule. We note honestly that this reward shape has no direct peer-reviewed source; the closest theoretically motivated form is Decima's time-integrated reward~\cite{decima}.
+
+The system's \texttt{Scheduler} interface provides \texttt{Select(buildType, arch, clientOS)} $\to$ \texttt{(Worker, error)}. The extended \texttt{LearningScheduler} interface adds \texttt{SelectWithDispatchInfo} (returning the Q-value and exploration flag for logging) and \texttt{RecordOutcome(workerID, reward, success)}. The \texttt{Compile()} handler uses a type assertion to feed rewards back only when a learner is configured, so the heuristics require no modification. This framework is the common substrate for all six schedulers.
+
+\section{HG-LinUCB: The Proposed Learning Scheduler}
+\label{sec:hglinucb}
+
+This is the paper's central algorithmic contribution. Sections~\ref{sec:linucb}--\ref{sec:context} build the LinUCB foundation and the context design; Section~\ref{sec:failures} identifies two failure modes of the plain bandit on a real system; Sections~\ref{sec:mech1}--\ref{sec:algo} present the two remedial mechanisms and the complete algorithm; Section~\ref{sec:reqs} states four mandatory implementation requirements.
+
+\subsection{Foundation: disjoint LinUCB for worker selection}
+\label{sec:linucb}
+
+We map each worker to an \emph{arm} and use the disjoint model of Li et al.~\cite{li2010}: each worker $a$ has its own parameters, shared with no other. For each $a$ we maintain $A_a\in\mathbb{R}^{d\times d}$ initialised to $I_d$ and $b_a\in\mathbb{R}^d$ initialised to $\mathbf{0}$; the current ridge-regression estimate is $\hat{\theta}_a=A_a^{-1}b_a$. At round $t$ the UCB score of each eligible worker is
+\begin{equation}
+p_{t,a}=\underbrace{\hat{\theta}_a^\top x_{t,a}}_{\text{learned value}}+\underbrace{\alpha\sqrt{x_{t,a}^\top A_a^{-1}x_{t,a}}}_{\text{exploration bonus}},
+\end{equation}
+we select $a_t=\arg\max_a p_{t,a}$, and when the reward arrives we update $A_{a_t}\leftarrow A_{a_t}+xx^\top$, $b_{a_t}\leftarrow b_{a_t}+rx$.
+
+The disjoint model suits this problem: workers are physically distinct machines, and we \emph{want} the model to learn that a large C++ task behaves differently on a 0.5-CPU worker than on a 1.1-CPU worker - sharing parameters would blur exactly the distinction we need to exploit. The price is that each worker needs its own data to warm up, and that is one of the two problems Section~\ref{sec:failures} raises.
+
+One point of terminology, since it is a live source of confusion. We use Algorithm~1 of Li et al. - the \emph{disjoint} model - throughout. Their Algorithm~2 is called the \emph{hybrid linear model} and is a different construction: it adds a coefficient vector $\beta^*$ \textbf{shared across all arms} alongside the per-arm $\theta_a$. We do not use it. The ``HG'' in HG-LinUCB stands for Hybrid-Grid, the system, and carries no claim about the model class.
+
+\subsection{Context vector design ($d=12$)}
+\label{sec:context}
+
+The context vector $x_{t,a}$ describes the \emph{pair} (task, worker) - this is the core distinction from $\varepsilon$-greedy, which holds only a single value $Q(a)$ per worker regardless of the task. Table~\ref{tab:features} lists the layout and normalisation; all features are mapped approximately into $[0,1]$ to keep $\|x\|$ bounded, following the linear convention of~\cite{chu2011}.
+
+\begin{table*}[t]
+\centering
+\caption{The 12-dimensional context vector of HG-LinUCB. Dimensions 1--3 and 9--10 describe the task; 4--8 and 11 describe the worker and its instantaneous state.}
 \label{tab:features}
 \small
-\begin{tabular}{@{}cll@{}}
+\begin{tabular}{cllp{7.6cm}}
 \toprule
-\# & Feature & Normalization \\
+\# & Feature & Source & Normalisation \\
 \midrule
-0 & bias & constant 1.0 \\
-1 & log preprocessed source size & $\frac{\log(1+s)}{\log(1+4\,\text{MiB})}$, clip 1 \\
-2 & target arch = x86\_64 & one-hot 0/1 \\
-3 & target arch = arm64 & one-hot 0/1 \\
-4 & worker CPU cores & cores/16, clip 1 \\
-5 & worker memory & mem/64\,GiB, clip 1 \\
-6 & native arch matches target & 0/1 \\
-7 & queue pressure & $\frac{\text{active}}{\text{max\_parallel}}$, clip 1 \\
-8 & recent RPC latency & ms/100, clip 1 \\
-9 & task is C++ & 0/1 \\
-10 & log raw source size & $\frac{\log(1+s_{\text{raw}})}{\log(1+1\,\text{MiB})}$, clip 1 \\
-11 & worker success rate (Laplace) & $(s{+}1)/(s{+}f{+}2)$ \\
+0  & bias & --- & constant 1.0 \\
+1  & log preprocessed source size & task & $\log(1+s)/\log(1+4\,\text{MiB})$, clipped at 1 \\
+2  & target arch = x86\_64 & task & one-hot 0/1 \\
+3  & target arch = arm64 & task & one-hot 0/1 \\
+4  & worker CPU capacity (log scale) & worker & $\log(1+m)/\log(1+16000)$, $m$ = cgroup milli-cores if detected, else cores$\times1000$ \\
+5  & worker memory (log scale) & worker & $\log(1+b)/\log(1+64\,\text{GiB})$, $b$ in bytes \\
+6  & native arch matches target & pair & 0/1 \\
+7  & queue pressure (LoadRatio) & worker, instantaneous & \texttt{active\_tasks}/\texttt{max\_parallel}, clipped at 1 \\
+8  & recent RPC latency & worker, instantaneous & ms/100, clipped at 1 \\
+9  & task is C++ & task & 0/1 \\
+10 & log raw source size & task & $\log(1+s_{\text{raw}})/\log(1+1\,\text{MiB})$, clipped at 1 \\
+11 & success rate (Laplace) & worker, history & $(s+1)/(s+f+2)$ \\
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
-\textbf{Feature vector ($d=12$).} Table~\ref{tab:features} lists the feature layout; all features are scaled to approximately $[0,1]$ to keep $\|x\|$ bounded, following the linear-payoff convention of~\cite{chu2011}. Two design decisions deserve mention. First, the initial design used a three-way one-hot for build type (CPP/Flutter/Unity); because the current \texttt{Compile()} path only emits CPP, these dimensions degenerated (the CPP column perfectly collinear with the bias, the other two permanently zero) and were removed. Second, a raw success-rate feature with an optimistic prior would equal exactly 1.0 for every worker on a fully-successful workload --- again collinear with the bias --- so we apply Laplace smoothing to keep the column experience-dependent.
+Two principles govern this design, both learned from versions that did not work.
 
-\textbf{Sherman--Morrison incremental inverse.} Each update is rank-1: $A_{\text{new}} = A_{\text{old}} + xx^\top$. Re-inversion from scratch costs $O(d^3)$; the Sherman--Morrison formula~\cite{sherman1950} reduces this to $O(d^2)$:
+\textbf{No dimension may be collinear with another.} The initial design included a three-dimensional one-hot for build type (CPP / Flutter / Unity); since the \texttt{Compile()} path currently produces only CPP, the CPP column coincided exactly with the bias and the other two were permanently zero. These three dead dimensions made $A_a$ singular in the corresponding directions and contributed no information; we removed them. Likewise, the success-rate feature in raw form with an optimistic prior would equal exactly 1.0 for every worker on a fully successful workload - collinear with the bias again - so we apply Laplace smoothing to keep the column dependent on actual experience.
+
+\textbf{Every worker-describing dimension must actually vary across workers.} Dimensions 4 and 5 exist so the bandit can distinguish hardware capacity, and they can only do so if their data source reflects the capacity \emph{of the container}, not of the host. This is the strictest implementation requirement in the whole system and we present it separately in Section~\ref{sec:reqs}.
+
+One caveat about our own cluster follows from the first principle. Docker Compose provisions each worker's memory in proportion to its CPU quota, so on this particular cluster dimensions 4 and 5 are almost perfectly correlated after normalisation ($r=0.99999$ across the five workers). The design admits independent variation on the two axes and a cluster with, say, a memory-rich low-core node would exercise it, but our evaluation does not: in effect the bandit sees one capacity axis, not two. Ridge regularisation keeps $A_a$ invertible regardless, and nothing in the results depends on the two being distinct, but we note it rather than let Table~\ref{tab:features} imply twelve independently informative dimensions.
+
+\subsection{Two failure modes of the plain bandit on a real system}
+\label{sec:failures}
+
+With the context designed correctly, standard LinUCB still exhibits two structural problems inside Hybrid-Grid. Both are direct consequences of the task lifecycle in Figure~\ref{fig:lifecycle} rather than defects of the algorithm.
+
+\textbf{(F1) Cold start over too short a horizon.} Immediately after initialisation, $A_a=I_d$ and $b_a=\mathbf{0}$, so $\hat\theta_a=\mathbf{0}$ and the UCB score reduces to the exploration bonus alone - decisions are essentially random. For a bandit in online advertising this phase is negligible over millions of impressions. For us, a clean build has only 295 decisions, and the coordinator typically restarts between builds; a random phase lasting a few dozen decisions is already several percent of the whole makespan wasted.
+
+\textbf{(F2) Delayed feedback causes pile-up.} The reward returns only at step~7, after compilation finishes. Throughout that window - as long as the compile time, up to 5--8 seconds at P99 - a worker's model remains exactly as it was before it received the task. If $\hat\theta_a$ currently rates worker $a$ best, the bandit will select it repeatedly for every decision in that window, piling dozens of tasks onto one machine before any negative signal returns. The LoadRatio feature ($x[7]$) \emph{in principle} encodes this state, but the model can only use it after learning a negative weight for it - that is, after paying for the pile-up behaviour many times over.
+
+The two modes are different in kind - one is a lack of data, the other a lack of data freshness - so we address them with two orthogonal mechanisms, each with its own configuration parameter and each independently disableable.
+
+\subsection{Mechanism 1 - A passive-learning warm-start window}
+\label{sec:mech1}
+
+For the first $N$ dispatches (default $N=100$, configured via \texttt{-{}-warm-start}), the decision is delegated to the least-loaded heuristic: pick the worker with the smallest \texttt{ActiveTasks} among the filtered candidates. But the learner does \textbf{not} sit idle. It still computes the context vector $x$ of the selected worker, still stores $x$ keyed by TaskID, and when the reward arrives still performs the normal Sherman--Morrison update.
+
+The key point is that \emph{the learner learns from data generated by a different policy}. This is off-policy learning in its simplest form: the least-loaded heuristic acts as a safe behaviour policy, generating (context, reward) pairs spread across all workers - and spread fairly evenly, since distributing tasks is exactly what least-loaded does. After $N$ dispatches the bandit takes over with $A_a$ and $b_a$ warmed by real observations rather than an empty prior.
+
+Choosing $N=100$ for a 295-task build is a deliberate trade-off: roughly a third of the decisions go to safe data collection, the remaining two thirds to the learned policy. Because $N<295$, the bandit converges \emph{within} a single build, independent of state from prior builds - a property we verify empirically in Section~\ref{sec:coldstart}.
+
+\subsection{Mechanism 2 - A combined score with a real-time load penalty}
+\label{sec:mech2}
+
+After warm start, the worker score is no longer the plain UCB score but
 \begin{equation}
-A_{\text{new}}^{-1} = A_{\text{old}}^{-1} - \frac{A_{\text{old}}^{-1}xx^\top A_{\text{old}}^{-1}}{1 + x^\top A_{\text{old}}^{-1}x}.
+Q_{\text{HG}}(a)=\hat{\theta}_a^\top x+\alpha\sqrt{x^\top A_a^{-1}x}-\lambda\cdot\text{LoadRatio}_a,
 \end{equation}
-A unit test compares the cached inverse against a fresh inversion after 50 random updates; the elementwise discrepancy stays below $10^{-6}$.
+with $\lambda$ defaulting to 0.5, configured via \texttt{-{}-load-penalty}: the first term is the learned value, the second the exploration bonus, the third the instantaneous overload penalty.
 
-\textbf{Three implementation traps.} The first LinUCB run ($\alpha=1.0$) performed \emph{worse than every baseline} (158\,s on the 5-worker cluster, versus 94\,s for P2C). An independent code review identified three bugs: (i) \emph{target leakage} --- the feature vector was reconstructed at update time using worker state \emph{after} task completion rather than at dispatch; (ii) \emph{multicollinearity} of the build-type one-hot as described above; (iii) \emph{reward-scale mismatch} --- the reward magnitude ($|r|\approx 7$) dwarfed the exploration bonus, driving the effective exploration rate down to 1.7\%. After the fixes (caching the feature vector at Select keyed by TaskID, removing the degenerate dimensions, lowering $\alpha$ to 0.5), makespan recovered to 94\,s --- \textbf{the entire 64-second recovery came from implementation discipline, not algorithmic redesign}.
+The third term is what separates HG-LinUCB from the plain bandit. LoadRatio is already feature $x[7]$, so in theory LinUCB can learn a negative weight for it on its own - and eventually it will. The penalty term acts as a \textbf{hand-specified prior} that imposes knowledge we already know to be correct, using \emph{real-time} information (the running task count, updated to the millisecond at dispatch, exactly as LeastLoaded uses it) instead of information learned \emph{slowly} through delayed rewards. Put differently: the bandit supplies what the heuristic lacks (an understanding of the task--worker pair), and the load penalty supplies what the bandit lacks (queue state as of right now). This is the direct countermeasure to (F2).
 
-\subsection{Hybrid-LinUCB: The Proposed Design}
+We constrain $\lambda\in[0,5]$: too large a $\lambda$ makes the penalty term dominate every learned estimate and the algorithm degenerates into plain LeastLoaded. At the other end, when $\lambda=0$ \emph{and} $N=0$, behaviour is bit-for-bit identical to plain LinUCB - both schedulers share one code path and differ only in configuration, so the comparison between them in Section~\ref{sec:eval} isolates exactly the two mechanisms' contribution and no implementation difference.
 
-Observing pure LinUCB revealed two remaining failure modes: \emph{cold start} --- during the first dispatches, the estimates $\hat\theta_a$ carry no information and decisions are near-random; and \emph{delayed feedback} --- rewards arrive seconds later, and within that window the bandit cannot see that a worker is being flooded and keeps flooding it. Hybrid-LinUCB addresses both with two orthogonal mechanisms, configured via \texttt{--warm-start} (default $N=100$) and \texttt{--load-penalty} (default $\lambda=0.5$):
+\subsection{The complete algorithm and its complexity}
+\label{sec:algo}
 
-\textbf{(a) Passively-learning warm-start.} For the first $N$ dispatches, decisions are delegated to the least-loaded heuristic, but the learner \emph{still} computes and stores the feature vector of the selected worker; when the reward arrives, the Sherman--Morrison update proceeds normally. The bandit ``watches and learns'' while ceding decision authority --- after $N$ dispatches it takes over with matrices already warmed by real observations.
+\begin{figure}[H]
+\centering
+\begin{minipage}{\columnwidth}
+\footnotesize
+\hrule\vspace{3pt}
+\textbf{Algorithm 1:} HG-LinUCB (one dispatch decision)
+\vspace{3pt}\hrule\vspace{4pt}
+\noindent\textbf{Parameters:} $\alpha$ (exploration bonus), $N$ (warm-start window), $\lambda$ (load-penalty weight).\\
+\noindent\textbf{Per-worker state $a$:} $A_a\in\mathbb{R}^{d\times d}$ (init $I_d$), $b_a\in\mathbb{R}^d$ (init $\mathbf{0}$), $A_a^{-1}$ cached; $n$ = number of dispatches so far.
+\vspace{4pt}\hrule\vspace{4pt}
+\noindent\textsc{Select}(task $\tau$, candidate set $\mathcal{W}_t$):\\
+\hspace*{0.6em}1\quad \textbf{if} $|\mathcal{W}_t|=1$: \textbf{return} the single worker\\
+\hspace*{2.2em}\textit{(fast path, skip matrix algebra)}\\
+\hspace*{0.6em}2\quad \textbf{for each} $a\in\mathcal{W}_t$: $x_a\leftarrow$ \textsc{BuildContext}$(\tau,a)$\\
+\hspace*{2.2em}\textit{(Table~\ref{tab:features}; read state HERE)}\\
+\hspace*{0.6em}3\quad \textbf{if} $n<N$: \textit{(Mechanism 1: passive warm start)}\\
+\hspace*{0.6em}4\quad\quad $a^*\leftarrow\arg\min_{a\in\mathcal{W}_t}$ \textsc{ActiveTasks}$(a)$\\
+\hspace*{0.6em}5\quad \textbf{else}: \textit{(Mechanism 2: combined score)}\\
+\hspace*{0.6em}6\quad\quad \textbf{for each} $a\in\mathcal{W}_t$:\\
+\hspace*{0.6em}7\quad\quad\quad $\hat\theta_a\leftarrow A_a^{-1}b_a$\\
+\hspace*{0.6em}8\quad\quad\quad $Q_a\leftarrow\hat\theta_a^\top x_a+\alpha\sqrt{x_a^\top A_a^{-1}x_a}-\lambda\,\text{LoadRatio}(a)$\\
+\hspace*{0.6em}9\quad\quad $a^*\leftarrow\arg\max_{a\in\mathcal{W}_t}Q_a$\\
+\hspace*{0.3em}10\quad \textsc{pendingContext}$[\tau.\text{ID}]\leftarrow x_{a^*}$\\
+\hspace*{2.2em}\textit{(freeze the decision's context)}\\
+\hspace*{0.3em}11\quad $n\leftarrow n+1$; \textbf{return} $a^*$
+\vspace{4pt}
 
-\textbf{(b) Hybrid score with load penalty.} After warm-start, the selection score becomes
+\noindent\textsc{RecordOutcome}($\tau$, worker $a$, compile time $t_c$, success):\\
+\hspace*{0.3em}12\quad $x\leftarrow$ \textsc{pendingContext}$[\tau.\text{ID}]$; delete the entry\\
+\hspace*{0.3em}13\quad $r\leftarrow-\log(1+t_c)$ if success, else $-\log(1+T_{\text{timeout}})$\\
+\hspace*{0.3em}14\quad $b_a\leftarrow b_a+r\,x$\\
+\hspace*{0.3em}15\quad $A_a^{-1}\leftarrow A_a^{-1}-\dfrac{A_a^{-1}xx^\top A_a^{-1}}{1+x^\top A_a^{-1}x}$\\
+\hspace*{2.2em}\textit{(Sherman--Morrison)}
+\vspace{3pt}\hrule
+\end{minipage}
+\label{alg:hglinucb}
+\end{figure}
+
+\textbf{Sherman--Morrison inverse update.} Each update is rank-1: $A_{\text{new}}=A_{\text{old}}+xx^\top$. Recomputing the inverse from scratch costs $O(d^3)$; the Sherman--Morrison formula~\cite{sherman1950} at line~15 reduces this to $O(d^2)$:
 \begin{equation}
-Q_{\text{hybrid}} = \underbrace{\hat{\theta}_a^\top x}_{\text{learned value}} + \underbrace{\alpha\sqrt{x^\top A_a^{-1}x}}_{\text{exploration bonus}} - \underbrace{\lambda\cdot\text{LoadRatio}_a}_{\text{overload penalty}}.
+A_{\text{new}}^{-1}=A_{\text{old}}^{-1}-\frac{A_{\text{old}}^{-1}xx^\top A_{\text{old}}^{-1}}{1+x^\top A_{\text{old}}^{-1}x}.
 \end{equation}
-LoadRatio is already feature $x[7]$, so in principle LinUCB could learn a negative weight for it on its own; the penalty term acts as a \emph{manual prior} that uses real-time information (task counts current to the millisecond, as LeastLoaded does) to suppress worker-flooding \emph{before} the model has accumulated enough data to discover it --- the central ``hybrid'' argument of the design. We constrain $\lambda\in[0,5]$ because an oversized $\lambda$ lets the penalty dominate every learned estimate, degenerating into LeastLoaded. With both parameters at zero, behavior is bit-identical to pure LinUCB --- guaranteeing that benchmark comparisons run the same code path and differ only in configuration.
+A unit test compares the cached inverse against a fresh inversion via \texttt{gonum/mat} after 50 random updates; element-wise deviation stays below $10^{-6}$.
 
-\subsection{Measurement Pipeline}
+\textbf{Complexity.} With $d=12$ and $|\mathcal{W}_t|\le m$: each \texttt{Select} costs $O(md^2)$, each \texttt{RecordOutcome} $O(d^2)$, with $O(md^2)$ memory. Concretely, with $d=12$ and $m=5$ a decision costs a few hundred floating-point operations, against the millisecond-scale gRPC round-trip that the dispatch itself incurs. We did not instrument the scoring step separately: the two are three orders of magnitude apart, and no plausible measurement would reverse that ordering.
 
-Every completed \texttt{Compile()} invocation emits one 27-field JSON Lines record: identity (task, build type, scheduler), worker context at dispatch (cores, RAM, architecture, active tasks, discovery source), task metadata (raw/preprocessed source size, target architecture), latency decomposition (queue/compile/RPC/total), outcome (success, exit code, cache hit), and learner introspection (Q-value at dispatch, exploration flag). Files load directly into pandas via \texttt{read\_json(lines=True)}; the schema was validated at 100\% conformance on 1{,}746 records from the preliminary measurement phase.
+\textbf{The single-candidate fast path} (line~1) exists for a practical reason: when only one eligible worker remains there is no \emph{decision} to make, so all the matrix algebra is pure waste. We added it after measuring a 41\% penalty from P2C's filtering pipeline on a one-worker cluster; all three learning schedulers share this fast path.
 
-\section{Experiments}
+\subsection{Four mandatory implementation requirements}
+\label{sec:reqs}
 
-\subsection{Setup}
+While bringing the algorithm into a real running system, we identified four requirements whose violation turns an \emph{algorithmically correct} LinUCB implementation into the worst scheduler in the system - 158\,s against 94\,s for P2C on the 5-worker cluster, i.e. slower than a policy that ignores every signal the bandit was designed to exploit. The makespans, exploration rates and dispatch ratios quoted in this section and in Section~\ref{sec:sensitivity} are \textbf{single-run measurements} taken while the implementation was being brought up; we report them to convey the size of the effect, not as controlled comparisons. Every controlled comparison in this paper is in Section~\ref{sec:eval}. None is a defect of LinUCB; all four are state-management, scale-normalisation and instrumentation issues that surface only when the bandit is wired into a real, concurrent system rather than a simulator. We present them as design requirements because we believe they transfer to any bandit deployment in a distributed system.
 
-\textbf{Workload:} a clean CPython build via \texttt{make} with \texttt{hgbuild} as the compiler driver --- $\sim$293 translation units per build (light load) and a $\sim$371-unit variant (heavy load); the preliminary single-run measurements (Table~\ref{tab:singlerun}) used an earlier, heavier $\sim$873-unit snapshot, reported as context only. \textbf{Cluster:} Docker Compose on a single host, with total CPU fixed at 4.0 cores divided unequally across 5 workers (0.5/0.6/0.8/1.0/1.1 cpu) via cgroup limits; 1-worker and 3-worker configurations serve the preliminary measurements. \textbf{Metrics:} makespan (wall-clock), per-worker dispatch distribution, and P50/P95/P99 compile-time percentiles.
+\begin{table*}[t]
+\centering
+\caption{Four implementation requirements, the consequence of violating each, and the measured evidence.}
+\label{tab:reqs}
+\small
+\begin{tabular}{p{5.0cm}p{4.0cm}p{7.0cm}}
+\toprule
+Requirement & Violation produces & Measured evidence \\
+\midrule
+\textbf{R1.} Freeze the context at \emph{decision} time; do not rebuild it at update time & target leakage & the model is fitted against worker state \emph{after} completion --- information the policy could not have had \\
+\addlinespace
+\textbf{R2.} Eliminate all collinear dimensions & singular $A_a$, dead dimensions & build-type one-hot $\equiv$ bias column; 3/15 dimensions carry no information \\
+\addlinespace
+\textbf{R3.} Balance the reward scale against the exploration bonus & exploration collapse & $|r|\approx7$ swamps the bonus; effective exploration rate 1.7\% \\
+\addlinespace
+\textbf{R4.} Read worker capacity from cgroup, not from the host & context degenerate along the axis that matters most & 2/12 dimensions constant across all workers; a real 2.2$\times$ capacity spread erased \\
+\bottomrule
+\end{tabular}
+\end{table*}
 
-\subsection{Randomized Block Design and Statistical Analysis}
+R1 is satisfied by caching the vector $x$ at \texttt{Select} keyed by TaskID (line~10 of Algorithm~1) and looking it up at update time (line~12) - this is why \texttt{pendingContext} exists in the algorithm. R2 is satisfied by the 12-dimensional layout of Table~\ref{tab:features}. R3 is satisfied by $\alpha=0.5$ rather than 1.0, which raises the effective exploration rate from 1.7\% to 25.1\% and reduces load skew from a 97:1 dispatch ratio to 13.9:1.
 
-Preliminary measurements showed that the single-host Docker platform has a substantial run-to-run noise floor; single-run comparisons are therefore inconclusive. More importantly, a ``scheduler-major'' layout (running all repetitions of one scheduler back-to-back) \emph{entangles} scheduler identity with slow host drift (thermal, background load). We redesigned the experiment as a \textbf{randomized complete block design}: 10 rounds, each running all four schedulers exactly once in a per-round seeded shuffled order; with one discarded warm-up build, a barrier waiting for all 5/5 workers to register, a fixed cooldown between builds, sub-second timing, and compile-cache clearing before every build. Each round forms a statistical block, enabling \textbf{paired} tests: Friedman omnibus~\cite{friedman1937}, one-sided Wilcoxon signed-rank~\cite{wilcoxon1945}, Holm--Bonferroni correction~\cite{holm1979}, Cliff's delta effect sizes~\cite{cliff1993}, and bootstrap confidence intervals.
+\textbf{R4 deserves separate treatment}, because it is the only one of the four we have not seen described anywhere, and because it is invisible to every conventional form of testing. Dimensions 4 and 5 of the context vector exist to distinguish workers by CPU and memory capacity. The initial implementation of \texttt{capability.Detect()} read \texttt{runtime.NumCPU()} and \texttt{/proc/meminfo} - but inside a container both return the values of the \emph{host}, not the container's cgroup quota. On our 5-worker cluster limited to 0.5 / 0.6 / 0.8 / 1.0 / 1.1 CPU via Docker Compose, all five workers therefore reported identical core counts and identical RAM. Two of twelve context dimensions became constant across every arm, and the real 2.2$\times$ capacity spread - the very axis along which this cluster is heterogeneous - was erased from the learner's view entirely. The model was not wrong; it was simply blind.
 
-\section{Results}
+What makes R4 dangerous is that it produces no symptom whatsoever: no error, no warning, no failing test. The bandit still runs, still converges, still reports plausible Q-values - it just converges to a policy that cannot tell a strong worker from a weak one. Any learning or capability-scoring scheduler deployed on Docker or Kubernetes with differing quotas is exposed to this failure mode.
 
-\subsection{Preliminary Single-Run Measurements}
+The fix has three parts: read \texttt{/sys/fs/cgroup/cpu.max} (cgroup v2) or \texttt{cpu.cfs\_quota\_us} / \texttt{cfs\_period\_us} (v1) directly; add a \textbf{milli-core} resolution field to carry fractional quota values that the old integer-core field could not represent (0.5 CPU rounds to 0 or 1); and change normalisation from linear - which compressed the 0.5--1.1 core range into just 0.03--0.07 of $[0,1]$, too small for ridge regression to separate from noise - to the $\log(1+x)$ scale of Table~\ref{tab:features}. We verified the fix end to end rather than by unit test alone, cross-checking worker registration records and task logs on the real cluster against the Compose file, confirming exact byte-for-byte and milli-core-for-milli-core agreement with the declared quotas.
+
+With all four requirements satisfied, makespan on the 5-worker cluster recovered from 158\,s to 94\,s - coincidentally the same figure P2C scores on this configuration, so the repaired bandit went from last place to level with the best heuristic. \textbf{All 64 seconds came from implementation discipline; not a single line of the LinUCB algorithm changed.} This is the clearest transferable lesson of this section: for a contextual bandit in a real system, instrumentation quality matters far more than hyperparameter tuning.
+
+\subsection{Hyperparameter sensitivity}
+\label{sec:sensitivity}
+
+An $\alpha$ sweep on the 5-worker configuration (with all four requirements satisfied) gives makespans of 98\,s ($\alpha=0.1$), 94\,s ($\alpha=0.5$) and 96\,s ($\alpha=2.0$); $\alpha=0.5$ is our default. Every value in the measured range is competitive with the best heuristic, with differences inside the noise margin of a single-run measurement - reinforcing the observation in Section~\ref{sec:reqs} that the algorithm is not sensitive to $\alpha$ at anything like the magnitude of a violated implementation requirement. We hold $N=100$ and $\lambda=0.5$ fixed across every experiment reported in this paper.
+
+\section{Baseline Schedulers}
+\label{sec:baselines}
+
+To evaluate HG-LinUCB fairly we implemented five other schedulers behind the \emph{same} \texttt{Scheduler} / \texttt{LearningScheduler} interface, sharing the candidate filter of Section~\ref{sec:dispatch} and the single-candidate fast path. The scheduler is selected at startup via the \texttt{-{}-scheduler} flag, with per-scheduler options (\texttt{-{}-epsilon}, \texttt{-{}-alpha}, \texttt{-{}-warm-start}, \texttt{-{}-load-penalty}). HG-LinUCB itself is selected as \texttt{-{}-scheduler hybrid-linucb}, the identifier it carries in the source code and in the released measurement logs.
+
+\begin{enumerate}
+\item \textbf{LeastLoaded} - selects the worker with the smallest \texttt{ActiveTasks}. No parameters, no learned state. This is the strongest baseline and the principal opponent in the evaluation.
+\item \textbf{P2C} - samples two workers at random and selects by static weighted score~\cite{mitzenmacher2001}. Represents the family of randomised heuristics common in production load balancing.
+\item \textbf{HEFT} - estimates compile time by EWMA ($\alpha=0.3$) and assigns by earliest finish time~\cite{heft}. Represents prediction-based scheduling without exploration.
+\item \textbf{$\varepsilon$-greedy} - maintains a per-worker sample average $Q(a)$ of observed rewards, exploring uniformly at random with probability $\varepsilon=0.1$~\cite{sutton2018}. It learns online from exactly the same reward signal as HG-LinUCB but is \textbf{context-blind} - ignoring task size, worker hardware and queue pressure - so a gap between it and HG-LinUCB would isolate the value of context itself.
+\item \textbf{LinUCB} - the disjoint contextual linear bandit of Section~\ref{sec:linucb}, i.e. HG-LinUCB with $N=0$ and $\lambda=0$. This is the \emph{ablation of the two proposed mechanisms}, running on the same code path.
+\end{enumerate}
+
+Of these five, the blocked evaluation of Section~\ref{sec:eval} carries three: LeastLoaded, P2C and LinUCB. \textbf{LinUCB is the ablation our central claim rests on} - it differs from HG-LinUCB only in $N$ and $\lambda$, on one shared code path, so the gap between them isolates the two proposed mechanisms and nothing else. HEFT and $\varepsilon$-greedy were implemented and exercised only in preliminary single-run measurements; we did not carry them into the 10-block protocol, so this paper makes no statistically supported claim about either, and the value of context \emph{as such} remains untested under a controlled protocol. Section~\ref{sec:limitations} records this as a limitation.
+
+\section{Experimental Evaluation}
+\label{sec:eval}
+
+\subsection{Setup and protocol}
+\label{sec:setup}
+
+\textbf{Workload.} A clean CPython build via \texttt{make} with \texttt{hgbuild} as the compiler driver - 295 translation units per build, with the compilation cache cleared before every run.
+
+\textbf{Cluster.} Docker Compose on a single host, a fixed 4.0-core CPU budget divided unevenly across 5 workers (0.5 / 0.6 / 0.8 / 1.0 / 1.1 cpu) via cgroup limits, for 10 concurrent dispatch slots in total.
+
+\textbf{Two operating points.} We measure at two dispatch-concurrency levels. \texttt{-j5} is the typical-load point: half the cluster's capacity, corresponding to how a developer would ordinarily invoke \texttt{make -j}. \texttt{-j10} is \textbf{saturation}: exactly the cluster's 10-slot total capacity, the highest concurrency the coordinator serves with 100\% reliability. We established that threshold by binary search on the real cluster (\texttt{-j5}, \texttt{-j6} clean; \texttt{-j7}--\texttt{-j8} beginning to fail; \texttt{-j16} failing badly), and the \texttt{-j9}/\texttt{-j10} mark was reachable only after the dispatch path was serialised as described in Section~\ref{sec:dispatch}. Beyond it, the retry-budget limitation noted in Section~\ref{sec:dispatch} makes builds fail rather than merely slow down, so we have no data on the sustained-overload regime.
+
+\textbf{Metrics.} Makespan (wall-clock) is the primary metric; we also report per-worker dispatch distribution (Section~\ref{sec:skew}) and compile-time percentiles pooled over the 11{,}800 tasks at each operating point - P50\,/\,P95\,/\,P99 of 257\,/\,2{,}119\,/\,6{,}623\,ms at \texttt{-j5} and 426\,/\,3{,}250\,/\,10{,}311\,ms at \texttt{-j10}.
+
+\textbf{Statistical design.} Preliminary measurements showed that Docker on a single host has a substantial run-to-run noise floor, so single-run comparisons cannot support conclusions. More importantly, a ``scheduler-major'' layout - running all repetitions of one scheduler before moving to the next - \emph{confounds} scheduler identity with slow host drift (thermal, background load). We therefore use a \textbf{full randomised block design}: 10 rounds, each running every scheduler configuration under test exactly once in a per-round seeded shuffled order, with a discarded warm-up build, a barrier waiting for all workers to register, a fixed cooldown between builds and sub-second timing. Each round executed five configurations; the four analysed here are the ones that bear on the research question, and because Holm's procedure steps down from the smallest $p$, the corrected $p$ of the weakest comparison - the one that decides the LeastLoaded verdict - is the same whether three or four comparisons accompany it. Each round is a statistical block, enabling \textbf{paired} tests: Friedman omnibus, one-sided Wilcoxon signed-rank, Holm--Bonferroni correction, Cliff's delta effect sizes, and bootstrap confidence intervals~\cite{wilcoxon1945,holm1979,friedman1937,cliff1993}. The coordinator restarts for every build, so the learners cold-start every time - a handicap that makes any bandit win a conservative conclusion.
+
+\textbf{Why blocking is mandatory.} An earlier pilot of this very measurement, in scheduler-major layout, showed HG-LinUCB beating LeastLoaded by 7.9\% at $p=0.0001$. When run order was blocked, that advantage vanished completely: the apparent difference was an artifact of thermal drift and background load, with LeastLoaded simply having been measured while the host was in a different state. We report this because it calibrates how much confidence any single-layout result on this class of platform deserves - including our own.
+
+\subsection{Makespan at typical load (\texttt{-j5})}
+\label{sec:j5}
+
+\begin{table*}[t]
+\centering
+\caption{Makespan (seconds), 10 blocks, 5-worker heterogeneous cluster, dispatch concurrency \texttt{-j5}. One-sided paired Wilcoxon against HG-LinUCB, Holm-corrected over three comparisons. $\Delta$ is the median of the ten per-block differences (HG-LinUCB minus the row), so negative means HG-LinUCB is faster; it is deliberately not the difference of the two medians in the table, which for LeastLoaded is 0.83\,s.}
+\label{tab:j5}
+\small
+\begin{tabular}{lrrrrrp{3.2cm}}
+\toprule
+Scheduler & Median & Mean & Std & $\Delta$ & $p_{\text{holm}}$ & Cliff's $d$ \\
+\midrule
+\textbf{HG-LinUCB} & \textbf{39.66} & 41.55 & 5.97 & --- & --- & --- \\
+LeastLoaded & 40.48 & 42.43 & 6.61 & $-$1.12 & 0.053 & $-$0.23 (small) \\
+P2C & 44.61 & 48.09 & 9.01 & $-$4.66 & \textbf{0.003} & $-$0.78 (large) \\
+LinUCB & 48.12 & 51.95 & 9.85 & $-$8.95 & \textbf{0.003} & $-$0.84 (large) \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+The Friedman omnibus gives $\chi^2=30.96$, $p<0.001$: the four schedulers genuinely differ.
+
+\textbf{The two proposed mechanisms work, and clearly.} HG-LinUCB beats plain LinUCB - the same code path, differing only in $N$ and $\lambda$ - by 8.95\,s with Cliff's $d=-0.84$ (large), and beats P2C by 4.66\,s with $d=-0.78$ (large); both are significant after Holm correction. HG-LinUCB is the faster of the pair in \textbf{all ten blocks} against each of them. This is a direct measurement of what warm start and the load penalty are worth: the two mechanisms turn the worst scheduler in the table into the fastest.
+
+\textbf{Against LeastLoaded, the advantage is consistent but not significant.} The median per-block difference is 1.12\,s in HG-LinUCB's favour and it is ahead in eight of ten blocks, but $p=0.053$ even before correction, with a small effect size. We read this as ``not established'', not ``proven to be zero'' - and Section~\ref{sec:mech} explains \emph{why} this tie arises.
+
+Two features of the table need stating. First, the standard deviations (6.0--9.9\,s) are much larger than the median differences they surround; they are inflated by the first block, whose median makespan is 59.8\,s against 39--43\,s for blocks 2--10, showing that one discarded warm-up build is not enough to warm this platform. Because the design is blocked, this affects every scheduler in the same round equally and the paired tests absorb it; as a sensitivity check, dropping block~1 changes no conclusion (the LeastLoaded comparison moves from $p_{\text{holm}}=0.053$ to $0.082$, still not significant). Second, the ranking is stable across blocks: HG-LinUCB or LeastLoaded is fastest in all ten rounds (8 and 2 respectively).
+
+\subsection{Makespan at saturation (\texttt{-j10})}
+\label{sec:j10}
+
+We re-ran exactly the same protocol at \texttt{-j10}, a concurrency equal to the cluster's own 10-slot total capacity.
 
 \begin{table}[t]
 \centering
-\caption{Makespan (s), single-run --- context only, not a valid basis for comparative conclusions.}
-\label{tab:singlerun}
+\caption{Makespan (seconds), 10 blocks, 5-worker heterogeneous cluster, dispatch concurrency \texttt{-j10}. $\Delta$ as in Table~\ref{tab:j5}: median per-block difference, HG-LinUCB minus the row.}
+\label{tab:j10}
 \small
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}lcccccc@{}}
+\begin{tabular}{lrrrrr}
 \toprule
-Config & LL & P2C & $\varepsilon$-g & LinUCB$^{\text{bug}}$ & LinUCB$^{\text{fix}}$ & HEFT \\
+Scheduler & Median & Mean & Std & $\Delta$ & $p_{\text{holm}}$ \\
 \midrule
-1w-4.0cpu & 92 & 130 & 146 & 129 & 131 & 129 \\
-3w-hetero & 123 & 85 & 142 & 103 & 108 & 135 \\
-5w-hetero & 152 & \textbf{94} & 119 & 158 & \textbf{94} & 144 \\
+LinUCB & 38.48 & 38.45 & 1.74 & $+$0.57 & 1.000 \\
+\textbf{HG-LinUCB} & 38.69 & 39.14 & 2.47 & --- & --- \\
+P2C & 39.03 & 38.77 & 1.79 & $+$0.82 & 1.000 \\
+LeastLoaded & 39.67 & 39.35 & 1.67 & $-$0.60 & 1.000 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-These single-run figures come from an earlier, heavier $\sim$873-task CPython snapshot --- a different measurement phase from the $\sim$293/371-task blocked experiments of Tables~\ref{tab:rigorous}--\ref{tab:heavy} --- and their absolute makespans are \textbf{not comparable} to those tables: the larger task count, not the scheduler, is why LeastLoaded reads 152\,s here versus $\sim$40\,s there. They establish only the qualitative ordering of schedulers, never head-to-head evidence. Three observations from Table~\ref{tab:singlerun}: (i) P2C improves 1.45--1.62$\times$ over LeastLoaded on heterogeneous clusters, matching the theoretical prediction~\cite{mitzenmacher2001}; (ii) feature-blind $\varepsilon$-greedy loses to \emph{every} heuristic --- the learner faithfully identifies ``the worker with the best mean reward'' and floods it, skewing load worse than LeastLoaded (top:bottom dispatch ratio 13.2:1 versus P2C's 8.6:1); (iii) buggy LinUCB was the worst scheduler on 5 workers (158\,s), recovering to 94\,s after the three implementation fixes (Section~4.3) --- with the exploration rate rising from 1.7\% to 25.1\% and load skew dropping from 97:1 to 13.9:1.
+The Friedman omnibus gives $\chi^2=4.24$, $p=0.375$: \textbf{no difference between the four schedulers is detectable.} All four medians lie within a 1.19\,s band, every pairwise comparison is non-significant with negligible effect size, and no scheduler leads even nominally by an interpretable margin. P99 tail latency shows no difference either. The per-block winners say it without any test: whereas at \texttt{-j5} the fastest scheduler in all ten blocks was always HG-LinUCB or LeastLoaded, at \texttt{-j10} the wins spread across all four - P2C four blocks, plain LinUCB three, LeastLoaded two, HG-LinUCB one - exactly the shape of between-block noise when no policy holds a real advantage.
 
-\subsection{Headline Result: The Confound-Controlled Comparison}
+A complete reversal of Table~\ref{tab:j5}'s ranking while every difference remains non-significant is a strong signal, and it leads directly to the next section's question: what changed between the two operating points?
 
-\begin{table}[t]
+\subsection{Mechanism analysis: one behaviour explains the entire spread}
+\label{sec:mech}
+
+Rather than reason indirectly, we reconstruct cluster state at the exact instant each dispatch decision was taken. For each task the log records the selected worker and the total task duration, so a worker is busy over $[t_{\text{dispatch}},t_{\text{completion}}]$; intersecting those intervals with each dispatch timestamp tells us how many workers were idle when that decision was made. The reconstruction covers 2,950 dispatch decisions per scheduler at each concurrency level. The analysis needs only one field already present in the task log and a few lines of offline processing.
+
+\begin{table*}[t]
 \centering
-\caption{Makespan (s), 10 blocks, 5-worker heterogeneous cluster, light workload ($\sim$293 tasks/build). Paired Wilcoxon + Holm vs.\ Hybrid-LinUCB.}
-\label{tab:rigorous}
+\caption{Worker availability at dispatch time, reconstructed from the task logs. ``Skipped idle'' counts decisions that sent a task to a busy worker while at least one idle worker remained, as a percentage of all 2{,}950 decisions; the bracketed figure is the same count as a percentage of only those decisions that had an idle worker to skip. At \texttt{-j5} the two coincide because every decision had one.}
+\label{tab:avail}
 \small
-\setlength{\tabcolsep}{3.5pt}
-\begin{tabular}{@{}lcccl@{}}
+\begin{tabular}{lrrrrrr}
 \toprule
-Scheduler & Median & Mean & Std & vs.\ hybrid \\
+& \multicolumn{3}{c}{\texttt{-j5}} & \multicolumn{3}{c}{\texttt{-j10}} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+Scheduler & had idle & mean idle (of 5) & skipped idle & had idle & mean idle (of 5) & skipped idle \\
 \midrule
-LeastLoaded & 40.24 & 40.38 & 1.02 & \textbf{tie} ($p=0.65$) \\
-\textbf{Hybrid-LinUCB} & 40.52 & 40.56 & 1.06 & --- \\
-P2C & 45.60 & 46.01 & 1.39 & wins ($p=0.003$) \\
-LinUCB & 47.48 & 47.11 & 1.45 & wins ($p=0.003$) \\
+LeastLoaded & 100.0\% & 1.63 & 0.0\% & 32.8\% & 0.53 & 0.3\% (0.9\%) \\
+HG-LinUCB & 100.0\% & 1.65 & 0.1\% & 32.5\% & 0.52 & 0.3\% (1.0\%) \\
+P2C & 100.0\% & 2.03 & 22.5\% & 35.2\% & 0.58 & 5.4\% (15.3\%) \\
+LinUCB & 100.0\% & 2.22 & 35.0\% & 35.2\% & 0.59 & 7.1\% (20.0\%) \\
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
-The Friedman omnibus gives $\chi^2=24.60$, $p=2\times10^{-5}$: the schedulers differ significantly (Table~\ref{tab:rigorous}). Hybrid-LinUCB beats P2C ($\Delta=-5.26$\,s) and pure LinUCB ($\Delta=-6.80$\,s) with maximal effect size ($|d|=1.0$ --- winning in all 10 of 10 blocks), but is \textbf{statistically indistinguishable from LeastLoaded} ($\Delta=+0.09$\,s, $d=+0.10$). For P99 tail latency, Friedman gives $p=0.169$ --- no detectable difference among the four schedulers; the 2.3\% tail advantage seen in the single run did not replicate.
+\textbf{At \texttt{-j5}, every single dispatch decision - 100.0\%, under all four schedulers - was taken with at least one completely idle worker available.} In that regime the scheduling problem reduces to exactly one question: does the policy place the task on an idle machine? LeastLoaded answers correctly by construction (0.0\% skipped; its rule \emph{is} ``fewest active tasks''). HG-LinUCB answers correctly almost always (0.1\%), because the load-penalty term of Section~\ref{sec:mech2} encodes precisely the same preference. P2C skips an idle worker on 22.5\% of decisions, because sampling two workers at random frequently offers only busy ones. Plain LinUCB skips on 35.0\%, because its exploration bonus actively rewards trying under-sampled arms regardless of queue state - failure mode (F2) of Section~\ref{sec:failures}, measured directly.
 
-\textbf{A false positive caught.} The first analysis of the same measurement effort, taken under the scheduler-major layout, showed Hybrid-LinUCB \emph{beating} LeastLoaded by 7.9\% at $p=0.0001$. Once the run-order confound was removed by blocking, that advantage vanished entirely ($p=0.65$): the apparent difference was an \emph{artifact} of thermal/background drift --- LeastLoaded had simply been measured while the host was in a different state. This is direct evidence that a rigorous experimental design can catch a false positive that a careless one produces.
+One objection has to be settled before HG-LinUCB's 0.1\% can be credited to the load penalty: the first $N=100$ of each build's 295 dispatches are delegated to least-loaded by construction (Section~\ref{sec:mech1}), so a third of the figure is not the bandit's doing at all. Splitting the reconstruction at the warm-start boundary answers it. Over the 1{,}000 warm-start dispatches the skip rate is \textbf{0.00\%}, as it must be; over the 1{,}950 dispatches the bandit decides for itself it is \textbf{0.21\%}. The combined score is therefore what holds the rate near zero once the learner takes over - the delegation window does not carry the result.
 
-\begin{table}[t]
+That one behaviour ranks the schedulers identically to Table~\ref{tab:j5}: the two policies that never skip are the two that tie at the front, and the two that skip are behind by 4.66\,s and 8.95\,s in the same order. We deliberately do \emph{not} regress makespan on skip rate: with four schedulers there are only four group-level points, and quantifying a per-decision mechanism from four aggregates would be an ecological fallacy. The counts and their ordering are the argument.
+
+This also explains the tie with LeastLoaded without appealing to anything about the bandit's capacity to learn. LeastLoaded here is not merely a strong baseline; in this regime it is \emph{optimal at the only thing that matters}, and there is no headroom above 0.0\% for a learner to claim. The 2.2$\times$ capacity spread the bandit can now see (Section~\ref{sec:reqs}) gets almost no opportunity to pay off, because a scheduler that never skips an idle worker rarely has to choose \emph{between} workers of differing speed - it chooses between an idle worker and a busy one, and takes the idle one.
+
+\textbf{The \texttt{-j10} columns confirm the mechanism by breaking its precondition.} At saturation, the fraction of decisions with an idle worker falls from 100\% to 32--35\%, and mean idle capacity from 1.6--2.2 workers to 0.52--0.59. Two things then happen to the skipping behaviour, and they should be kept apart. The \emph{opportunity} to skip becomes rare - that is the 100\%\,$\to$\,33\% column. Conditional on the opportunity still existing, the policies also skip somewhat less often: P2C from 22.5\% to 15.3\%, plain LinUCB from 35.0\% to 20.0\%. Multiplying the two gives what the workload actually experiences: P2C's absolute skip rate falls from 22.5\% to 5.4\% and plain LinUCB's from 35.0\% to 7.1\%, roughly a fourfold reduction, of which the shrinking opportunity is by far the larger factor. Their deficits vanish along with it - plain LinUCB goes from 8.95\,s behind to statistically level. The losers did not become much smarter; the operating regime largely stopped presenting them with the mistake they were making.
+
+The symmetric reading is what matters for our research question. Saturation removes LeastLoaded's structural advantage, but it does \emph{not} transfer that advantage to the learner: HG-LinUCB neither gains nor loses when the field converges. On this workload, at both operating points we could measure, context information buys no makespan beyond what a queue-length rule already achieves.
+
+\subsection{Verification: the tie is not a cold-start artifact}
+\label{sec:coldstart}
+
+An alternative explanation for Section~\ref{sec:j5}'s result deserves its own test: the protocol restarts the coordinator for every build, so the bandit always starts cold and might simply never reach the regime in which it would win. We tested this with a dedicated warm-bandit experiment at \texttt{-j5}, the same concurrency as Section~\ref{sec:j5}. A session keeps \textbf{one} coordinator alive across $K=8$ sequential builds so the bandit's in-memory state accumulates from build to build instead of being discarded; we ran 6 independent sessions per scheduler, and ran LeastLoaded through the identical procedure so the comparison stays like-for-like. That is 48 builds per scheduler, each issuing 293 translation units. The session is the pairing unit, so the paired tests below have $n=6$; the trend test runs over all 48 build indices.
+
+The result rules the hypothesis out: the makespan trend against build index is \textbf{flat} (Spearman $\rho=-0.079$, $p=0.59$); the eighth build is not faster than the first ($\Delta=+0.21$\,s, $p=0.42$); and the warmed bandit still ties LeastLoaded ($\Delta=-0.19$\,s, $p=0.50$). This matches the design: each build issues 293 tasks while the warm-start window is only $N=100$, so the bandit converges within a single build regardless of prior state. The tie is not a cold-start artifact - it is a property of the operating point, exactly as Section~\ref{sec:mech} shows.
+
+\subsection{Load distribution and the role of context}
+\label{sec:skew}
+
+Load skew tells the same story as Table~\ref{tab:avail} from a different angle. Because container identities change between rounds, the ratio must be computed within a round; the medians over the ten \texttt{-j5} blocks are 1.9:1 for LeastLoaded, 2.7:1 for HG-LinUCB, 2.8:1 for P2C and 5.0:1 for plain LinUCB, with the busiest worker taking 24.7\%, 28.6\%, 30.5\% and 33.6\% of a round's 295 dispatches respectively (an even split would be 20\%). Plain LinUCB concentrates dispatches roughly twice as hard as the two front-runners, and it is the only scheduler whose skew is visibly above the others - the same ordering as makespan, and the same ordering as the skip rate.
+
+Skew on its own does not say whether a scheduler concentrates work in the \emph{right} place, so we compared each dispatch distribution against the one the cluster's capacities imply. The five workers hold 12.5\,/\,15.0\,/\,20.0\,/\,25.0\,/\,27.5\% of the cluster's 4{,}000 milli-cores, and a scheduler allocating strictly in proportion to capacity would reproduce those shares exactly. This is not the same as the slot layout, which is 10\,/\,20\,/\,20\,/\,20\,/\,30\% (\texttt{MaxParallel} of 1, 2, 2, 2, 3) - so neither an even split across workers nor an even split across slots is capacity-proportional.
+
+\begin{table*}[t]
 \centering
-\caption{Makespan (s) on the heavy workload ($\sim$371 tasks/build).}
-\label{tab:heavy}
+\caption{Share of a round's 295 dispatches received by each worker, averaged over the ten \texttt{-j5} blocks, against the capacity-proportional allocation. MAD is the mean absolute deviation from that allocation, in percentage points.}
+\label{tab:capshare}
 \small
-\setlength{\tabcolsep}{3.5pt}
-\begin{tabular}{@{}lcccl@{}}
+\begin{tabular}{lrrrrrrr}
 \toprule
-Scheduler & Median & Mean & Std & vs.\ hybrid \\
+Allocation & 0.5 CPU & 0.6 & 0.8 & 1.0 & 1.1 & MAD & 1.1\,:\,0.5 \\
 \midrule
-\textbf{LeastLoaded} & 48.65 & 51.36 & 6.78 & tie ($p=0.82$) \\
-Hybrid-LinUCB & 50.64 & 55.42 & 16.60 & --- \\
-P2C & 53.48 & 55.22 & 5.08 & $p_{\text{holm}}=0.16$ \\
-LinUCB & 60.20 & 59.45 & 6.35 & $p_{\text{holm}}=0.16$ \\
+Capacity-proportional (ideal) & 12.5\% & 15.0\% & 20.0\% & 25.0\% & 27.5\% & --- & 2.20 \\
+\textbf{HG-LinUCB} & 12.2\% & 15.6\% & 21.0\% & 24.9\% & 26.2\% & \textbf{0.63} & \textbf{2.14} \\
+LeastLoaded & 14.2\% & 15.8\% & 22.2\% & 25.3\% & 22.5\% & 2.00 & 1.58 \\
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
-The Friedman omnibus gives $\chi^2=10.58$, $p=0.014$ (schedulers differ, driven by LinUCB lagging). Under heavier load (Table~\ref{tab:heavy}), LeastLoaded is fastest by median and the hybrid's edge over P2C/LinUCB does not survive Holm correction. The hybrid's large standard deviation (16.6) comes from exactly one outlier (one round at 101.93\,s, roughly double the norm): a bad sequence of exploratory decisions during cold start exposes a \textbf{tail risk} of the bandit that static heuristics simply do not have.
+HG-LinUCB tracks the capacity-proportional allocation more than three times as closely as LeastLoaded, and its strong-to-weak dispatch ratio of 2.14 is nearly the ideal 2.20 against LeastLoaded's 1.58. The gap sits at the strong end: LeastLoaded under-serves the fastest worker by five percentage points, because its rule counts tasks and knows nothing about capacity - it converges toward equal \emph{task counts}, and drifts capacity-ward only to the extent that faster workers finish sooner and become least-loaded again. HG-LinUCB reaches the capacity split deliberately, from context dimensions 4 and 5.
 
-\subsection{Warm-Bandit Ablation: The Tie Is Intrinsic}
+This is the end-to-end evidence that requirement R4 (Section~\ref{sec:reqs}) matters in practice: with the cgroup fix in place the learner does not merely \emph{receive} the capacity signal, it demonstrably \emph{acts} on it, and the allocation it converges to is the theoretically right one. That this still does not convert into a significant makespan win is exactly the argument of Section~\ref{sec:mech} - at \texttt{-j5} the binding constraint is idle-worker availability, not capacity, so allocating perfectly by capacity buys little.
 
-The natural hypothesis explaining the tie: the benchmark restarts the coordinator on every build, so the bandit always starts cold. We tested this by keeping \textbf{one} coordinator alive across $K=8$ sequential builds (the bandit's state is an in-memory singleton, accumulating throughout), repeated over 6 independent sessions. The result refutes the hypothesis: the makespan trend over the build index is \textbf{flat} (Spearman $\rho=-0.079$, $p=0.59$); build 8 is no faster than build 1 ($\Delta=+0.21$\,s, $p=0.42$); and the warmed bandit still ties LeastLoaded ($\Delta=-0.19$\,s, $p=0.50$). The explanation: each build contains $\sim$293 tasks while the warm-start window is only 100 --- the bandit converges \emph{within a single build}; with a 12-dimensional feature space and a stationary workload, the matrices $A_a$ saturate during the first build, and subsequent builds carry no new information. The tie is therefore not a cold-start consequence but intrinsic: on a stationary compilation workload with static workers, LeastLoaded is already near-optimal, and there is no hidden structure for the bandit to exploit beyond it.
-
-\subsection{Hyperparameter Sensitivity}
-
-Sweeping $\alpha\in\{0.1,0.5,1.0,2.0\}$ on the 5-worker configuration (post-bugfix) yields makespans of 98/94/--/96 seconds --- every value in the range is competitive with P2C, with differences inside the single-run noise band. The lesson for practitioners: the implementation-fix discipline matters far more than tuning $\alpha$. The bandit's computational cost is negligible: the 12-dimensional scoring step takes microseconds per worker, dwarfed by the gRPC round-trip of the dispatch itself.
+At \texttt{-j10} the skew ordering flattens to 2.1:1, 2.3:1, 2.5:1 and 2.6:1, once again mirroring the collapse of the differences in Table~\ref{tab:j10}. Capacity tracking collapses with it: the MAD rises to 2.59 points for HG-LinUCB and 2.20 for LeastLoaded, and both strong-to-weak ratios fall to about 1.45. With every worker pinned at its \texttt{MaxParallel} ceiling most of the time, the slot layout dictates the allocation and neither policy can express a capacity preference at all. Taken with the warm-start split above, this traces the design's channel of effect: the load penalty keeps the learner from concentrating work on an apparently-good worker while its reward is still in flight, and that single behavioural difference is what the makespan numbers are measuring.
 
 \section{Discussion}
+\label{sec:discussion}
 
-\subsection{Key Findings}
+\subsection{Principal findings}
 
-The two-sided outcome of this study can be summarized in three statements. \emph{First}, static heuristics are surprisingly strong: LeastLoaded --- no learning, no parameters --- matches or beats every learner on a stationary compilation workload. \emph{Second}, within the family of learners, context and hybridization deliver clear value: Hybrid-LinUCB wins decisively (10/10 blocks) against both P2C and pure LinUCB, showing that the warm-start and load penalty address exactly the two failure modes identified. \emph{Third}, most of the bandit's initial performance gap lay not in the algorithm but in implementation traps --- target leakage, feature multicollinearity, reward-scale mismatch --- errors that the algorithmic literature does not warn about and that only surface when running on a real system.
+\textbf{The two proposed mechanisms work, and we can name their channel of effect.} HG-LinUCB beats plain LinUCB by 8.95\,s and P2C by 4.66\,s at \texttt{-j5}, with large effect sizes significant after Holm correction. More important than the numbers: Table~\ref{tab:avail} identifies the \emph{mechanism} - warm start and the load penalty cut the idle-worker skip rate from 35.0\% to 0.1\%, exactly the failure mode (F2) they were designed to block.
 
-\subsection{Practical Implications}
+\textbf{The hardest problem for a bandit in a real system is instrumentation, not learning.} An algorithmically correct LinUCB implementation lost to every baseline, and all 64 seconds of recovery came from four implementation requirements (Section~\ref{sec:reqs}), none of which touched the algorithm. Three of the four are known in principle but easy to hit in a concurrent system; the fourth - a cgroup-blind capability detector holding two of twelve context dimensions constant - is specific to containerised deployments and raises no error, fails no test, and has no symptom other than the learner quietly not seeing the very axis along which its cluster varies.
 
-For builders of distributed build systems, the results suggest: use LeastLoaded/P2C as the default on clean-build workloads; invest in learned scheduling only when the environment carries structure the heuristics ignore. Our analysis identifies two such environments: (i) \emph{cache affinity} --- when a worker already holds a file's artifact in its local cache, re-dispatching that file to the same worker turns a compilation into a near-instant cache hit; this signal correlates with dispatch-history features that LeastLoaded is entirely blind to, and only manifests in incremental-build scenarios (not the clean builds this study measures); (ii) \emph{non-stationary environments} --- workers degrading due to thermal throttling or background load, where an outcome-observing learner can react while a static capability heuristic cannot.
+\textbf{Against LeastLoaded the honest answer is not yet, and we can say why.} At \texttt{-j5} the margin is 1.12\,s and not significant; at \texttt{-j10} there is no margin at all. The dispatch-level reconstruction supplies the reason instead of leaving an unexplained negative: at \texttt{-j5} every decision has an idle worker, making ``don't skip an idle worker'' the only behaviour that distinguishes policies, and LeastLoaded performs it perfectly by construction. At \texttt{-j10} that behaviour stops mattering and nothing replaces it. Both operating points are consistent with a single explanation, and that is stronger evidence than either point alone.
+
+\textbf{This is a result about the environment, not about the learner.} The findings delimit where context-aware scheduling can help, and the boundary lies in the environment: clean-build compilation on a small cluster does not generate the kind of structure a bandit is designed to exploit, at either load level we could reach. That is a claim about this environment, not about contextual bandits in general.
+
+\subsection{Practical implications}
+
+For engineers building distributed build systems, the most transferable result is diagnostic rather than algorithmic.
+
+\textbf{Before comparing schedulers, measure whether the scheduler actually has a choice.} On our cluster at normal load the answer was ``never, in any meaningful sense'' - there was always an idle worker - and no scheduler comparison run at that operating point can produce a meaningful ranking among policies that all prefer idle workers. The measurement costs exactly one field in the task log and a few lines of offline analysis, and it determines whether a scheduling study is really measuring scheduling.
+
+\textbf{Check what your scheduler can see.} Requirement R4 of Section~\ref{sec:reqs} will silently affect any learning or capability-scoring scheduler on a containerised cluster with differing quotas, and it fails in exactly the direction that makes a learner look as though it has nothing to learn.
+
+\textbf{On scheduler choice:} LeastLoaded is an excellent default for this class of workload. It was never significantly beaten at either operating point, it has no parameters, and in the regime where scheduling decisions actually have consequences it is optimal at exactly the behaviour that carries those consequences. Invest in learned scheduling when the environment has the structure these results show to be absent here - cache affinity on incremental rebuilds, where returning a file to the worker already holding its artifact turns a compilation into a near-instant cache hit, or long-running workers whose performance drifts under thermal or background load.
 
 \subsection{Limitations}
+\label{sec:limitations}
 
-(1) \emph{One workload:} the entire evaluation uses CPython --- a single C codebase; template-heavy C++ codebases (Boost, Eigen, LLVM) have heavier-tailed distributions where the relative ordering of schedulers may change. (2) \emph{One topology:} the cluster runs on a single Docker host --- symmetric network latency, zero clock skew, a shared filesystem cache. (3) \emph{Linear realisability:} the regret bound of~\cite{chu2011} requires $\mathbb{E}[r|x]=x^\top\theta^*$; compile time is non-linear in source size, and the log transform compresses but does not linearize --- misspecification of magnitude $\varepsilon$ inflates regret by an additive $O(\varepsilon\sqrt{T})$~\cite{lattimore2020}. (4) \emph{Plain LinUCB versus SupLinUCB:} the $\tilde O(\sqrt{Td})$ bound is proven for SupLinUCB; we implement the simpler LinUCB Algorithm~1, which has no proven bound. (5) \emph{Drift:} no mechanism (sliding windows, change-point detection) is implemented to handle worker performance drift. (6) \emph{No production-system comparison:} comparisons are restricted to the algorithms we implement, not the schedulers inside Bazel RBE or Incredibuild.
+(1)~\emph{One workload:} the entire evaluation uses CPython - a C codebase with its own compile-cost distribution; template-heavy C++ codebases (Boost, Eigen, LLVM) have heavier tails and the relative ordering of schedulers may change. (2)~\emph{One topology:} the cluster runs on a single Docker host - symmetric network latency, no clock skew, a shared filesystem cache; conclusions about network sensitivity extrapolate from a single point. (3)~\emph{Two operating points:} we measured at \texttt{-j5} and \texttt{-j10}; the backpressure limitation in item~(8) prevented testing beyond the cluster's physical capacity, so we cannot say what happens under sustained overload. (4)~\emph{Statistical power:} with 10 blocks, the paired Wilcoxon test comfortably resolves large effects (P2C and LinUCB at \texttt{-j5}) but cannot resolve $\sim$1\,s differences; the LeastLoaded comparison at \texttt{-j5} ($p=0.053$) must be read as ``not established'', not ``proven zero''. (5)~\emph{Linearity assumption:} the regret bound of~\cite{chu2011} requires $\mathbb{E}[r|x]=x^\top\theta^*$; compile time is nonlinear in source size and the log compression does not fully linearise it - misspecification of magnitude $\varepsilon$ adds $O(\varepsilon\sqrt{T})$ to regret~\cite{lattimore2020}. (6)~\emph{Plain LinUCB versus SupLinUCB:} the $\tilde{O}(\sqrt{Td})$ bound is proven for SupLinUCB; we implement the simpler LinUCB Algorithm~1, which has no proven bound - the bound is cited as context, not as a guarantee. (7)~\emph{No drift handling:} we implement neither a sliding window nor change-point detection; standard LinUCB has no guarantees under drift~\cite{lattimore2020}. (8)~\emph{The coordinator has no true backpressure:} the dispatch retry budget ($\sim$700\,ms, Section~\ref{sec:dispatch}) was set assuming compile times below $\sim$500\,ms, which our own measured P99 (5--8\,s) contradicts; the coordinator cannot properly serve sustained demand above total capacity, only retry briefly and then fail. (9)~\emph{Two baselines were not carried into the controlled protocol:} HEFT and $\varepsilon$-greedy were implemented behind the same interface and exercised in preliminary single-run measurements, but only LeastLoaded, P2C and LinUCB were run under the 10-block design. We therefore have no statistically supported statement about prediction-based scheduling without exploration, nor - more importantly - about the value of context as such, which is exactly what a blocked $\varepsilon$-greedy comparison would isolate. (10)~\emph{No comparison against production systems:} the comparison is limited to algorithms we implemented, not the schedulers inside Bazel RBE or Incredibuild.
 
-\subsection{Threats to Validity}
+\subsection{Threats to validity}
 
-\emph{Internal:} run-to-run noise of Docker on a single host is the main threat; the randomized block design with paired testing was chosen precisely to neutralize it, and the single-run tables are clearly labeled as non-conclusive context. \emph{External:} one workload and one topology; moreover, all four schedulers in the headline evaluation ran on the same hardware configuration, so conclusions do not automatically extend to clusters of other scales. \emph{Construct:} clean-build makespan is the primary metric; if the deployment goal is tail latency or incremental builds, the scheduler ranking could differ --- our P99 data (statistically indistinguishable) underlines this.
+\emph{Internal:} Docker run-to-run noise on a single host is the primary threat, and Section~\ref{sec:setup} documents a case in which an unblocked layout of this very measurement produced a spurious $p=0.0001$ result; the randomised block design with paired tests is applied precisely to neutralise it, and the numbers in Sections~\ref{sec:reqs}--\ref{sec:sensitivity} are labelled in place as single-run measurements offered as context rather than as comparative evidence. The second internal threat is the cold first block noted in Section~\ref{sec:j5}; a sensitivity analysis excluding it changes no conclusion. \emph{External:} one workload, one topology, one cluster scale; all four schedulers ran on the same hardware configuration, so conclusions do not automatically extend to larger or geographically distributed clusters. \emph{Construct:} clean-build makespan is the primary metric; if the deployment objective is tail latency or incremental builds, the ranking may differ - our P99 data, indistinguishable at both operating points, underscores this.
 
 \section{Conclusion and Future Work}
+\label{sec:conclusion}
 
-This paper presented Hybrid-Grid --- a complete distributed compilation system in Go with six schedulers behind a unified learning interface --- and a confound-controlled empirical study of contextual-bandit scheduling on heterogeneous clusters. The honest outcome is two-fold. On \emph{results}: Hybrid-LinUCB (warm-start + load penalty) significantly outperforms the weaker learners but only ties the LeastLoaded heuristic on a stationary compilation workload --- a tie shown to be intrinsic by the warm-bandit ablation, not a cold-start consequence. On \emph{methodology}: the randomized block protocol with paired testing detected and eliminated a false positive produced by run-order confounding --- a lesson of independent value to the systems-measurement community.
+We built Hybrid-Grid, a complete distributed compilation system in Go, and designed for it \textbf{HG-LinUCB} - a contextual-bandit scheduler that learns online on the running system, with no offline training phase and no simulator. The algorithm poses each dispatch decision under a 12-dimensional context describing the task--worker pair, and adds to LinUCB two mechanisms targeting the two failure modes a plain bandit exhibits on a real system: a passive-learning warm-start window for cold start, and a real-time load-penalty term for delayed feedback.
 
-Future work follows directly from the diagnosis of ``when the learner wins'': (i) \emph{cache-aware} scheduling on incremental-rebuild workloads --- adding a ``worker already holds this artifact'' feature that the coordinator can derive from dispatch history without any new RPC; (ii) \emph{drift} adaptation via change-point detection (CUSUM, Page--Hinkley) with localized resets of $A_a,b_a$; (iii) a Decima-style reward $-(t_k-t_{k-1})J_k$ motivated by Little's law in place of the purely-engineering log-latency form; (iv) extending the context vector once the Flutter/Unity build paths enter the learning flow. All source code, raw measurement logs, and reproduction scripts are released with the system.
+Both mechanisms earn their place: under a blocked, paired protocol HG-LinUCB beats plain LinUCB and P2C with large effect sizes, and the dispatch-level reconstruction names the channel rather than leaving it to inference. Getting there also yielded four implementation requirements that have nothing to do with bandit theory and everything to do with running one inside a concurrent system - the cgroup-blind capability detector among them, dangerous precisely because it is symptomless.
 
-\section*{Acknowledgment}
+Against LeastLoaded the answer is no, at either operating point, and the value of this study lies in being able to say why rather than merely reporting it. One behaviour - whether a policy skips a worker that is sitting idle - accounts for the entire measurable spread; LeastLoaded is optimal at it by construction, and at the loads we could reach nothing else was left for context to exploit. That the learner nevertheless allocates almost exactly in proportion to worker capacity, where LeastLoaded does not, says the mechanism is sound and the environment simply does not reward it.
 
-[Add funding, institutional support, and advisor acknowledgments here.]
+Future work follows directly from those boundaries. The most immediate is \textbf{true coordinator backpressure}: replacing the bounded dispatch retry with a real admission queue sized from the measured P99 is a prerequisite for evaluating scheduling quality beyond the cluster's physical capacity - precisely the regime our results could not reach. Beyond that lie two environments our diagnosis implies but this study cannot test: \textbf{cache-aware scheduling} on incremental-rebuild workloads, adding to the context vector a ``worker already holds the artifact'' feature the coordinator can infer from dispatch history without any new RPC; and \textbf{drift adaptation} via change-point detection (CUSUM, Page--Hinkley) with local resets of $A_a,b_a$, for clusters whose workers degrade under thermal or background load. A Decima-style $-(t_k-t_{k-1})J_k$ reward justified by Little's law would also place the reward shape on firmer theoretical ground than the log-latency form used here. All source code, raw measurement logs and reproduction scripts are released with the system.
 
-\begin{thebibliography}{21}
+\section*{Acknowledgements}
+
+The authors thank Nguyen Trong Khanh for steering this work toward the scheduling problem - the direction that shaped the entire paper - and for feedback on successive drafts.
+
+\begin{thebibliography}{22}
 
 \bibitem{lenstra1990} J.~K. Lenstra, D.~B. Shmoys, \'E. Tardos, Approximation algorithms for scheduling unrelated parallel machines, Mathematical Programming 46 (1990) 259--271. doi:10.1007/BF01585745.
 
@@ -317,6 +679,8 @@ Future work follows directly from the diagnosis of ``when the learner wins'': (i
 \bibitem{friedman1937} M.~Friedman, The use of ranks to avoid the assumption of normality implicit in the analysis of variance, Journal of the American Statistical Association 32~(200) (1937) 675--701.
 
 \bibitem{cliff1993} N.~Cliff, Dominance statistics: ordinal analyses to answer ordinal questions, Psychological Bulletin 114~(3) (1993) 494--509.
+
+\bibitem{buildbarn} Buildbarn: a scalable implementation of the Remote Execution API, 2024. \url{https://github.com/buildbarn/bb-remote-execution}.
 
 \end{thebibliography}
 
