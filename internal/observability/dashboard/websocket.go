@@ -179,49 +179,71 @@ func (h *Hub) GetTasks() []*TaskInfo {
 func (h *Hub) GetBuilds() []*BuildInfo {
 	h.eventsMu.RLock()
 	defer h.eventsMu.RUnlock()
-
 	builds := make([]*BuildInfo, 0, len(h.buildOrder))
 	for i := len(h.buildOrder) - 1; i >= 0; i-- {
-		buildID := h.buildOrder[i]
-		build := &BuildInfo{ID: buildID, Status: "completed", Truncated: h.buildTruncated[buildID]}
-		for _, task := range h.tasks {
-			if task.BuildID != buildID {
-				continue
-			}
-			if build.BuildType == "" {
-				build.BuildType = task.BuildType
-			}
-			build.TotalTasks++
-			switch task.Status {
-			case "running":
-				build.RunningTasks++
-			case "failed":
-				build.FailedTasks++
-			default:
-				build.CompletedTasks++
-			}
-			if task.FromCache {
-				build.FromCacheCount++
-			}
-			if task.StartedAt != 0 && (build.FirstTaskAt == 0 || task.StartedAt < build.FirstTaskAt) {
-				build.FirstTaskAt = task.StartedAt
-			}
-			lastAt := task.CompletedAt
-			if lastAt == 0 {
-				lastAt = task.StartedAt
-			}
-			if lastAt > build.LastTaskAt {
-				build.LastTaskAt = lastAt
-			}
-		}
-		if build.RunningTasks > 0 {
-			build.Status = "running"
-		} else if build.FailedTasks > 0 {
-			build.Status = "failed"
-		}
-		builds = append(builds, build)
+		builds = append(builds, h.buildInfo(h.buildOrder[i]))
 	}
 	return builds
+}
+
+// GetBuildDetail returns a logical build and its tasks, newest first.
+func (h *Hub) GetBuildDetail(buildID string) (*BuildInfo, []*TaskInfo, bool) {
+	h.eventsMu.RLock()
+	defer h.eventsMu.RUnlock()
+	if _, ok := h.buildTasks[buildID]; !ok {
+		return nil, nil, false
+	}
+	tasks := make([]*TaskInfo, 0, len(h.buildTasks[buildID]))
+	for i := len(h.buildTasks[buildID]) - 1; i >= 0; i-- {
+		task, ok := h.tasks[h.buildTasks[buildID][i]]
+		if !ok {
+			continue
+		}
+		copy := *task
+		tasks = append(tasks, &copy)
+	}
+	return h.buildInfo(buildID), tasks, true
+}
+
+// buildInfo derives a logical build aggregate. The caller must hold eventsMu.
+func (h *Hub) buildInfo(buildID string) *BuildInfo {
+	build := &BuildInfo{ID: buildID, Status: "completed", Truncated: h.buildTruncated[buildID]}
+	for _, task := range h.tasks {
+		if task.BuildID != buildID {
+			continue
+		}
+		if build.BuildType == "" {
+			build.BuildType = task.BuildType
+		}
+		build.TotalTasks++
+		switch task.Status {
+		case "running":
+			build.RunningTasks++
+		case "failed":
+			build.FailedTasks++
+		default:
+			build.CompletedTasks++
+		}
+		if task.FromCache {
+			build.FromCacheCount++
+		}
+		if task.StartedAt != 0 && (build.FirstTaskAt == 0 || task.StartedAt < build.FirstTaskAt) {
+			build.FirstTaskAt = task.StartedAt
+		}
+		lastAt := task.CompletedAt
+		if lastAt == 0 {
+			lastAt = task.StartedAt
+		}
+		if lastAt > build.LastTaskAt {
+			build.LastTaskAt = lastAt
+		}
+	}
+	if build.RunningTasks > 0 {
+		build.Status = "running"
+	} else if build.FailedTasks > 0 {
+		build.Status = "failed"
+	}
+	return build
 }
 
 // storeTask records the latest task state and updates build membership.
