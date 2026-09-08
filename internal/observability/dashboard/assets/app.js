@@ -516,6 +516,13 @@ function dashboard() {
                     responsive: true,
                     maintainAspectRatio: false,
                     animation: false,
+                    // Whole-column hover target (Buildkite build-history
+                    // style): with minBarLength a sub-second bar paints
+                    // ~1.5 px, and the default intersect:true hit box
+                    // equals the drawn height — a mouse sweep sails past
+                    // the very builds the tooltip exists to inspect. With
+                    // one dataset, items[0].dataIndex is unambiguous.
+                    interaction: { mode: 'index', intersect: false },
                     plugins: {
                         legend: { display: false },
                         tooltip: {
@@ -542,9 +549,12 @@ function dashboard() {
             // component so tooltip callbacks resolve dataIndex against
             // the exact array the dataset was built from — this.builds
             // is newest-first and may contain entries the filter
-            // dropped, which would mislabel every hover.
+            // dropped, which would mislabel every hover. The >= guard
+            // matters: a fully-cached build can start and complete in
+            // the same millisecond — the minBarLength floor only helps
+            // builds that reach the dataset at all.
             const builds = this.builds
-                .filter((b) => b.first_task_at_ms && b.last_task_at_ms && b.last_task_at_ms > b.first_task_at_ms)
+                .filter((b) => b.first_task_at_ms && b.last_task_at_ms && b.last_task_at_ms >= b.first_task_at_ms)
                 .slice(0, 20)
                 .reverse();
             this.durationChartBuilds = builds;

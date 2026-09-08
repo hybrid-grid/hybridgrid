@@ -285,6 +285,32 @@ func TestServer_ChartAsset(t *testing.T) {
 	}
 }
 
+// TestServer_AppAssetMinBarLength guards the sub-second-build floor in
+// the durations bar chart. Without it a 0.02 s build on a y-axis
+// spanning tens of seconds renders 0 px tall — invisible and with no
+// hover target — and on real clusters most cpp TUs are client-side
+// cache hits or sub-second compiles, so the chart would silently drop
+// exactly the builds the tooltip exists to inspect.
+func TestServer_AppAssetMinBarLength(t *testing.T) {
+	cfg := DefaultConfig()
+	s := New(cfg, &mockProvider{})
+
+	req := httptest.NewRequest(http.MethodGet, "/app.js", nil)
+	rec := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("app.js status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "minBarLength") {
+		t.Error("app.js should set minBarLength on the durations bar dataset; without it sub-second builds render 0 px and become invisible/unhoverable")
+	}
+	if !strings.Contains(body, "interaction: { mode: 'index', intersect: false }") {
+		t.Error("app.js should set whole-column interaction on the durations chart; the default intersect:true hit box equals the drawn bar height, so a ~1.5 px bar is effectively unhoverable on a mouse sweep")
+	}
+}
+
 func TestServer_MetricsEndpoint(t *testing.T) {
 	cfg := DefaultConfig()
 	s := New(cfg, &mockProvider{})
