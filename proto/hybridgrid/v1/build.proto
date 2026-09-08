@@ -222,6 +222,10 @@ message BuildRequest {
     NodeConfig node_config = 16;
   }
 
+  // Build session ID for grouping related builds (clients read
+  // HG_BUILD_ID from the wrapping build tool; empty for ungrouped)
+  string build_id = 17;
+
   // Optional overrides
   string docker_image = 20;         // Override default image
   int32 timeout_seconds = 21;       // Override default timeout
@@ -294,6 +298,10 @@ message CompileRequest {
   int32 timeout_seconds = 9;
   string client_os = 10;            // OS where preprocessing was done (linux, darwin, windows)
   Architecture client_arch = 11;    // Architecture of the client machine
+  // Build session ID grouping the per-TU invocations of one logical
+  // build (clients read HG_BUILD_ID from the wrapping make environment;
+  // empty for ungrouped tasks)
+  string build_id = 12;
 
   // Cross-compilation mode (Mode 2): Send raw source + project headers
   bytes raw_source = 20;            // Raw source file (not preprocessed)
