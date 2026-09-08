@@ -507,7 +507,11 @@ function dashboard() {
             if (this.route !== 'home') return;
             const chart = this.ensureChart('durations', 'durations-canvas', (c) => ({
                 type: 'bar',
-                data: { labels: [], datasets: [{ label: 'duration (s)', data: [], backgroundColor: [] }] },
+                // minBarLength keeps sub-second/cached builds visible and
+                // hoverable — without it a 0.02 s build renders 0 px tall
+                // on a chart whose y-axis spans tens of seconds, silently
+                // dropping exactly the builds the tooltip exists to inspect.
+                data: { labels: [], datasets: [{ label: 'duration (s)', data: [], backgroundColor: [], minBarLength: 2 }] },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
