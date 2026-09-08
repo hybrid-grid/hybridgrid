@@ -63,7 +63,10 @@ function dashboard() {
             const finished = this.builds.filter((b) => !b.running_tasks && this.buildDurationMs(b) !== null);
             if (finished.length === 0) return '—';
             const avgSeconds = finished.reduce((acc, b) => acc + this.buildDurationMs(b), 0) / finished.length / 1000;
-            return avgSeconds >= 60 ? `${(avgSeconds / 60).toFixed(1)} min` : `${avgSeconds.toFixed(1)} s`;
+            // toFixed(2) matches buildDurationLabel — a 17 ms average must
+            // not print "0.0 s" on the card while the history column next to
+            // it prints "0.02 s" for the same builds.
+            return avgSeconds >= 60 ? `${(avgSeconds / 60).toFixed(1)} min` : `${avgSeconds.toFixed(2)} s`;
         },
 
         get executorUtilizationDisplay() {
@@ -360,6 +363,10 @@ function dashboard() {
         // numbers on one screen disagree about the same build set.
         // Same-millisecond builds return 0 (a real, renderable duration);
         // missing fields or inverted order return null (no duration).
+        // Deliberate call-site policy, not absorbed here: the avg card
+        // excludes running builds (their span is still growing), the
+        // chart includes them as grey bars. A 0 prints "0.00 s" on every
+        // surface — matching the chart tooltip — rather than "—".
         buildDurationMs(build) {
             if (!build.first_task_at_ms || !build.last_task_at_ms || build.last_task_at_ms < build.first_task_at_ms) return null;
             return build.last_task_at_ms - build.first_task_at_ms;
