@@ -60,9 +60,9 @@ function dashboard() {
         },
 
         get avgBuildDurationDisplay() {
-            const finished = this.builds.filter((b) => !b.running_tasks && b.first_task_at_ms && b.last_task_at_ms && b.last_task_at_ms > b.first_task_at_ms);
+            const finished = this.builds.filter((b) => !b.running_tasks && this.buildDurationMs(b) !== null);
             if (finished.length === 0) return '—';
-            const avgSeconds = finished.reduce((acc, b) => acc + (b.last_task_at_ms - b.first_task_at_ms), 0) / finished.length / 1000;
+            const avgSeconds = finished.reduce((acc, b) => acc + this.buildDurationMs(b), 0) / finished.length / 1000;
             return avgSeconds >= 60 ? `${(avgSeconds / 60).toFixed(1)} min` : `${avgSeconds.toFixed(1)} s`;
         },
 
@@ -353,9 +353,22 @@ function dashboard() {
             return Math.min(100, ((build.completed_tasks + build.failed_tasks) / build.total_tasks) * 100);
         },
 
+        // Shared build-duration predicate. Every display that derives a
+        // duration from first/last task timestamps (avg card, history
+        // column, durations chart) must go through here — site-local
+        // guards already drifted once (> here, >= there) and made two
+        // numbers on one screen disagree about the same build set.
+        // Same-millisecond builds return 0 (a real, renderable duration);
+        // missing fields or inverted order return null (no duration).
+        buildDurationMs(build) {
+            if (!build.first_task_at_ms || !build.last_task_at_ms || build.last_task_at_ms < build.first_task_at_ms) return null;
+            return build.last_task_at_ms - build.first_task_at_ms;
+        },
+
         buildDurationLabel(build) {
-            if (!build.first_task_at_ms || !build.last_task_at_ms || build.last_task_at_ms <= build.first_task_at_ms) return '—';
-            const seconds = (build.last_task_at_ms - build.first_task_at_ms) / 1000;
+            const ms = this.buildDurationMs(build);
+            if (ms === null) return '—';
+            const seconds = ms / 1000;
             return seconds >= 60 ? `${(seconds / 60).toFixed(1)} min` : `${seconds.toFixed(2)} s`;
         },
 
@@ -507,7 +520,7 @@ function dashboard() {
             if (this.route !== 'home') return;
             const chart = this.ensureChart('durations', 'durations-canvas', (c) => ({
                 type: 'bar',
-                // minBarLength keeps sub-second/cached builds visible and
+                // minBarLength keeps sub-second builds visible and
                 // hoverable — without it a 0.02 s build renders 0 px tall
                 // on a chart whose y-axis spans tens of seconds, silently
                 // dropping exactly the builds the tooltip exists to inspect.
@@ -550,18 +563,19 @@ function dashboard() {
             // the exact array the dataset was built from — this.builds
             // is newest-first and may contain entries the filter
             // dropped, which would mislabel every hover. The >= guard
-            // matters: a fully-cached build can start and complete in
-            // the same millisecond — the minBarLength floor only helps
-            // builds that reach the dataset at all.
+            // (via buildDurationMs) matters: a build whose first and
+            // last task land in the same millisecond still reaches the
+            // dataset — the minBarLength floor only helps builds that
+            // render at all.
             const builds = this.builds
-                .filter((b) => b.first_task_at_ms && b.last_task_at_ms && b.last_task_at_ms >= b.first_task_at_ms)
+                .filter((b) => this.buildDurationMs(b) !== null)
                 .slice(0, 20)
                 .reverse();
             this.durationChartBuilds = builds;
             const t = this.chartTheme();
             const colors = { success: t.blue, failed: t.red, running: t.grey, queued: t.grey };
             chart.data.labels = builds.map((b) => b.id);
-            chart.data.datasets[0].data = builds.map((b) => (b.last_task_at_ms - b.first_task_at_ms) / 1000);
+            chart.data.datasets[0].data = builds.map((b) => this.buildDurationMs(b) / 1000);
             chart.data.datasets[0].backgroundColor = builds.map((b) => colors[this.buildStatus(b)] || t.grey);
             chart.update('none');
         },
