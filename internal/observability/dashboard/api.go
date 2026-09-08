@@ -63,19 +63,19 @@ type WorkerInfo struct {
 
 // TaskInfo represents task information for the dashboard.
 type TaskInfo struct {
-	ID           string `json:"id"`
-	BuildType    string `json:"build_type"`
-	BuildID      string `json:"build_id"`
-	Status       string `json:"status"`
-	WorkerID     string `json:"worker_id"`
-	StartedAt    int64  `json:"started_at"`
-	CompletedAt  int64  `json:"completed_at,omitempty"`
-	DurationMs   int64  `json:"duration_ms,omitempty"`
-	QueueMs      int64  `json:"queue_ms"`
-	CompileMs    int64  `json:"compile_ms"`
-	ExitCode     int32  `json:"exit_code,omitempty"`
-	FromCache    bool   `json:"from_cache"`
-	ErrorMessage string `json:"error_message,omitempty"`
+	ID            string `json:"id"`
+	BuildType     string `json:"build_type"`
+	BuildID       string `json:"build_id"`
+	Status        string `json:"status"`
+	WorkerID      string `json:"worker_id"`
+	StartedAtMs   int64  `json:"started_at_ms"`
+	CompletedAtMs int64  `json:"completed_at_ms,omitempty"`
+	DurationMs    int64  `json:"duration_ms,omitempty"`
+	QueueMs       int64  `json:"queue_ms"`
+	CompileMs     int64  `json:"compile_ms"`
+	ExitCode      int32  `json:"exit_code,omitempty"`
+	FromCache     bool   `json:"from_cache"`
+	ErrorMessage  string `json:"error_message,omitempty"`
 }
 
 // BuildInfo represents an aggregate logical build for the dashboard.
@@ -88,8 +88,8 @@ type BuildInfo struct {
 	FailedTasks    int    `json:"failed_tasks"`
 	RunningTasks   int    `json:"running_tasks"`
 	FromCacheCount int    `json:"from_cache_count"`
-	FirstTaskAt    int64  `json:"first_task_at"`
-	LastTaskAt     int64  `json:"last_task_at"`
+	FirstTaskAtMs  int64  `json:"first_task_at_ms"`
+	LastTaskAtMs   int64  `json:"last_task_at_ms"`
 	Truncated      bool   `json:"truncated"`
 }
 
