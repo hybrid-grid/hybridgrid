@@ -40,8 +40,27 @@
   --link-color: var(--accent-color);
 
   --input-color: var(--white);
+  --white: #fff;
   --button-background: oklch(from var(--text-color-secondary) l c h / 0.075);
   --standard-transition: 0.25s ease;
+}
+
+/* Dark scheme: flip the neutrals only. Everything else — text
+   (var(--black)), borders (color-mix over the secondary text color),
+   zebra rows, pane headers — derives from these, and the accent/ball
+   colors carry over unchanged. Derived in the same blue-grey family
+   (hue 256.91) as the light theme's text color; this is our variant,
+   not a stock Jenkins theme. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(17% 0.02 256.91);
+    --very-light-grey: oklch(22% 0.02 256.91);
+    --light-grey: oklch(20% 0.02 256.91);
+    --medium-grey: oklch(60% 0.03 256.91);
+    --dark-grey: oklch(78% 0.03 256.91);
+    --black: oklch(from var(--accent-color) 93% 0.02 h);
+    --white: oklch(100% 0 0);
+  }
 }
 
 * { box-sizing: border-box; }
