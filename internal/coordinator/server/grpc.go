@@ -299,17 +299,19 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 
 // TaskEvent represents a task event for the dashboard.
 type TaskEvent struct {
-	ID           string
-	BuildType    string
-	BuildID      string
-	Status       string
-	WorkerID     string
-	StartedAt    int64
-	CompletedAt  int64
-	DurationMs   int64
-	ExitCode     int32
-	FromCache    bool
-	ErrorMessage string
+	ID            string
+	BuildType     string
+	BuildID       string
+	Status        string
+	WorkerID      string
+	StartedAt     int64
+	CompletedAt   int64
+	DurationMs    int64
+	QueueTimeMs   int64
+	CompileTimeMs int64
+	ExitCode      int32
+	FromCache     bool
+	ErrorMessage  string
 }
 
 // EventNotifier is called when task events occur.
@@ -903,13 +905,15 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	// Notify task completed
 	if s.eventNotifier != nil {
 		event := &TaskEvent{
-			ID:          req.TaskId,
-			BuildType:   "cpp",
-			BuildID:     buildID,
-			WorkerID:    worker.ID,
-			StartedAt:   taskStartTime.Unix(),
-			CompletedAt: taskCompletedTime.Unix(),
-			DurationMs:  taskCompletedTime.Sub(taskStartTime).Milliseconds(),
+			ID:            req.TaskId,
+			BuildType:     "cpp",
+			BuildID:       buildID,
+			WorkerID:      worker.ID,
+			StartedAt:     taskStartTime.Unix(),
+			CompletedAt:   taskCompletedTime.Unix(),
+			DurationMs:    taskCompletedTime.Sub(taskStartTime).Milliseconds(),
+			QueueTimeMs:   resp.GetQueueTimeMs(),
+			CompileTimeMs: resp.GetCompilationTimeMs(),
 		}
 		if success {
 			event.Status = "completed"
@@ -1019,17 +1023,19 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest, b
 				StartedAt: taskStart,
 			})
 			s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
-				ID:           req.TaskId,
-				BuildType:    "flutter",
-				BuildID:      buildID,
-				Status:       "completed",
-				WorkerID:     "",
-				StartedAt:    taskStart,
-				CompletedAt:  time.Now().Unix(),
-				DurationMs:   cached.buildTimeMs,
-				ExitCode:     0,
-				FromCache:    true,
-				ErrorMessage: "",
+				ID:            req.TaskId,
+				BuildType:     "flutter",
+				BuildID:       buildID,
+				Status:        "completed",
+				WorkerID:      "",
+				StartedAt:     taskStart,
+				CompletedAt:   time.Now().Unix(),
+				DurationMs:    cached.buildTimeMs,
+				QueueTimeMs:   0,
+				CompileTimeMs: cached.buildTimeMs,
+				ExitCode:      0,
+				FromCache:     true,
+				ErrorMessage:  "",
 			})
 		}
 
@@ -1157,14 +1163,16 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest, b
 
 	if s.eventNotifier != nil {
 		event := &TaskEvent{
-			ID:          req.TaskId,
-			BuildType:   "flutter",
-			BuildID:     buildID,
-			WorkerID:    worker.ID,
-			StartedAt:   taskStartTime.Unix(),
-			CompletedAt: taskCompletedTime.Unix(),
-			DurationMs:  taskCompletedTime.Sub(taskStartTime).Milliseconds(),
-			FromCache:   false,
+			ID:            req.TaskId,
+			BuildType:     "flutter",
+			BuildID:       buildID,
+			WorkerID:      worker.ID,
+			StartedAt:     taskStartTime.Unix(),
+			CompletedAt:   taskCompletedTime.Unix(),
+			DurationMs:    taskCompletedTime.Sub(taskStartTime).Milliseconds(),
+			QueueTimeMs:   buildResp.GetQueueTimeMs(),
+			CompileTimeMs: buildResp.GetBuildTimeMs(),
+			FromCache:     false,
 		}
 		if success {
 			event.Status = "completed"
@@ -1227,17 +1235,19 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 				StartedAt: taskStart,
 			})
 			s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
-				ID:           req.TaskId,
-				BuildType:    "unity",
-				BuildID:      buildID,
-				Status:       "completed",
-				WorkerID:     "",
-				StartedAt:    taskStart,
-				CompletedAt:  time.Now().Unix(),
-				DurationMs:   cached.buildTimeMs,
-				ExitCode:     0,
-				FromCache:    true,
-				ErrorMessage: "",
+				ID:            req.TaskId,
+				BuildType:     "unity",
+				BuildID:       buildID,
+				Status:        "completed",
+				WorkerID:      "",
+				StartedAt:     taskStart,
+				CompletedAt:   time.Now().Unix(),
+				DurationMs:    cached.buildTimeMs,
+				QueueTimeMs:   0,
+				CompileTimeMs: cached.buildTimeMs,
+				ExitCode:      0,
+				FromCache:     true,
+				ErrorMessage:  "",
 			})
 		}
 
@@ -1365,14 +1375,16 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 
 	if s.eventNotifier != nil {
 		event := &TaskEvent{
-			ID:          req.TaskId,
-			BuildType:   "unity",
-			BuildID:     buildID,
-			WorkerID:    worker.ID,
-			StartedAt:   taskStartTime.Unix(),
-			CompletedAt: taskCompletedTime.Unix(),
-			DurationMs:  taskCompletedTime.Sub(taskStartTime).Milliseconds(),
-			FromCache:   false,
+			ID:            req.TaskId,
+			BuildType:     "unity",
+			BuildID:       buildID,
+			WorkerID:      worker.ID,
+			StartedAt:     taskStartTime.Unix(),
+			CompletedAt:   taskCompletedTime.Unix(),
+			DurationMs:    taskCompletedTime.Sub(taskStartTime).Milliseconds(),
+			QueueTimeMs:   buildResp.GetQueueTimeMs(),
+			CompileTimeMs: buildResp.GetBuildTimeMs(),
+			FromCache:     false,
 		}
 		if success {
 			event.Status = "completed"

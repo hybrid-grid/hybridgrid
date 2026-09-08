@@ -1205,7 +1205,7 @@ func TestServer_CreateEventNotifier_ForwardsBuildID(t *testing.T) {
 	s := New(DefaultConfig(), &mockProvider{})
 	onStart, onComplete := s.CreateEventNotifier()
 	onStart("task-1", "build-1", "cpp", "running", "worker-1", 100)
-	onComplete("task-1", "build-1", "cpp", "completed", "worker-1", 100, 120, 20, 0, "")
+	onComplete("task-1", "build-1", "cpp", "completed", "worker-1", 100, 120, 20, 5, 15, 0, "")
 
 	tasks := s.hub.GetTasks()
 	if len(tasks) != 1 {
@@ -1416,5 +1416,44 @@ func TestWorkerInfo_UnityFields(t *testing.T) {
 	}
 	if len(decoded.UnityPlatforms) != 2 {
 		t.Errorf("UnityPlatforms len = %d, want 2", len(decoded.UnityPlatforms))
+	}
+}
+
+func TestServer_HandleBuildByID(t *testing.T) {
+	s := New(DefaultConfig(), &mockProvider{})
+	s.hub.BroadcastTaskCompleted(&TaskInfo{ID: "old", BuildID: "build-1", BuildType: "cpp", Status: "completed", QueueMs: 10, CompileMs: 15})
+	s.hub.BroadcastTaskCompleted(&TaskInfo{ID: "new", BuildID: "build-1", BuildType: "cpp", Status: "completed", QueueMs: 20, CompileMs: 30})
+
+	rec := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/builds/build-1", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Status = %d, want 200", rec.Code)
+	}
+	var response struct {
+		Build *BuildInfo  `json:"build"`
+		Tasks []*TaskInfo `json:"tasks"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Build == nil || response.Build.ID != "build-1" {
+		t.Fatalf("build = %#v, want build-1", response.Build)
+	}
+	if len(response.Tasks) != 2 {
+		t.Fatalf("tasks len = %d, want 2", len(response.Tasks))
+	}
+	if response.Tasks[0].ID != "new" || response.Tasks[0].QueueMs != 20 || response.Tasks[0].CompileMs != 30 {
+		t.Errorf("newest task = %#v, want propagated timing fields", response.Tasks[0])
+	}
+
+	rec = httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/builds/missing", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("missing Status = %d, want 404", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/builds/build-1", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST Status = %d, want 405", rec.Code)
 	}
 }

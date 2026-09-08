@@ -71,6 +71,8 @@ type TaskInfo struct {
 	StartedAt    int64  `json:"started_at"`
 	CompletedAt  int64  `json:"completed_at,omitempty"`
 	DurationMs   int64  `json:"duration_ms,omitempty"`
+	QueueMs      int64  `json:"queue_ms"`
+	CompileMs    int64  `json:"compile_ms"`
 	ExitCode     int32  `json:"exit_code,omitempty"`
 	FromCache    bool   `json:"from_cache"`
 	ErrorMessage string `json:"error_message,omitempty"`
@@ -182,4 +184,20 @@ func (s *Server) handleBuilds(w http.ResponseWriter, r *http.Request) {
 		"count":     len(builds),
 		"timestamp": time.Now().Unix(),
 	})
+}
+
+// handleBuildByID returns a logical build and its tasks.
+func (s *Server) handleBuildByID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	build, tasks, ok := s.hub.GetBuildDetail(r.PathValue("id"))
+	w.Header().Set("Content-Type", "application/json")
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "build not found"})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"build": build, "tasks": tasks})
 }

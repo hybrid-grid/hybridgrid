@@ -188,3 +188,43 @@ tbody tr:last-child td { border-bottom: 0; }
   th, td { padding: .55rem .5rem; }
   .cache-layout { gap: .9rem; }
 }
+
+/* Build detail view */
+a.build-id { color: var(--link-color); text-decoration: none; }
+a.build-id:hover { text-decoration: underline; }
+.detail-title {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-bold-weight);
+  margin: 0 0 1rem;
+  word-break: break-all;
+}
+.meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: .75rem 1.5rem;
+  margin: 0;
+}
+.meta-grid dt {
+  font-size: var(--font-size-xs);
+  color: var(--text-color-secondary);
+  margin: 0 0 .15rem;
+}
+.meta-grid dd { margin: 0; }
+.truncated-badge {
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  color: var(--warning);
+  background: color-mix(in sRGB, var(--warning) 4%, transparent);
+  border: var(--jenkins-border);
+  border-radius: 3px;
+  padding: .15rem .5rem;
+}
+.provenance-note {
+  font-size: var(--font-size-xs);
+  color: var(--text-color-secondary);
+  margin: 0;
+  padding: 0 .25rem;
+}

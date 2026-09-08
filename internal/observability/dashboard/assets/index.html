@@ -18,9 +18,12 @@
       </div>
     </header>
 
-    <nav class="breadcrumb-bar" aria-label="Breadcrumb"><a href="#status">Dashboard</a></nav>
+    <nav class="breadcrumb-bar" aria-label="Breadcrumb">
+      <a href="#status" x-show="route === 'home'">Dashboard</a>
+      <span x-show="route === 'build'" x-cloak><a href="#/">Dashboard</a> » <span class="mono" x-text="detailId"></span></span>
+    </nav>
 
-    <div class="dashboard-layout" id="status">
+    <div class="dashboard-layout" id="status" x-show="route === 'home'">
       <aside class="side-panel" aria-label="Dashboard sections">
         <p class="side-panel-heading">HybridGrid</p>
         <nav class="task-menu">
@@ -49,7 +52,7 @@
                           <title x-text="buildStatus(build)"></title><circle cx="7" cy="7" r="6"></circle>
                         </svg>
                       </td>
-                      <td><span class="build-id" :title="build.id" x-text="build.id"></span></td>
+                      <td><a class="build-id" :href="'#/build/' + encodeURIComponent(build.id)" :title="build.id" x-text="build.id"></a></td>
                       <td class="muted" x-text="build.build_type || 'native'"></td>
                       <td class="progress-cell"><span class="task-count" x-text="`${build.completed_tasks + build.failed_tasks}/${build.total_tasks}`"></span><span class="thin-progress"><span :style="`width: ${buildProgress(build)}%`"></span></span></td>
                       <td x-text="build.from_cache_count || 0"></td>
@@ -112,6 +115,80 @@
             </ol>
           </div>
         </section>
+      </main>
+    </div>
+
+    <div class="dashboard-layout" x-show="route === 'build'" x-cloak>
+      <aside class="side-panel" aria-label="Build sections">
+        <p class="side-panel-heading">HybridGrid</p>
+        <nav class="task-menu">
+          <a href="#detail-top">Status</a>
+          <a href="#detail-tasks">Tasks</a>
+          <a href="#/">← Back to Dashboard</a>
+        </nav>
+      </aside>
+
+      <main class="dashboard-main">
+        <template x-if="detailLoading && !detail"><p class="empty-state">Loading build…</p></template>
+        <template x-if="detailMissing"><p class="empty-state">Build not found. <a href="#/">Back to Dashboard</a></p></template>
+
+        <template x-if="detail">
+          <div>
+            <h1 class="detail-title" id="detail-top">
+              <svg class="status-ball" :class="'status-' + buildStatus(detail.build)" viewBox="0 0 14 14" role="img" :aria-label="buildStatus(detail.build)">
+                <title x-text="buildStatus(detail.build)"></title><circle cx="7" cy="7" r="6"></circle>
+              </svg>
+              <span class="mono" x-text="detail.build.id"></span>
+            </h1>
+
+            <section class="pane" aria-labelledby="detail-meta-heading">
+              <div class="pane-header"><h2 id="detail-meta-heading">Status</h2><span class="truncated-badge" x-show="detail.build.truncated" x-cloak>retained subset — counts may be partial</span></div>
+              <div class="pane-body">
+                <dl class="meta-grid">
+                  <div><dt>Status</dt><dd x-text="buildStatus(detail.build)"></dd></div>
+                  <div><dt>Type</dt><dd x-text="detail.build.build_type || 'native'"></dd></div>
+                  <div><dt>Tasks</dt><dd x-text="`${detail.build.completed_tasks + detail.build.failed_tasks}/${detail.build.total_tasks}`"></dd></div>
+                  <div><dt>Failed</dt><dd x-text="detail.build.failed_tasks"></dd></div>
+                  <div><dt>From cache</dt><dd x-text="detail.build.from_cache_count"></dd></div>
+                  <div><dt>First task</dt><dd class="mono" x-text="formatTime(detail.build.first_task_at)"></dd></div>
+                  <div><dt>Last activity</dt><dd class="mono" x-text="formatTime(detail.build.last_task_at)"></dd></div>
+                </dl>
+              </div>
+            </section>
+
+            <section class="pane" id="detail-tasks" aria-labelledby="detail-tasks-heading">
+              <div class="pane-header"><h2 id="detail-tasks-heading">Tasks</h2></div>
+              <div class="pane-body flush">
+                <template x-if="!detail.tasks || detail.tasks.length === 0"><p class="empty-state">No tasks retained for this build.</p></template>
+                <div class="table-scroll" x-show="detail.tasks && detail.tasks.length > 0">
+                  <table>
+                    <thead><tr><th class="ball-cell"><span class="sr-only">Status</span></th><th>Task</th><th>Worker</th><th>Queue</th><th>Compile</th><th>Duration</th><th>Exit</th><th>Cached</th></tr></thead>
+                    <tbody>
+                      <template x-for="task in detail.tasks" :key="task.id">
+                        <tr :title="task.error_message || ''">
+                          <td class="ball-cell">
+                            <svg class="status-ball" :class="'status-' + taskBall(task)" viewBox="0 0 14 14" role="img" :aria-label="taskBall(task)">
+                              <title x-text="taskBall(task)"></title><circle cx="7" cy="7" r="6"></circle>
+                            </svg>
+                          </td>
+                          <td><span class="mono" :title="task.id" x-text="task.id"></span></td>
+                          <td class="mono muted" x-text="task.worker_id || '—'"></td>
+                          <td class="mono" x-text="formatMs(task.queue_ms)"></td>
+                          <td class="mono" x-text="formatMs(task.compile_ms)"></td>
+                          <td class="mono" x-text="formatMs(task.duration_ms)"></td>
+                          <td class="mono" x-text="task.exit_code"></td>
+                          <td x-text="task.from_cache ? 'yes' : ''"></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            <p class="provenance-note">Live operational view — not a measurement series. Measurement data lives in the coordinator's task log.</p>
+          </div>
+        </template>
       </main>
     </div>
   </div>
