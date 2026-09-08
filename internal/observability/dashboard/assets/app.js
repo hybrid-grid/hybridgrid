@@ -3,6 +3,11 @@
 // internal bookkeeping (resize observers, animation state).
 const chartRegistry = {};
 
+// Single scratch canvas for token rasterization, reused across every
+// chartTheme() call — allocating five fresh 2d contexts per call (and
+// chartTheme() runs on every stats refresh) is pointless garbage.
+let scratchCanvas = null;
+
 function destroyCharts() {
     Object.keys(chartRegistry).forEach((key) => {
         try { chartRegistry[key].destroy(); } catch (err) { /* already gone */ }
@@ -17,6 +22,7 @@ function dashboard() {
         stats: {},
         workers: [],
         builds: [],
+        durationChartBuilds: [],
         events: [],
         recentTasks: [],
         cacheHistory: Array(24).fill(0),
@@ -450,11 +456,14 @@ function dashboard() {
         chartTheme() {
             const roundTrip = (cssColor, fallback) => {
                 try {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = 1;
-                    canvas.height = 1;
-                    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+                    if (!scratchCanvas) {
+                        scratchCanvas = document.createElement('canvas');
+                        scratchCanvas.width = 1;
+                        scratchCanvas.height = 1;
+                    }
+                    const ctx = scratchCanvas.getContext('2d', { willReadFrequently: true });
                     if (!ctx) return fallback;
+                    ctx.clearRect(0, 0, 1, 1);
                     ctx.fillStyle = '#123456';
                     ctx.fillStyle = cssColor;
                     if (ctx.fillStyle === '#123456') return fallback;
@@ -507,9 +516,9 @@ function dashboard() {
                         legend: { display: false },
                         tooltip: {
                             callbacks: {
-                                title: (items) => this.builds[items[0].dataIndex] ? this.builds[items[0].dataIndex].id : '',
+                                title: (items) => this.durationChartBuilds[items[0].dataIndex] ? this.durationChartBuilds[items[0].dataIndex].id : '',
                                 label: (item) => {
-                                    const build = this.builds[item.dataIndex];
+                                    const build = this.durationChartBuilds[item.dataIndex];
                                     if (!build) return '';
                                     const status = this.buildStatus(build);
                                     const cached = build.from_cache_count || 0;
@@ -525,15 +534,21 @@ function dashboard() {
                 }
             }));
             if (!chart) return;
-            // Oldest → newest, most recent 20 builds.
+            // Oldest → newest, most recent 20 builds. Stored on the
+            // component so tooltip callbacks resolve dataIndex against
+            // the exact array the dataset was built from — this.builds
+            // is newest-first and may contain entries the filter
+            // dropped, which would mislabel every hover.
             const builds = this.builds
                 .filter((b) => b.first_task_at_ms && b.last_task_at_ms && b.last_task_at_ms > b.first_task_at_ms)
                 .slice(0, 20)
                 .reverse();
-            const colors = { success: this.chartTheme().blue, failed: this.chartTheme().red, running: this.chartTheme().grey, queued: this.chartTheme().grey };
+            this.durationChartBuilds = builds;
+            const t = this.chartTheme();
+            const colors = { success: t.blue, failed: t.red, running: t.grey, queued: t.grey };
             chart.data.labels = builds.map((b) => b.id);
             chart.data.datasets[0].data = builds.map((b) => (b.last_task_at_ms - b.first_task_at_ms) / 1000);
-            chart.data.datasets[0].backgroundColor = builds.map((b) => colors[this.buildStatus(b)] || this.chartTheme().grey);
+            chart.data.datasets[0].backgroundColor = builds.map((b) => colors[this.buildStatus(b)] || t.grey);
             chart.update('none');
         },
 
