@@ -1457,3 +1457,83 @@ func TestServer_HandleBuildByID(t *testing.T) {
 		t.Errorf("POST Status = %d, want 405", rec.Code)
 	}
 }
+
+// consoleMockProvider extends mockProvider with console retention.
+type consoleMockProvider struct {
+	mockProvider
+	logs map[string]string
+}
+
+func (m *consoleMockProvider) GetConsole(taskID string) (stdout, stderr string, truncated bool, ok bool) {
+	out, exists := m.logs[taskID]
+	return out, "", false, exists
+}
+
+func TestServer_HandleTaskConsole(t *testing.T) {
+	s := New(DefaultConfig(), &consoleMockProvider{
+		logs: map[string]string{"task-1": "gcc: compiled main.c"},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/task-1/console", nil)
+	rec := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Status = %d, want 200", rec.Code)
+	}
+	var response struct {
+		TaskID    string `json:"task_id"`
+		Stdout    string `json:"stdout"`
+		Truncated bool   `json:"truncated"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	if response.TaskID != "task-1" {
+		t.Errorf("task_id = %q, want task-1", response.TaskID)
+	}
+	if response.Stdout != "gcc: compiled main.c" {
+		t.Errorf("stdout = %q, want gcc: compiled main.c", response.Stdout)
+	}
+	if response.Truncated {
+		t.Error("truncated = true, want false")
+	}
+}
+
+func TestServer_HandleTaskConsole_NotFound(t *testing.T) {
+	s := New(DefaultConfig(), &consoleMockProvider{logs: map[string]string{}})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/unknown/console", nil)
+	rec := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("Status = %d, want 404", rec.Code)
+	}
+}
+
+func TestServer_HandleTaskConsole_MethodNotAllowed(t *testing.T) {
+	s := New(DefaultConfig(), &consoleMockProvider{logs: map[string]string{}})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/task-1/console", nil)
+	rec := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("Status = %d, want 405", rec.Code)
+	}
+}
+
+func TestServer_HandleTaskConsole_NoProvider(t *testing.T) {
+	// A plain StatsProvider without console support must yield 503, not
+	// an empty 200 that would read as "task produced no output".
+	s := New(DefaultConfig(), &mockProvider{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/task-1/console", nil)
+	rec := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("Status = %d, want 503", rec.Code)
+	}
+}

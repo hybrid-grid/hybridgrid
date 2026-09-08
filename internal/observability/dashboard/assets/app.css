@@ -228,3 +228,17 @@ a.build-id:hover { text-decoration: underline; }
   margin: 0;
   padding: 0 .25rem;
 }
+
+/* Task console view */
+a.task-link { color: var(--link-color); text-decoration: none; }
+a.task-link:hover { text-decoration: underline; }
+.small { font-size: var(--font-size-sm); font-weight: 400; }
+.console-output {
+  margin: 0;
+  padding: .8rem 1rem;
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+  line-height: 1.66rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
