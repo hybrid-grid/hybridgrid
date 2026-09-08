@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -21,6 +19,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/build"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/flutter"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/output"
+	"github.com/h3nr1-d14z/hybridgrid/internal/cli/taskid"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/unity"
 	"github.com/h3nr1-d14z/hybridgrid/internal/compiler"
 	"github.com/h3nr1-d14z/hybridgrid/internal/config"
@@ -323,6 +322,14 @@ Examples:
 			}
 			defer c.Close()
 
+			// One build session per invocation: all files submitted below
+			// share it, and the wrapping make's HG_BUILD_ID groups the
+			// per-TU invocations of one logical build (see taskid).
+			buildID := taskid.BuildSessionID()
+			if verbose {
+				fmt.Printf("Build session: %s\n", buildID)
+			}
+
 			// Process each file
 			successCount := 0
 			failCount := 0
@@ -343,7 +350,7 @@ Examples:
 				}
 
 				// Generate task ID
-				taskID := generateTaskID()
+				taskID := taskid.NewTaskID()
 
 				// Determine output file
 				outFile := output
@@ -365,6 +372,7 @@ Examples:
 				// Create compile request
 				req := &pb.CompileRequest{
 					TaskId:             taskID,
+					BuildId:            buildID,
 					Compiler:           comp,
 					CompilerArgs:       compArgs,
 					PreprocessedSource: source,
@@ -472,16 +480,6 @@ func detectCompiler(file string) string {
 	default:
 		return "gcc"
 	}
-}
-
-// generateTaskID creates a unique task identifier.
-func generateTaskID() string {
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback to timestamp-only if crypto/rand fails
-		return fmt.Sprintf("task-%d", time.Now().UnixNano())
-	}
-	return fmt.Sprintf("task-%s-%d", hex.EncodeToString(b), time.Now().UnixNano()%10000)
 }
 
 // parseArch converts architecture string to proto enum.
@@ -866,7 +864,7 @@ func runCompiler(defaultCompiler, envVar string, args []string) error {
 
 		// No coordinator available, run locally
 		if verbose {
-			fmt.Fprintf(os.Stderr, "[local] No coordinator available\n")
+			fmt.Fprintln(os.Stderr, "[local] Coordinator unavailable")
 		} else {
 			fmt.Fprintln(os.Stderr, "Warning: coordinator not available, compiling locally")
 		}
@@ -915,7 +913,7 @@ func runCompiler(defaultCompiler, envVar string, args []string) error {
 
 	// Build request
 	req := &build.Request{
-		TaskID:     generateTaskID(),
+		TaskID:     taskid.NewTaskID(),
 		SourceFile: parsed.InputFiles[0],
 		OutputFile: outputFile,
 		Args:       parsed,

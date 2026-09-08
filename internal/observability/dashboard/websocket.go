@@ -47,27 +47,41 @@ type Client struct {
 
 // Hub manages WebSocket client connections.
 type Hub struct {
-	clients      map[*Client]bool
-	broadcast    chan []byte
-	register     chan *Client
-	unregister   chan *Client
-	done         chan struct{}
-	mu           sync.RWMutex
-	recentEvents [][]byte // Store recent events for new clients
-	eventsMu     sync.RWMutex
-	maxEvents    int
+	clients          map[*Client]bool
+	broadcast        chan []byte
+	register         chan *Client
+	unregister       chan *Client
+	done             chan struct{}
+	mu               sync.RWMutex
+	recentEvents     [][]byte // Store recent events for new clients
+	eventsMu         sync.RWMutex
+	maxEvents        int
+	tasks            map[string]*TaskInfo
+	taskOrder        []string
+	buildTasks       map[string][]string
+	buildOrder       []string
+	buildTruncated   map[string]bool
+	maxBuilds        int
+	maxTasksTotal    int
+	maxTasksPerBuild int
 }
 
 // NewHub creates a new WebSocket hub.
 func NewHub() *Hub {
 	return &Hub{
-		clients:      make(map[*Client]bool),
-		broadcast:    make(chan []byte, 256),
-		register:     make(chan *Client),
-		unregister:   make(chan *Client),
-		done:         make(chan struct{}),
-		recentEvents: make([][]byte, 0, 100),
-		maxEvents:    100, // Keep last 100 events
+		clients:          make(map[*Client]bool),
+		broadcast:        make(chan []byte, 256),
+		register:         make(chan *Client),
+		unregister:       make(chan *Client),
+		done:             make(chan struct{}),
+		recentEvents:     make([][]byte, 0, 100),
+		maxEvents:        100, // Keep last 100 events
+		tasks:            make(map[string]*TaskInfo),
+		buildTasks:       make(map[string][]string),
+		buildTruncated:   make(map[string]bool),
+		maxBuilds:        100,
+		maxTasksTotal:    20000,
+		maxTasksPerBuild: 5000,
 	}
 }
 
@@ -144,57 +158,175 @@ func (h *Hub) GetRecentEvents() []json.RawMessage {
 	return events
 }
 
+// GetTasks returns the latest state for each task, newest first.
 func (h *Hub) GetTasks() []*TaskInfo {
 	h.eventsMu.RLock()
 	defer h.eventsMu.RUnlock()
 
-	tasks := make([]*TaskInfo, 0, len(h.recentEvents))
-	for _, data := range h.recentEvents {
-		var msg Message
-		if err := json.Unmarshal(data, &msg); err != nil {
-			continue
-		}
-		if msg.Type != MessageTypeTaskStarted && msg.Type != MessageTypeTaskComplete {
-			continue
-		}
-		dataMap, ok := msg.Data.(map[string]interface{})
+	tasks := make([]*TaskInfo, 0, len(h.taskOrder))
+	for i := len(h.taskOrder) - 1; i >= 0; i-- {
+		task, ok := h.tasks[h.taskOrder[i]]
 		if !ok {
 			continue
 		}
-		task := &TaskInfo{}
-		if id, ok := dataMap["id"].(string); ok {
-			task.ID = id
-		}
-		if bt, ok := dataMap["build_type"].(string); ok {
-			task.BuildType = bt
-		}
-		if st, ok := dataMap["status"].(string); ok {
-			task.Status = st
-		}
-		if wid, ok := dataMap["worker_id"].(string); ok {
-			task.WorkerID = wid
-		}
-		if startedAt, ok := dataMap["started_at"].(float64); ok {
-			task.StartedAt = int64(startedAt)
-		}
-		if completedAt, ok := dataMap["completed_at"].(float64); ok {
-			task.CompletedAt = int64(completedAt)
-		}
-		if durationMs, ok := dataMap["duration_ms"].(float64); ok {
-			task.DurationMs = int64(durationMs)
-		}
-		if exitCode, ok := dataMap["exit_code"].(float64); ok {
-			task.ExitCode = int32(exitCode)
-		}
-		if fromCache, ok := dataMap["from_cache"].(bool); ok {
-			task.FromCache = fromCache
-		}
-		if errMsg, ok := dataMap["error_message"].(string); ok {
-			task.ErrorMessage = errMsg
-		}
-		tasks = append(tasks, task)
+		copy := *task
+		tasks = append(tasks, &copy)
 	}
 	return tasks
+}
+
+// GetBuilds returns derived logical build aggregates, newest first.
+func (h *Hub) GetBuilds() []*BuildInfo {
+	h.eventsMu.RLock()
+	defer h.eventsMu.RUnlock()
+
+	builds := make([]*BuildInfo, 0, len(h.buildOrder))
+	for i := len(h.buildOrder) - 1; i >= 0; i-- {
+		buildID := h.buildOrder[i]
+		build := &BuildInfo{ID: buildID, Status: "completed", Truncated: h.buildTruncated[buildID]}
+		for _, task := range h.tasks {
+			if task.BuildID != buildID {
+				continue
+			}
+			if build.BuildType == "" {
+				build.BuildType = task.BuildType
+			}
+			build.TotalTasks++
+			switch task.Status {
+			case "running":
+				build.RunningTasks++
+			case "failed":
+				build.FailedTasks++
+			default:
+				build.CompletedTasks++
+			}
+			if task.FromCache {
+				build.FromCacheCount++
+			}
+			if task.StartedAt != 0 && (build.FirstTaskAt == 0 || task.StartedAt < build.FirstTaskAt) {
+				build.FirstTaskAt = task.StartedAt
+			}
+			lastAt := task.CompletedAt
+			if lastAt == 0 {
+				lastAt = task.StartedAt
+			}
+			if lastAt > build.LastTaskAt {
+				build.LastTaskAt = lastAt
+			}
+		}
+		if build.RunningTasks > 0 {
+			build.Status = "running"
+		} else if build.FailedTasks > 0 {
+			build.Status = "failed"
+		}
+		builds = append(builds, build)
+	}
+	return builds
+}
+
+// storeTask records the latest task state and updates build membership.
+// The caller must hold eventsMu for writing.
+func (h *Hub) storeTask(task *TaskInfo) {
+	if task == nil {
+		return
+	}
+
+	updated := *task
+	previous, exists := h.tasks[task.ID]
+	if !exists {
+		h.taskOrder = append(h.taskOrder, task.ID)
+	} else if previous.BuildID != task.BuildID {
+		h.removeTaskFromBuild(previous.BuildID, task.ID)
+	}
+	h.tasks[task.ID] = &updated
+
+	if task.BuildID != "" {
+		h.ensureBuild(task.BuildID)
+		if ids := h.buildTasks[task.BuildID]; len(ids) < h.maxTasksPerBuild && !containsString(ids, task.ID) {
+			h.buildTasks[task.BuildID] = append(ids, task.ID)
+		}
+		if len(h.buildTasks[task.BuildID]) >= h.maxTasksPerBuild {
+			h.buildTruncated[task.BuildID] = true
+		}
+	}
+
+	for len(h.tasks) > h.maxTasksTotal {
+		h.evictOldestTask()
+	}
+}
+
+func (h *Hub) ensureBuild(buildID string) {
+	if _, exists := h.buildTasks[buildID]; exists {
+		return
+	}
+	if h.maxBuilds <= 0 {
+		return
+	}
+	for len(h.buildOrder) >= h.maxBuilds {
+		h.evictOldestBuild()
+	}
+	h.buildTasks[buildID] = make([]string, 0)
+	h.buildOrder = append(h.buildOrder, buildID)
+}
+
+func (h *Hub) evictOldestBuild() {
+	if len(h.buildOrder) == 0 {
+		return
+	}
+	buildID := h.buildOrder[0]
+	h.buildOrder = h.buildOrder[1:]
+	delete(h.buildTasks, buildID)
+	delete(h.buildTruncated, buildID)
+	for id, task := range h.tasks {
+		if task.BuildID == buildID {
+			delete(h.tasks, id)
+		}
+	}
+	h.removeMissingTasksFromOrder()
+}
+
+func (h *Hub) evictOldestTask() {
+	for len(h.taskOrder) > 0 {
+		id := h.taskOrder[0]
+		h.taskOrder = h.taskOrder[1:]
+		if task, ok := h.tasks[id]; ok {
+			delete(h.tasks, id)
+			h.removeTaskFromBuild(task.BuildID, id)
+			return
+		}
+	}
+}
+
+func (h *Hub) removeMissingTasksFromOrder() {
+	order := h.taskOrder[:0]
+	for _, id := range h.taskOrder {
+		if _, ok := h.tasks[id]; ok {
+			order = append(order, id)
+		}
+	}
+	h.taskOrder = order
+}
+
+func (h *Hub) removeTaskFromBuild(buildID, taskID string) {
+	if buildID == "" {
+		return
+	}
+	ids := h.buildTasks[buildID]
+	for i, id := range ids {
+		if id == taskID {
+			h.buildTasks[buildID] = append(ids[:i], ids[i+1:]...)
+			return
+		}
+	}
+}
+
+func containsString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 // Broadcast sends a message to all connected clients.
@@ -250,6 +382,9 @@ func (h *Hub) BroadcastWorkerRemoved(workerID string) {
 
 // BroadcastTaskStarted notifies clients of a started task.
 func (h *Hub) BroadcastTaskStarted(task *TaskInfo) {
+	h.eventsMu.Lock()
+	h.storeTask(task)
+	h.eventsMu.Unlock()
 	h.Broadcast(&Message{
 		Type: MessageTypeTaskStarted,
 		Data: task,
@@ -258,6 +393,9 @@ func (h *Hub) BroadcastTaskStarted(task *TaskInfo) {
 
 // BroadcastTaskCompleted notifies clients of a completed task.
 func (h *Hub) BroadcastTaskCompleted(task *TaskInfo) {
+	h.eventsMu.Lock()
+	h.storeTask(task)
+	h.eventsMu.Unlock()
 	h.Broadcast(&Message{
 		Type: MessageTypeTaskComplete,
 		Data: task,

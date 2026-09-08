@@ -31,6 +31,7 @@ type TaskLogRecord struct {
 	Event            string    `json:"event"`
 	TaskID           string    `json:"task_id"`
 	BuildType        string    `json:"build_type"`
+	BuildID          string    `json:"build_id"`
 	Scheduler        string    `json:"scheduler"`
 	WorkerID         string    `json:"worker_id"`
 	WorkerArch       string    `json:"worker_arch"`

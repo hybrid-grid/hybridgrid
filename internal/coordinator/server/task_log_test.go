@@ -31,6 +31,7 @@ func sampleRecord() *TaskLogRecord {
 		Event:                       "task_completed",
 		TaskID:                      "task-1",
 		BuildType:                   "cpp",
+		BuildID:                     "build-session-1",
 		Scheduler:                   "p2c",
 		WorkerID:                    "worker-3",
 		WorkerArch:                  "x86_64",
@@ -147,6 +148,7 @@ func TestCompile_EmitsTaskLogRecord(t *testing.T) {
 		PreprocessedSource: []byte("int main() { return 0; }"),
 		Compiler:           "gcc",
 		TargetArch:         pb.Architecture_ARCH_X86_64,
+		BuildId:            "build-session-1",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, pb.TaskStatus_STATUS_FAILED, resp.Status, "expect failure since worker is unreachable")
@@ -161,6 +163,7 @@ func TestCompile_EmitsTaskLogRecord(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(lines[0]), &rec))
 	assert.Equal(t, "task_completed", rec.Event)
 	assert.Equal(t, "log-task-1", rec.TaskID)
+	assert.Equal(t, "build-session-1", rec.BuildID)
 	assert.Equal(t, "p2c", rec.Scheduler)
 	assert.Equal(t, "worker-X", rec.WorkerID)
 	assert.Equal(t, "mdns", rec.WorkerDiscoverySource)
@@ -176,6 +179,22 @@ func TestCompile_EmitsTaskLogRecord(t *testing.T) {
 	// PreprocessedSource length is the only source data sent.
 	assert.Equal(t, len("int main() { return 0; }"), rec.PreprocessedSizeBytes)
 	assert.Equal(t, len("int main() { return 0; }"), rec.SourceSizeBytes)
+
+	invalidResp, err := s.Compile(ctx, &pb.CompileRequest{
+		TaskId:             "log-task-invalid-build-id",
+		PreprocessedSource: []byte("int main() { return 0; }"),
+		Compiler:           "gcc",
+		TargetArch:         pb.Architecture_ARCH_X86_64,
+		BuildId:            "invalid/build-id",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, pb.TaskStatus_STATUS_FAILED, invalidResp.Status, "expect failure since worker is unreachable")
+
+	lines = strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	require.Len(t, lines, 2)
+	var invalidRec TaskLogRecord
+	require.NoError(t, json.Unmarshal([]byte(lines[1]), &invalidRec))
+	assert.Empty(t, invalidRec.BuildID)
 }
 
 // TestTaskLogger_ConcurrentWrites verifies that JSON Lines stay well-formed
