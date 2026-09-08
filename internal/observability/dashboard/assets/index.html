@@ -1,412 +1,119 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hybrid-Grid Dashboard</title>
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        [x-cloak] { display: none !important; }
-        .pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
-        .sparkline { display: flex; align-items: flex-end; gap: 2px; height: 24px; }
-        .sparkline-bar { width: 4px; background: currentColor; border-radius: 1px; transition: height 0.3s ease; }
-        .progress-ring { transform: rotate(-90deg); }
-        .progress-ring-circle { transition: stroke-dashoffset 0.5s ease; }
-    </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hybrid-Grid Dashboard</title>
+  <link rel="stylesheet" href="app.css">
+  <script src="./app.js"></script>
+  <script defer src="./alpinejs.min.js"></script>
 </head>
-<body class="bg-gray-900 text-gray-100 min-h-screen">
-    <div x-data="dashboard()" x-init="init()" x-cloak>
-        <!-- Header -->
-        <header class="bg-gray-800 border-b border-gray-700 px-6 py-4">
-            <div class="flex items-center justify-between">
-                <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-                        <span class="text-xl font-bold">HG</span>
-                    </div>
-                    <div>
-                        <h1 class="text-xl font-semibold">Hybrid-Grid</h1>
-                        <p class="text-xs text-gray-400">Distributed Build System</p>
-                    </div>
-                </div>
-                <div class="flex items-center gap-4">
-                    <div class="flex items-center gap-2">
-                        <span class="w-2 h-2 rounded-full" :class="connected ? 'bg-green-500' : 'bg-red-500 pulse'"></span>
-                        <span class="text-sm text-gray-400" x-text="connected ? 'Connected' : 'Disconnected'"></span>
-                    </div>
-                    <span class="text-sm text-gray-500" x-text="lastUpdate"></span>
-                </div>
+<body>
+  <div x-data="dashboard()" x-init="init()" x-cloak>
+    <header class="site-header">
+      <a class="wordmark" href="#status">Hybrid-Grid</a>
+      <div class="header-meta" aria-live="polite">
+        <span class="connection"><span class="connection-dot" :class="connected ? 'is-connected' : 'is-disconnected'" aria-hidden="true"></span><span x-text="connected ? 'Connected' : 'Disconnected'"></span></span>
+        <span class="last-update">Last update <span x-text="lastUpdate"></span></span>
+      </div>
+    </header>
+
+    <nav class="breadcrumb-bar" aria-label="Breadcrumb"><a href="#status">Dashboard</a></nav>
+
+    <div class="dashboard-layout" id="status">
+      <aside class="side-panel" aria-label="Dashboard sections">
+        <p class="side-panel-heading">HybridGrid</p>
+        <nav class="task-menu">
+          <a href="#status">Status</a>
+          <a href="#build-history">Build History</a>
+          <a href="#executor-status">Executor Status</a>
+          <a href="#build-queue">Build Queue</a>
+          <a href="#cache-statistics">Cache Statistics</a>
+          <a href="#event-log">Event Log</a>
+        </nav>
+      </aside>
+
+      <main class="dashboard-main">
+        <section class="pane" id="build-history" aria-labelledby="build-history-heading">
+          <div class="pane-header"><h2 id="build-history-heading">Build History</h2></div>
+          <div class="pane-body flush">
+            <template x-if="builds.length === 0"><p class="empty-state">No builds yet — run <span class="mono">HG_BUILD_ID=&lt;id&gt; make -j5</span> to group a build</p></template>
+            <div class="table-scroll" x-show="builds.length > 0">
+              <table>
+                <thead><tr><th class="ball-cell"><span class="sr-only">Status</span></th><th>Build</th><th>Type</th><th>Tasks</th><th>Cached</th><th>Started</th><th>Last activity</th></tr></thead>
+                <tbody>
+                  <template x-for="build in builds" :key="build.id">
+                    <tr class="build-row">
+                      <td class="ball-cell">
+                        <svg class="status-ball" :class="'status-' + buildStatus(build)" viewBox="0 0 14 14" role="img" :aria-label="buildStatus(build)">
+                          <title x-text="buildStatus(build)"></title><circle cx="7" cy="7" r="6"></circle>
+                        </svg>
+                      </td>
+                      <td><span class="build-id" :title="build.id" x-text="build.id"></span></td>
+                      <td class="muted" x-text="build.build_type || 'native'"></td>
+                      <td class="progress-cell"><span class="task-count" x-text="`${build.completed_tasks + build.failed_tasks}/${build.total_tasks}`"></span><span class="thin-progress"><span :style="`width: ${buildProgress(build)}%`"></span></span></td>
+                      <td x-text="build.from_cache_count || 0"></td>
+                      <td class="mono muted" x-text="formatTime(build.first_task_at)"></td>
+                      <td class="mono muted" x-text="formatTime(build.last_task_at)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
             </div>
-        </header>
+          </div>
+        </section>
 
-        <!-- Main Content -->
-        <main class="p-6">
-            <!-- Primary Stats Cards -->
-            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
-                <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
-                    <p class="text-xs text-gray-400 uppercase tracking-wide">Total Tasks</p>
-                    <p class="text-2xl font-bold text-white" x-text="stats.total_tasks || 0"></p>
-                </div>
-                <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
-                    <p class="text-xs text-gray-400 uppercase tracking-wide">Active</p>
-                    <p class="text-2xl font-bold text-blue-400" x-text="stats.active_tasks || 0"></p>
-                    <div class="text-xs text-gray-500 mt-1">
-                        <span x-text="stats.queued_tasks || 0"></span> queued
-                    </div>
-                </div>
-                <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
-                    <p class="text-xs text-gray-400 uppercase tracking-wide">Success Rate</p>
-                    <p class="text-2xl font-bold" :class="getSuccessRateColor(successRate)">
-                        <span x-text="successRate.toFixed(1)"></span>%
-                    </p>
-                    <div class="text-xs mt-1">
-                        <span class="text-green-400" x-text="stats.success_tasks || 0"></span>
-                        <span class="text-gray-500">/</span>
-                        <span class="text-red-400" x-text="stats.failed_tasks || 0"></span>
-                    </div>
-                </div>
-                <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
-                    <p class="text-xs text-gray-400 uppercase tracking-wide">Cache Hit Rate</p>
-                    <p class="text-2xl font-bold text-purple-400" x-text="cacheHitRate + '%'"></p>
-                    <div class="sparkline text-purple-400/60">
-                        <template x-for="val in cacheHistory" :key="Math.random()">
-                            <div class="sparkline-bar" :style="'height: ' + val + '%'"></div>
-                        </template>
-                    </div>
-                </div>
-                <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
-                    <p class="text-xs text-gray-400 uppercase tracking-wide">Workers</p>
-                    <p class="text-2xl font-bold text-cyan-400">
-                        <span x-text="stats.healthy_workers || 0"></span>
-                        <span class="text-gray-500 text-lg">/ <span x-text="stats.total_workers || 0"></span></span>
-                    </p>
-                    <div class="text-xs text-green-400/60 mt-1">healthy</div>
-                </div>
+        <section class="pane" id="executor-status" aria-labelledby="executor-status-heading">
+          <div class="pane-header"><h2 id="executor-status-heading">Build Executor Status</h2></div>
+          <div class="pane-body">
+            <template x-if="workers.length === 0"><p class="empty-state">No executors connected.</p></template>
+            <div class="worker-list" x-show="workers.length > 0">
+              <template x-for="worker in workers" :key="worker.id">
+                <article class="worker" :class="{ 'is-unhealthy': !worker.healthy }">
+                  <div class="worker-topline">
+                    <span class="health-dot" :class="worker.healthy ? 'is-healthy' : 'is-unhealthy'" aria-hidden="true"></span>
+                    <strong class="worker-host" x-text="worker.host || worker.id"></strong>
+                    <span class="circuit-badge" :class="circuitClass(worker)" x-text="worker.circuit_state || 'CLOSED'"></span>
+                  </div>
+                  <p class="worker-capability" x-text="capability(worker)"></p>
+                  <div class="executor-slots" aria-label="Executor slots">
+                    <template x-for="(task, index) in workerSlots(worker)" :key="index">
+                      <span class="executor-slot" :class="{ busy: task }"><span x-show="task" class="executor-task" :title="task && task.id" x-text="task ? task.id : 'idle'"></span><span x-show="!task">idle</span></span>
+                    </template>
+                  </div>
+                </article>
+              </template>
             </div>
+          </div>
+        </section>
 
-            <!-- Workers Table -->
-            <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden mb-6">
-                <div class="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
-                    <h2 class="text-lg font-semibold">Workers</h2>
-                    <span class="text-sm text-gray-400" x-text="workers.length + ' connected'"></span>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
-                        <thead class="bg-gray-750 text-gray-400 uppercase text-xs">
-                            <tr>
-                                <th class="px-4 py-3 text-left">ID</th>
-                                <th class="px-4 py-3 text-left">Host</th>
-                                <th class="px-4 py-3 text-left">Arch</th>
-                                <th class="px-4 py-3 text-center">CPU</th>
-                                <th class="px-4 py-3 text-center">Memory</th>
-                                <th class="px-4 py-3 text-center">Tasks</th>
-                                <th class="px-4 py-3 text-center">Success</th>
-                                <th class="px-4 py-3 text-center">Latency</th>
-                                <th class="px-4 py-3 text-center">Circuit</th>
-                                <th class="px-4 py-3 text-center">Source</th>
-                                <th class="px-4 py-3 text-center">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-gray-700">
-                            <template x-for="worker in workers" :key="worker.id">
-                                <tr class="hover:bg-gray-750 transition-colors">
-                                    <td class="px-4 py-3 font-mono text-xs" x-text="worker.id"></td>
-                                    <td class="px-4 py-3" x-text="worker.host"></td>
-                                    <td class="px-4 py-3">
-                                        <span class="px-2 py-1 bg-gray-700 rounded text-xs" x-text="worker.architecture"></span>
-                                    </td>
-                                    <td class="px-4 py-3 text-center" x-text="worker.cpu_cores"></td>
-                                    <td class="px-4 py-3 text-center" x-text="worker.memory_gb?.toFixed(1) + ' GB'"></td>
-                                    <td class="px-4 py-3 text-center">
-                                        <span class="text-blue-400" x-text="worker.active_tasks"></span>
-                                        <span class="text-gray-500">/ <span x-text="worker.total_tasks"></span></span>
-                                    </td>
-                                    <td class="px-4 py-3 text-center">
-                                        <span :class="getSuccessRateColor(worker.success_rate)" x-text="(worker.success_rate || 0).toFixed(1) + '%'"></span>
-                                    </td>
-                                    <td class="px-4 py-3 text-center" x-text="worker.avg_latency_ms?.toFixed(1) + ' ms'"></td>
-                                    <td class="px-4 py-3 text-center">
-                                        <span class="px-2 py-1 rounded text-xs"
-                                            :class="{
-                                                'bg-green-500/20 text-green-400': worker.circuit_state === 'CLOSED',
-                                                'bg-yellow-500/20 text-yellow-400': worker.circuit_state === 'HALF_OPEN',
-                                                'bg-red-500/20 text-red-400': worker.circuit_state === 'OPEN'
-                                            }"
-                                            x-text="worker.circuit_state || 'CLOSED'">
-                                        </span>
-                                    </td>
-                                    <td class="px-4 py-3 text-center">
-                                        <span class="px-2 py-1 rounded text-xs bg-gray-700" x-text="worker.discovery_source || 'manual'"></span>
-                                    </td>
-                                    <td class="px-4 py-3 text-center">
-                                        <span class="w-2 h-2 rounded-full inline-block"
-                                            :class="worker.healthy ? 'bg-green-500' : 'bg-red-500'"></span>
-                                    </td>
-                                </tr>
-                            </template>
-                            <tr x-show="workers.length === 0">
-                                <td colspan="11" class="px-4 py-8 text-center text-gray-500">
-                                    No workers connected
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+        <section class="pane compact-pane" id="build-queue" aria-labelledby="build-queue-heading">
+          <div class="pane-header"><h2 id="build-queue-heading">Build Queue</h2></div>
+          <div class="pane-body"><span class="queue-number" x-text="stats.queued_tasks || 0"></span><span class="queue-description">queued · <strong x-text="stats.active_tasks || 0"></strong> active</span></div>
+        </section>
 
-            <!-- Recent Tasks Timeline -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
-                    <div class="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
-                        <h2 class="text-lg font-semibold">Recent Tasks</h2>
-                        <span class="text-sm text-gray-400" x-text="recentTasks.length + ' tasks'"></span>
-                    </div>
-                    <div class="max-h-64 overflow-y-auto">
-                        <template x-for="(task, index) in recentTasks" :key="task.id || index">
-                            <div class="px-4 py-2 border-b border-gray-700/50 flex items-center gap-3">
-                                <span class="w-2 h-2 rounded-full flex-shrink-0"
-                                    :class="{
-                                        'bg-green-500': task.status === 'completed' || task.status === 'success',
-                                        'bg-red-500': task.status === 'failed',
-                                        'bg-blue-500 pulse': task.status === 'running',
-                                        'bg-gray-500': task.status === 'pending'
-                                    }"></span>
-                                <div class="flex-1 min-w-0">
-                                    <div class="text-sm truncate" x-text="task.id"></div>
-                                    <div class="text-xs text-gray-500">
-                                        <span x-text="task.worker_id || 'pending'"></span>
-                                        <template x-if="task.duration_ms">
-                                            <span> &bull; <span x-text="task.duration_ms + 'ms'"></span></span>
-                                        </template>
-                                        <template x-if="task.from_cache">
-                                            <span class="text-purple-400"> &bull; cached</span>
-                                        </template>
-                                    </div>
-                                </div>
-                                <span class="text-xs text-gray-500" x-text="formatTime(task.started_at)"></span>
-                            </div>
-                        </template>
-                        <div x-show="recentTasks.length === 0" class="px-4 py-8 text-center text-gray-500">
-                            No recent tasks
-                        </div>
-                    </div>
-                </div>
+        <section class="pane" id="cache-statistics" aria-labelledby="cache-statistics-heading">
+          <div class="pane-header"><h2 id="cache-statistics-heading">Cache Statistics</h2></div>
+          <div class="pane-body cache-layout">
+            <div><span class="cache-rate" x-text="cacheHitRate + '%'"></span><span class="cache-rate-label">overall cache hit rate</span></div>
+            <div class="sparkline" aria-label="Cache hit rate history"><template x-for="(rate, index) in cacheHistory" :key="index"><span class="sparkline-bar" :style="`height: ${Math.max(4, rate)}%`"></span></template></div>
+            <div class="cache-breakdown"><span x-text="`flutter ${Number(stats.flutter_cache_hit_rate || 0).toFixed(1)}% (${stats.flutter_cache_hits || 0}/${(stats.flutter_cache_hits || 0) + (stats.flutter_cache_misses || 0)})`"></span> · <span x-text="`unity ${Number(stats.unity_cache_hit_rate || 0).toFixed(1)}% (${stats.unity_cache_hits || 0}/${(stats.unity_cache_hits || 0) + (stats.unity_cache_misses || 0)})`"></span></div>
+          </div>
+        </section>
 
-                <!-- Events Log -->
-                <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
-                    <div class="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
-                        <h2 class="text-lg font-semibold">Event Log</h2>
-                        <button @click="events = []" class="text-xs text-gray-400 hover:text-white">Clear</button>
-                    </div>
-                    <div class="max-h-64 overflow-y-auto">
-                        <template x-for="(event, index) in events.slice(-20).reverse()" :key="index">
-                            <div class="px-4 py-2 border-b border-gray-700/50 text-sm flex items-center gap-3">
-                                <span class="text-gray-500 font-mono text-xs" x-text="formatTime(event.timestamp)"></span>
-                                <span class="px-2 py-0.5 rounded text-xs flex-shrink-0"
-                                    :class="{
-                                        'bg-blue-500/20 text-blue-400': event.type === 'stats',
-                                        'bg-green-500/20 text-green-400': event.type === 'worker_added' || event.type === 'task_completed',
-                                        'bg-red-500/20 text-red-400': event.type === 'worker_removed',
-                                        'bg-yellow-500/20 text-yellow-400': event.type === 'task_started'
-                                    }"
-                                    x-text="event.type">
-                                </span>
-                                <span class="text-gray-300 truncate" x-text="formatEventData(event)"></span>
-                            </div>
-                        </template>
-                        <div x-show="events.length === 0" class="px-4 py-8 text-center text-gray-500">
-                            No events yet
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </main>
-
-        <!-- Footer -->
-        <footer class="px-6 py-4 text-center text-xs text-gray-500 border-t border-gray-800">
-            Hybrid-Grid Build System &bull; <span x-text="'Uptime: ' + formatUptime(stats.uptime_seconds)"></span>
-        </footer>
+        <section class="pane" id="event-log" aria-labelledby="event-log-heading">
+          <div class="pane-header"><h2 id="event-log-heading">Event Log</h2><button class="subtle-button" type="button" @click="events = []">Clear</button></div>
+          <div class="pane-body flush">
+            <template x-if="events.length === 0"><p class="empty-state">No events yet.</p></template>
+            <ol class="event-list" x-show="events.length > 0">
+              <template x-for="(event, index) in events.slice().reverse()" :key="`${event.timestamp || index}-${event.type}`">
+                <li class="event-item"><time class="event-time" x-text="formatTime(event.timestamp)"></time><span class="event-badge" :class="'event-' + event.type" x-text="event.type"></span><span class="event-message" x-text="formatEventData(event)"></span></li>
+              </template>
+            </ol>
+          </div>
+        </section>
+      </main>
     </div>
-
-    <script>
-        function dashboard() {
-            return {
-                connected: false,
-                ws: null,
-                stats: {},
-                workers: [],
-                events: [],
-                recentTasks: [],
-                cacheHistory: Array(12).fill(0),
-                lastUpdate: 'Never',
-                reconnectAttempts: 0,
-                maxReconnectAttempts: 10,
-
-                get cacheHitRate() {
-                    const hits = this.stats.cache_hits || 0;
-                    const misses = this.stats.cache_misses || 0;
-                    const total = hits + misses;
-                    return total > 0 ? ((hits / total) * 100).toFixed(1) : '0.0';
-                },
-
-                get successRate() {
-                    const success = this.stats.success_tasks || 0;
-                    const total = this.stats.total_tasks || 0;
-                    return total > 0 ? (success / total) * 100 : 0;
-                },
-
-                init() {
-                    this.fetchInitialData();
-                    this.connectWebSocket();
-                },
-
-                async fetchInitialData() {
-                    try {
-                        const [statsRes, workersRes, eventsRes] = await Promise.all([
-                            fetch('/api/v1/stats'),
-                            fetch('/api/v1/workers'),
-                            fetch('/api/v1/events')
-                        ]);
-                        this.stats = await statsRes.json();
-                        const workersData = await workersRes.json();
-                        this.workers = workersData.workers || [];
-                        const eventsData = await eventsRes.json();
-                        this.events = eventsData.events || [];
-                        this.lastUpdate = this.formatTime(Date.now() / 1000);
-                        this.updateCacheHistory();
-                    } catch (err) {
-                        console.error('Failed to fetch initial data:', err);
-                    }
-                },
-
-                updateCacheHistory() {
-                    const rate = parseFloat(this.cacheHitRate);
-                    this.cacheHistory = [...this.cacheHistory.slice(1), rate];
-                },
-
-                connectWebSocket() {
-                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                    const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-                    this.ws = new WebSocket(wsUrl);
-
-                    this.ws.onopen = () => {
-                        this.connected = true;
-                        this.reconnectAttempts = 0;
-                        console.log('WebSocket connected');
-                    };
-
-                    this.ws.onclose = () => {
-                        this.connected = false;
-                        console.log('WebSocket disconnected');
-                        this.scheduleReconnect();
-                    };
-
-                    this.ws.onerror = (err) => {
-                        console.error('WebSocket error:', err);
-                    };
-
-                    this.ws.onmessage = (event) => {
-                        const lines = event.data.split('\n');
-                        lines.forEach(line => {
-                            if (line.trim()) {
-                                try {
-                                    const msg = JSON.parse(line);
-                                    this.handleMessage(msg);
-                                } catch (e) {
-                                    console.error('Failed to parse message:', e);
-                                }
-                            }
-                        });
-                    };
-                },
-
-                scheduleReconnect() {
-                    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-                        const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-                        this.reconnectAttempts++;
-                        setTimeout(() => this.connectWebSocket(), delay);
-                    }
-                },
-
-                handleMessage(msg) {
-                    this.lastUpdate = this.formatTime(msg.timestamp);
-
-                    switch (msg.type) {
-                        case 'stats':
-                            this.stats = msg.data;
-                            this.updateCacheHistory();
-                            break;
-                        case 'worker_added':
-                            this.workers = this.workers.filter(w => w.id !== msg.data.id);
-                            this.workers.push(msg.data);
-                            this.events.push(msg);
-                            break;
-                        case 'worker_removed':
-                            this.workers = this.workers.filter(w => w.id !== msg.data.worker_id);
-                            this.events.push(msg);
-                            break;
-                        case 'task_started':
-                            this.recentTasks = this.recentTasks.filter(t => t.id !== msg.data.id);
-                            this.recentTasks.unshift({ ...msg.data, status: 'running' });
-                            this.events.push(msg);
-                            break;
-                        case 'task_completed':
-                            const idx = this.recentTasks.findIndex(t => t.id === msg.data.id);
-                            if (idx >= 0) {
-                                this.recentTasks[idx] = { ...msg.data, status: msg.data.exit_code === 0 ? 'success' : 'failed' };
-                            } else {
-                                this.recentTasks.unshift({ ...msg.data, status: msg.data.exit_code === 0 ? 'success' : 'failed' });
-                            }
-                            this.events.push(msg);
-                            break;
-                    }
-
-                    // Keep lists limited
-                    if (this.events.length > 100) {
-                        this.events = this.events.slice(-100);
-                    }
-                    if (this.recentTasks.length > 20) {
-                        this.recentTasks = this.recentTasks.slice(0, 20);
-                    }
-                },
-
-                formatTime(timestamp) {
-                    if (!timestamp) return '';
-                    const date = new Date(timestamp * 1000);
-                    return date.toLocaleTimeString();
-                },
-
-                formatUptime(seconds) {
-                    if (!seconds) return '0s';
-                    const d = Math.floor(seconds / 86400);
-                    const h = Math.floor((seconds % 86400) / 3600);
-                    const m = Math.floor((seconds % 3600) / 60);
-                    const s = seconds % 60;
-                    if (d > 0) return `${d}d ${h}h`;
-                    if (h > 0) return `${h}h ${m}m`;
-                    if (m > 0) return `${m}m ${s}s`;
-                    return `${s}s`;
-                },
-
-                getSuccessRateColor(rate) {
-                    if (rate >= 95) return 'text-green-400';
-                    if (rate >= 80) return 'text-yellow-400';
-                    return 'text-red-400';
-                },
-
-                formatEventData(event) {
-                    if (!event.data) return '';
-                    if (event.type === 'stats') return `Active: ${event.data.active_tasks}, Workers: ${event.data.healthy_workers}`;
-                    if (event.type === 'worker_added') return `Worker ${event.data.id} joined`;
-                    if (event.type === 'worker_removed') return `Worker ${event.data.worker_id} left`;
-                    if (event.type === 'task_started') return `Task ${event.data.id} started on ${event.data.worker_id}`;
-                    if (event.type === 'task_completed') return `Task ${event.data.id} completed (${event.data.status})`;
-                    return JSON.stringify(event.data);
-                }
-            };
-        }
-    </script>
+  </div>
 </body>
 </html>
