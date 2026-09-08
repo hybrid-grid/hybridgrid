@@ -2,8 +2,6 @@ package flutter
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
+	"github.com/h3nr1-d14z/hybridgrid/internal/cli/taskid"
 )
 
 const (
@@ -139,7 +138,8 @@ func buildRequest(projectPath, outputType, buildMode, flavor string, buildTimeou
 	}
 
 	req := &pb.BuildRequest{
-		TaskId:         generateTaskID(),
+		TaskId:         taskid.NewTaskID(),
+		BuildId:        taskid.BuildSessionID(),
 		SourceHash:     hash,
 		BuildType:      pb.BuildType_BUILD_TYPE_FLUTTER,
 		TargetPlatform: pb.TargetPlatform_PLATFORM_ANDROID,
@@ -232,12 +232,4 @@ func printBuildResult(cmd *cobra.Command, resp *pb.BuildResponse) error {
 	}
 
 	return nil
-}
-
-func generateTaskID() string {
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("task-%d", time.Now().UnixNano())
-	}
-	return fmt.Sprintf("task-%s-%d", hex.EncodeToString(b), time.Now().UnixNano()%10000)
 }
