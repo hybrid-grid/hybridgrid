@@ -203,14 +203,14 @@
       </aside>
 
       <main class="dashboard-main">
-        <h1 class="detail-title"><span class="mono" x-text="consoleTaskId"></span> <span class="muted small">— Console Output</span></h1>
+        <h1 class="detail-title"><span class="mono" x-text="consoleTaskId"></span> <span class="muted small">— Console Output</span><span class="truncated-badge" x-show="consoleData && consoleData.truncated" x-cloak>output truncated at 256 KiB per stream</span></h1>
         <template x-if="consoleLoading && !consoleData"><p class="empty-state">Loading console…</p></template>
         <template x-if="consoleMissing"><p class="empty-state">Console output not retained for this task (evicted, pre-retention, or unavailable). <a href="#/">Back to Dashboard</a></p></template>
 
         <template x-if="consoleData">
           <div>
             <section class="pane" aria-labelledby="console-stderr-heading" x-show="consoleData.stderr">
-              <div class="pane-header"><h2 id="console-stderr-heading">stderr</h2><span class="truncated-badge" x-show="consoleData.truncated" x-cloak>output truncated at 256 KiB per stream</span></div>
+              <div class="pane-header"><h2 id="console-stderr-heading">stderr</h2></div>
               <div class="pane-body flush"><pre class="console-output" x-text="consoleData.stderr || '(empty)'"></pre></div>
             </section>
             <section class="pane" aria-labelledby="console-stdout-heading">
