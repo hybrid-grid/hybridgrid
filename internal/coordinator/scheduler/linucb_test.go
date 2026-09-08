@@ -212,7 +212,7 @@ func TestLinUCB_FeatureVectorDimensions(t *testing.T) {
 
 // TestLinUCB_FeatureVector_DistinguishesFractionalCPUQuotas is a
 // regression test for the degenerate-feature bug documented in
-// undersubscription-explains-tie: workers under Docker --cpus quotas of
+// docs/thesis/bao-cao-tien-do-260809.md §1.5: workers under Docker --cpus quotas of
 // 0.5/0.6/0.8/1.0/1.1 (see test/stress/docker-compose-hetero.yml) all
 // reported cpu_cores=<host core count> before capability.Detect() read
 // cgroup limits, so dim [4] was bit-for-bit identical (variance 0) across

@@ -371,9 +371,9 @@ func TestCompile_NoWorkersAvailable(t *testing.T) {
 }
 
 // TestCompile_RetriesWhenNoWorkerHasCapacity is a regression test for the
-// gap documented in undersubscription-explains-tie /
-// cgroup-fix-verified-live: previously, when dispatch() itself found no
-// eligible worker (every worker genuinely at MaxParallel — distinct from a
+// gap fixed in PR hybrid-grid/hybridgrid#9: previously, when dispatch()
+// itself found no eligible worker (every worker genuinely at
+// MaxParallel — distinct from a
 // selected worker's own admission control rejecting a forwarded compile
 // with ResourceExhausted), Compile() returned STATUS_FAILED immediately,
 // with zero retries. This left properly capacity-aware schedulers (P2C,
