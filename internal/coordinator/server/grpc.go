@@ -51,8 +51,8 @@ const dispatchQueueSize = 256
 // before any of them had written their own increment — a classic
 // check-then-act race. Under `make -jN` for N large enough relative to
 // total worker capacity (empirically N ≳ 7 on a 5-worker/10-slot
-// cluster — see undersubscription-explains-tie / cgroup-fix-verified-
-// live), this let multiple in-flight decisions overbook the same
+// cluster — see PR hybrid-grid/hybridgrid#9), this let multiple
+// in-flight decisions overbook the same
 // (especially low-max_parallel) worker, which then rejected the excess
 // with ResourceExhausted; a bounded reselection-with-backoff retry
 // (maxDispatchAttempts) mitigated but did not eliminate the failures.
@@ -652,8 +652,10 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	// the pendingX entry for this TaskID.
 	//
 	// maxDispatchAttempts was 3, tuned for modest bursts. Empirically
-	// (undersubscription-explains-tie / cgroup-fix-verified-live
-	// follow-up), a 5-worker cluster with 10 total max_parallel slots
+	// (follow-up measurements in PR hybrid-grid/hybridgrid#9; the budget's
+	// measured limits are in docs/thesis/bao-cao-tien-do-260821.md §4 and
+	// stated in docs/thesis/paper-hybridgrid-en.md §3.3), a 5-worker
+	// cluster with 10 total max_parallel slots
 	// hard-fails builds under `make -j7` and above with 3 attempts: the
 	// linear backoff below (25ms, 50ms) doesn't span enough of the
 	// dispatch storm at build-start cold start, when make launches all
@@ -703,8 +705,7 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 			// couple of backoff cycles. Retried with the same budget and
 			// backoff as the ResourceExhausted branch below, so a single
 			// Compile() call never waits longer in total than before this
-			// change — see undersubscription-explains-tie /
-			// cgroup-fix-verified-live.
+			// change — see PR hybrid-grid/hybridgrid#9.
 			if attempt < maxDispatchAttempts {
 				log.Warn().
 					Str("task_id", req.TaskId).

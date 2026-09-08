@@ -126,7 +126,10 @@ func NewLeastLoadedScheduler(reg registry.Registry) *LeastLoadedScheduler {
 // established pattern. Confirmed to be a no-op for every prior
 // benchmark run: those always had an idle (ActiveTasks=0) worker
 // available, which the old code already picked as the global minimum —
-// see undersubscription-explains-tie / cgroup-fix-verified-live.
+// LeastLoaded's idle-skip rate is 0.0% across the committed benchmark
+// data (scripts/analyze_idle_skip.py over .sisyphus/evidence/
+// rigorous-v3.14.0); see docs/thesis/bao-cao-tien-do-260821.md §3 and
+// PR hybrid-grid/hybridgrid#9.
 //
 // Unlike P2CScheduler.Select, there is no second, relaxed filtering
 // pass here: LeastLoadedScheduler does not consider circuit-breaker
@@ -326,8 +329,9 @@ func (s *P2CScheduler) scoreWorker(w *registry.WorkerInfo, targetArch pb.Archite
 	// quota, CpuCores reports the host's full core count for every
 	// container regardless of its --cpus limit, which made this term a
 	// worker-independent constant on a resource-constrained cluster —
-	// the same degenerate-feature bug fixed for LinUCB in
-	// undersubscription-explains-tie.
+	// the same degenerate-feature bug fixed for LinUCB (docs/thesis/
+	// bao-cao-tien-do-260809.md §1.5, verified live in .sisyphus/
+	// evidence/cgroup-smoke-260818/).
 	cpuContrib := effectiveCPUMillis(caps) / 1000.0
 	if cpuContrib > 16 {
 		cpuContrib = 16

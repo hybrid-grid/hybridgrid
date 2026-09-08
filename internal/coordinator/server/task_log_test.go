@@ -165,7 +165,8 @@ func TestCompile_EmitsTaskLogRecord(t *testing.T) {
 	assert.Equal(t, "worker-X", rec.WorkerID)
 	assert.Equal(t, "mdns", rec.WorkerDiscoverySource)
 	assert.Equal(t, int32(8), rec.WorkerCPUCores)
-	// Regression check for undersubscription-explains-tie: WorkerCPUCores
+	// Regression check for the cgroup-quota blindness (docs/thesis/
+	// bao-cao-tien-do-260809.md §1.5): WorkerCPUCores
 	// alone can't distinguish workers under a cgroup CPU quota (it stays
 	// the host core count regardless of the quota), so WorkerCPUMillis
 	// must independently reach the log record — proving the cgroup-aware
