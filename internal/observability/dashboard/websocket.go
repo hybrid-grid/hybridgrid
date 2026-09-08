@@ -292,6 +292,14 @@ func (h *Hub) evictOldestTask() {
 		if task, ok := h.tasks[id]; ok {
 			delete(h.tasks, id)
 			h.removeTaskFromBuild(task.BuildID, id)
+			// The build this task belonged to now holds a shrunken
+			// subset of its real task set; mark it so GetBuilds
+			// reports the counts as truncated rather than complete
+			// (total-task eviction can otherwise drain an old build
+			// to a phantom 0/0 "completed" row).
+			if task.BuildID != "" {
+				h.buildTruncated[task.BuildID] = true
+			}
 			return
 		}
 	}

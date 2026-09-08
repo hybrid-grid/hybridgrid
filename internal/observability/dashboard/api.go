@@ -77,6 +77,10 @@ type TaskInfo struct {
 }
 
 // BuildInfo represents an aggregate logical build for the dashboard.
+// All counts describe the RETAINED task set, which may be a subset of
+// the build's real tasks: capped per build (maxTasksPerBuild) and/or
+// shrunk when total-task eviction removes the oldest rows. Truncated
+// marks both cases; totals are not the build's lifetime counts.
 type BuildInfo struct {
 	ID             string `json:"id"`
 	BuildType      string `json:"build_type"`
