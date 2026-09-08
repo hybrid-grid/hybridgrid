@@ -20,6 +20,10 @@ function dashboard() {
         detailLoading: false,
         lastDetailFetchAt: 0,
         detailFetchTimer: null,
+        consoleTaskId: '',
+        consoleData: null,
+        consoleMissing: false,
+        consoleLoading: false,
 
         get cacheHitRate() {
             const hits = this.stats.cache_hits || 0;
@@ -85,6 +89,18 @@ function dashboard() {
         },
 
         handleRoute() {
+            const consoleMatch = /^#\/task\/(.+)\/console$/.exec(window.location.hash);
+            if (consoleMatch) {
+                const id = decodeURIComponent(consoleMatch[1]);
+                if (id !== this.consoleTaskId) {
+                    this.consoleTaskId = id;
+                    this.consoleData = null;
+                    this.consoleMissing = false;
+                    this.fetchConsole();
+                }
+                this.route = 'console';
+                return;
+            }
             const match = /^#\/build\/(.+)$/.exec(window.location.hash);
             if (match) {
                 const id = decodeURIComponent(match[1]);
@@ -97,6 +113,25 @@ function dashboard() {
                 this.route = 'build';
             } else {
                 this.route = 'home';
+            }
+        },
+
+        async fetchConsole() {
+            if (!this.consoleTaskId) return;
+            this.consoleLoading = true;
+            try {
+                const response = await fetch(`/api/v1/tasks/${encodeURIComponent(this.consoleTaskId)}/console`);
+                if (response.status === 404 || response.status === 503) {
+                    this.consoleData = null;
+                    this.consoleMissing = true;
+                } else if (response.ok) {
+                    this.consoleData = await response.json();
+                    this.consoleMissing = false;
+                }
+            } catch (err) {
+                console.error('Failed to fetch task console:', err);
+            } finally {
+                this.consoleLoading = false;
             }
         },
 

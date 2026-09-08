@@ -41,6 +41,13 @@ type StatsProvider interface {
 	GetWorkers() []*WorkerInfo
 }
 
+// ConsoleProvider is an optional StatsProvider extension exposing
+// retained per-task console output. The coordinator's provider
+// implements it; tests can inject it to exercise the console endpoint.
+type ConsoleProvider interface {
+	GetConsole(taskID string) (stdout, stderr string, truncated bool, ok bool)
+}
+
 // Server is the HTTP dashboard server.
 type Server struct {
 	config   Config
@@ -79,6 +86,7 @@ func New(cfg Config, provider StatsProvider) *Server {
 	mux.HandleFunc("/api/v1/builds", s.handleBuilds)
 	mux.HandleFunc("GET /api/v1/builds/{id}", s.handleBuildByID)
 	mux.HandleFunc("/api/v1/builds/{id}", s.handleBuildByID)
+	mux.HandleFunc("/api/v1/tasks/{id}/console", s.handleTaskConsole)
 
 	// WebSocket endpoint
 	mux.HandleFunc("/ws", s.handleWebSocket)

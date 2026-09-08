@@ -332,6 +332,7 @@ type Server struct {
 	eventNotifier  EventNotifier
 	workerConns    *connPool
 	taskLogger     *TaskLogger
+	console        *consoleStore
 	dispatchCh     chan *dispatchRequest
 	dispatchWG     sync.WaitGroup
 	dispatchOnce   sync.Once
@@ -426,6 +427,7 @@ func New(cfg Config) *Server {
 		circuitManager: circuitMgr,
 		workerConns:    newConnPool(dialOpts),
 		taskLogger:     taskLogger,
+		console:        newConsoleStore(),
 		flutterCache:   make(map[string]*flutterCacheEntry),
 		unityCache:     make(map[string]*unityCacheEntry),
 		dispatchCh:     make(chan *dispatchRequest, dispatchQueueSize),
@@ -902,6 +904,11 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 		span.SetStatus(otelcodes.Error, "compilation failed")
 	}
 
+	// Retain console output for the dashboard (bounded); the response
+	// carries the full log because Compile is unary.
+	if resp != nil {
+		s.console.Put(req.TaskId, resp.Stdout, resp.Stderr)
+	}
 	// Notify task completed
 	if s.eventNotifier != nil {
 		event := &TaskEvent{
@@ -1161,6 +1168,9 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest, b
 		atomic.AddInt64(&s.failedTasks, 1)
 	}
 
+	if buildResp != nil {
+		s.console.Put(req.TaskId, buildResp.Stdout, buildResp.Stderr)
+	}
 	if s.eventNotifier != nil {
 		event := &TaskEvent{
 			ID:            req.TaskId,
@@ -1373,11 +1383,13 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 		atomic.AddInt64(&s.failedTasks, 1)
 	}
 
+	if buildResp != nil {
+		s.console.Put(req.TaskId, buildResp.Stdout, buildResp.Stderr)
+	}
 	if s.eventNotifier != nil {
 		event := &TaskEvent{
 			ID:            req.TaskId,
 			BuildType:     "unity",
-			BuildID:       buildID,
 			WorkerID:      worker.ID,
 			StartedAt:     taskStartTime.Unix(),
 			CompletedAt:   taskCompletedTime.Unix(),

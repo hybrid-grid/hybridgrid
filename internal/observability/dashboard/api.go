@@ -186,6 +186,37 @@ func (s *Server) handleBuilds(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleTaskConsole returns retained console output for one task.
+// Console data lives in the coordinator (responses are unary, so
+// output arrives complete at task completion); the dashboard reaches it
+// through the optional ConsoleProvider. Without such a provider the
+// endpoint reports 503 rather than pretending no output exists.
+func (s *Server) handleTaskConsole(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	provider, ok := s.provider.(ConsoleProvider)
+	if !ok {
+		http.Error(w, "console output not available", http.StatusServiceUnavailable)
+		return
+	}
+	taskID := r.PathValue("id")
+	stdout, stderr, truncated, found := provider.GetConsole(taskID)
+	if !found {
+		http.Error(w, "task not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"task_id":   taskID,
+		"stdout":    stdout,
+		"stderr":    stderr,
+		"truncated": truncated,
+	})
+}
+
 // handleBuildByID returns a logical build and its tasks.
 func (s *Server) handleBuildByID(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

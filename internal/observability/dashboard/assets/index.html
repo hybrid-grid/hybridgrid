@@ -21,6 +21,7 @@
     <nav class="breadcrumb-bar" aria-label="Breadcrumb">
       <a href="#status" x-show="route === 'home'">Dashboard</a>
       <span x-show="route === 'build'" x-cloak><a href="#/">Dashboard</a> » <span class="mono" x-text="detailId"></span></span>
+      <span x-show="route === 'console'" x-cloak><a href="#/">Dashboard</a> » <span class="mono" x-text="consoleTaskId"></span> » Console</span>
     </nav>
 
     <div class="dashboard-layout" id="status" x-show="route === 'home'">
@@ -171,7 +172,7 @@
                               <title x-text="taskBall(task)"></title><circle cx="7" cy="7" r="6"></circle>
                             </svg>
                           </td>
-                          <td><span class="mono" :title="task.id" x-text="task.id"></span></td>
+                          <td><a class="mono task-link" :href="'#/task/' + encodeURIComponent(task.id) + '/console'" :title="task.id" x-text="task.id"></a></td>
                           <td class="mono muted" x-text="task.worker_id || '—'"></td>
                           <td class="mono" x-text="formatMs(task.queue_ms)"></td>
                           <td class="mono" x-text="formatMs(task.compile_ms)"></td>
@@ -187,6 +188,36 @@
             </section>
 
             <p class="provenance-note">Live operational view — not a measurement series. Measurement data lives in the coordinator's task log.</p>
+          </div>
+        </template>
+      </main>
+    </div>
+
+    <div class="dashboard-layout" x-show="route === 'console'" x-cloak>
+      <aside class="side-panel" aria-label="Console sections">
+        <p class="side-panel-heading">HybridGrid</p>
+        <nav class="task-menu">
+          <a :href="'#/build/' + encodeURIComponent(detailId)" x-show="detailId">← Build</a>
+          <a href="#/">← Back to Dashboard</a>
+        </nav>
+      </aside>
+
+      <main class="dashboard-main">
+        <h1 class="detail-title"><span class="mono" x-text="consoleTaskId"></span> <span class="muted small">— Console Output</span></h1>
+        <template x-if="consoleLoading && !consoleData"><p class="empty-state">Loading console…</p></template>
+        <template x-if="consoleMissing"><p class="empty-state">Console output not retained for this task (evicted, pre-retention, or unavailable). <a href="#/">Back to Dashboard</a></p></template>
+
+        <template x-if="consoleData">
+          <div>
+            <section class="pane" aria-labelledby="console-stderr-heading" x-show="consoleData.stderr">
+              <div class="pane-header"><h2 id="console-stderr-heading">stderr</h2><span class="truncated-badge" x-show="consoleData.truncated" x-cloak>output truncated at 256 KiB per stream</span></div>
+              <div class="pane-body flush"><pre class="console-output" x-text="consoleData.stderr || '(empty)'"></pre></div>
+            </section>
+            <section class="pane" aria-labelledby="console-stdout-heading">
+              <div class="pane-header"><h2 id="console-stdout-heading">stdout</h2></div>
+              <div class="pane-body flush"><pre class="console-output" x-text="consoleData.stdout || '(empty)'"></pre></div>
+            </section>
+            <p class="provenance-note">Output is captured once at task completion (the RPC is unary — no live tail).</p>
           </div>
         </template>
       </main>
