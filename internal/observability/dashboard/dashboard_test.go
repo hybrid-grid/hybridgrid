@@ -1162,6 +1162,41 @@ func TestHub_GetBuilds_Grouping(t *testing.T) {
 	}
 }
 
+func TestHub_GetBuilds_SubSecondSpan(t *testing.T) {
+	// The timeline's whole premise: two tasks that start and finish
+	// within the same wall-clock second. A seconds-based derivation
+	// collapses LastTaskAtMs-FirstTaskAtMs to 0; only millisecond
+	// timestamps keep the 1400ms span. This locks the resolution in
+	// so a quiet revert of the ms plumbing fails here, not in the UI.
+	hub := NewHub()
+	hub.BroadcastTaskCompleted(&TaskInfo{
+		ID:            "first",
+		BuildID:       "build-ms",
+		BuildType:     "cpp",
+		Status:        "completed",
+		StartedAtMs:   1000,
+		CompletedAtMs: 1400,
+		DurationMs:    400,
+	})
+	hub.BroadcastTaskCompleted(&TaskInfo{
+		ID:            "second",
+		BuildID:       "build-ms",
+		BuildType:     "cpp",
+		Status:        "completed",
+		StartedAtMs:   2000,
+		CompletedAtMs: 2400,
+		DurationMs:    400,
+	})
+
+	builds := hub.GetBuilds()
+	if len(builds) != 1 {
+		t.Fatalf("GetBuilds len = %d, want 1", len(builds))
+	}
+	if got := builds[0].LastTaskAtMs - builds[0].FirstTaskAtMs; got != 1400 {
+		t.Errorf("span = %d ms, want 1400 (millisecond resolution lost?)", got)
+	}
+}
+
 func TestHub_GetBuilds_EvictsOldestBuild(t *testing.T) {
 	hub := NewHub()
 	hub.maxBuilds = 1

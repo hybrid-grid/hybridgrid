@@ -84,7 +84,10 @@ function dashboard() {
                 .filter(Boolean);
             if (rows.length === 0) return { rows: [], spanMs: 0 };
             const t0 = Math.min(...rows.map((r) => r.queuedAt));
-            const t1 = Math.max(...rows.map((r) => r.end), now);
+            // Running rows already carry end = now, so the max of ends
+            // covers the live case. An unconditional `now` here would
+            // keep inflating the span of a settled build with wall clock.
+            const t1 = Math.max(...rows.map((r) => r.end));
             const span = Math.max(t1 - t0, 1);
             rows.forEach((r) => {
                 r.queueLeft = ((r.queuedAt - t0) / span) * 100;
@@ -432,13 +435,41 @@ function dashboard() {
 
         // Chart colors are resolved from CSS custom properties via probe
         // elements (custom properties are not computed values, so reading
-        // a real color property is the reliable way). Falls back to hex if
-        // the resolved string cannot be used.
+        // a real color property is the reliable way). The resolved string
+        // is then rasterized through a 1x1 canvas and read back with
+        // getImageData: Chromium returns authored forms like oklch(...)
+        // from computed styles AND from canvas fillStyle serialization,
+        // but Chart.js's @kurkle/color parser only understands
+        // hex/rgb/hsl — every parsed path (hover alpha, legend swatches,
+        // tooltip backgrounds) would render black/transparent. The
+        // rasterizer converts the token to concrete sRGB bytes, so the
+        // returned rgba(...) string parses correctly everywhere.
+        // Fallbacks are neutral greys from the existing token values
+        // (not approximations of the Jenkins colors) and only apply when
+        // even the browser cannot paint the token.
         chartTheme() {
+            const roundTrip = (cssColor, fallback) => {
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 1;
+                    canvas.height = 1;
+                    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+                    if (!ctx) return fallback;
+                    ctx.fillStyle = '#123456';
+                    ctx.fillStyle = cssColor;
+                    if (ctx.fillStyle === '#123456') return fallback;
+                    ctx.fillRect(0, 0, 1, 1);
+                    const d = ctx.getImageData(0, 0, 1, 1).data;
+                    if (d[3] === 0) return fallback;
+                    return `rgba(${d[0]}, ${d[1]}, ${d[2]}, ${(d[3] / 255).toFixed(4)})`;
+                } catch (err) {
+                    return fallback;
+                }
+            };
             const resolved = (id, fallback) => {
                 try {
                     const el = document.getElementById(id);
-                    return el ? getComputedStyle(el).color : fallback;
+                    return el ? roundTrip(getComputedStyle(el).color, fallback) : fallback;
                 } catch (err) {
                     return fallback;
                 }
@@ -446,10 +477,10 @@ function dashboard() {
             return {
                 text: resolved('probe-text', '#4d545d'),
                 grid: resolved('probe-grid', 'rgba(77, 84, 93, 0.2)'),
-                blue: resolved('probe-blue', '#5493f0'),
-                red: resolved('probe-red', '#e05a4e'),
-                green: resolved('probe-green', '#58b368'),
-                grey: '#9ba7af'
+                blue: resolved('probe-blue', '#4d545d'),
+                red: resolved('probe-red', '#4d545d'),
+                green: resolved('probe-green', '#4d545d'),
+                grey: resolved('probe-grey', '#9ba7af')
             };
         },
 

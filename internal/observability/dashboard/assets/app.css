@@ -300,6 +300,7 @@ a.task-link:hover { text-decoration: underline; }
 .chart-probe #probe-blue { color: var(--blue); }
 .chart-probe #probe-red { color: var(--red); }
 .chart-probe #probe-green { color: var(--green); }
+.chart-probe #probe-grey { color: var(--medium-grey); }
 
 /* ---- Worker utilization ---- */
 .utilization { display: flex; align-items: center; gap: .6rem; margin: .55rem 0 0 1.1rem; }
@@ -319,8 +320,11 @@ a.task-link:hover { text-decoration: underline; }
 .tl-queue { background: color-mix(in sRGB, var(--medium-grey) 60%, transparent); }
 .tl-success { background: var(--blue); }
 .tl-failed { background: var(--red); }
-.tl-running { background: var(--blue); animation: build-running 1.4s linear infinite; }
+.tl-running { background: var(--blue); animation: tl-pulse 1.4s ease-in-out infinite; }
 .tl-queued { background: color-mix(in sRGB, var(--medium-grey) 55%, transparent); }
+/* Opacity pulse for running timeline bars — build-running rotates and is
+   meant for the round status balls; on a wide bar it reads as flicker. */
+@keyframes tl-pulse { 50% { opacity: .45; } }
 .timeline-legend { display: flex; gap: 1.1rem; flex-wrap: wrap; padding: .5rem 0 .15rem; font-size: var(--font-size-xs); }
 .tl-legend-swatch { display: inline-block; width: .7rem; height: .7rem; margin-right: .3rem; border-radius: 2px; vertical-align: middle; }
 
