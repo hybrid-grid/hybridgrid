@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Go 1.24 distributed build system using gRPC, protobuf, zerolog, Viper, and cobra.
+Go 1.25 distributed build system using gRPC, protobuf, zerolog, Viper, and cobra.
 Three binaries: `hgbuild` (CLI client), `hg-coord` (coordinator), `hg-worker` (worker node).
 
 ## Build / Run / Test Commands
