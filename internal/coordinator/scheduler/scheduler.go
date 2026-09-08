@@ -126,9 +126,10 @@ func NewLeastLoadedScheduler(reg registry.Registry) *LeastLoadedScheduler {
 // established pattern. Confirmed to be a no-op for every prior
 // benchmark run: those always had an idle (ActiveTasks=0) worker
 // available, which the old code already picked as the global minimum —
-// verified by scripts/analyze_idle_skip.py over .sisyphus/evidence/
-// {rigorous,warm-bandit}-v3.14.0; see docs/thesis/bao-cao-tien-do-
-// 260809.md §1.1 and PR hybrid-grid/hybridgrid#9.
+// LeastLoaded's idle-skip rate is 0.0% across the committed benchmark
+// data (scripts/analyze_idle_skip.py over .sisyphus/evidence/
+// rigorous-v3.14.0); see docs/thesis/bao-cao-tien-do-260821.md §3 and
+// PR hybrid-grid/hybridgrid#9.
 //
 // Unlike P2CScheduler.Select, there is no second, relaxed filtering
 // pass here: LeastLoadedScheduler does not consider circuit-breaker
