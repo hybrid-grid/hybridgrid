@@ -227,15 +227,15 @@ func (h *Hub) buildInfo(buildID string) *BuildInfo {
 		if task.FromCache {
 			build.FromCacheCount++
 		}
-		if task.StartedAt != 0 && (build.FirstTaskAt == 0 || task.StartedAt < build.FirstTaskAt) {
-			build.FirstTaskAt = task.StartedAt
+		if task.StartedAtMs != 0 && (build.FirstTaskAtMs == 0 || task.StartedAtMs < build.FirstTaskAtMs) {
+			build.FirstTaskAtMs = task.StartedAtMs
 		}
-		lastAt := task.CompletedAt
+		lastAt := task.CompletedAtMs
 		if lastAt == 0 {
-			lastAt = task.StartedAt
+			lastAt = task.StartedAtMs
 		}
-		if lastAt > build.LastTaskAt {
-			build.LastTaskAt = lastAt
+		if lastAt > build.LastTaskAtMs {
+			build.LastTaskAtMs = lastAt
 		}
 	}
 	if build.RunningTasks > 0 {

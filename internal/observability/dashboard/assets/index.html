@@ -6,10 +6,22 @@
   <title>Hybrid-Grid Dashboard</title>
   <link rel="stylesheet" href="app.css">
   <script src="./app.js"></script>
+  <script defer src="./chart.umd.js"></script>
   <script defer src="./alpinejs.min.js"></script>
 </head>
 <body>
   <div x-data="dashboard()" x-init="init()" x-cloak>
+    <!-- Resolved-color probes: Chart.js needs concrete color strings, and CSS
+         custom properties are not computed values. These hidden spans resolve
+         theme tokens (including the dark-scheme block) into real colors. -->
+    <div class="chart-probe" aria-hidden="true">
+      <span id="probe-text"></span>
+      <span id="probe-grid"></span>
+      <span id="probe-blue"></span>
+      <span id="probe-red"></span>
+      <span id="probe-green"></span>
+    </div>
+
     <header class="site-header">
       <a class="wordmark" href="#status">Hybrid-Grid</a>
       <div class="header-meta" aria-live="polite">
@@ -28,8 +40,9 @@
       <aside class="side-panel" aria-label="Dashboard sections">
         <p class="side-panel-heading">HybridGrid</p>
         <nav class="task-menu">
-          <a href="#status">Status</a>
+          <a href="#status">Overview</a>
           <a href="#build-history">Build History</a>
+          <a href="#build-durations">Build Durations</a>
           <a href="#executor-status">Executor Status</a>
           <a href="#build-queue">Build Queue</a>
           <a href="#cache-statistics">Cache Statistics</a>
@@ -38,13 +51,41 @@
       </aside>
 
       <main class="dashboard-main">
+        <section class="metric-cards" aria-label="Cluster overview">
+          <article class="metric-card">
+            <span class="metric-value" x-text="passRateDisplay"></span>
+            <span class="metric-label">Reliability</span>
+            <span class="metric-sub muted" x-text="`${stats.success_tasks || 0}/${(stats.success_tasks || 0) + (stats.failed_tasks || 0)} tasks passed`"></span>
+          </article>
+          <article class="metric-card">
+            <span class="metric-value" x-text="avgBuildDurationDisplay"></span>
+            <span class="metric-label">Avg build duration</span>
+            <span class="metric-sub muted" x-text="`${builds.length} build${builds.length === 1 ? '' : 's'} retained`"></span>
+          </article>
+          <article class="metric-card">
+            <span class="metric-value" x-text="cacheHitRate + '%'"></span>
+            <span class="metric-label">Cache hit rate</span>
+            <span class="metric-sub muted" x-text="`${stats.cache_hits || 0} hits · ${stats.cache_misses || 0} misses`"></span>
+          </article>
+          <article class="metric-card">
+            <span class="metric-value" x-text="`${stats.healthy_workers || 0}/${stats.total_workers || 0}`"></span>
+            <span class="metric-label">Executors online</span>
+            <span class="metric-sub muted" x-text="`utilization ${executorUtilizationDisplay}`"></span>
+          </article>
+          <article class="metric-card">
+            <span class="metric-value" x-text="formatUptime(stats.uptime_seconds)"></span>
+            <span class="metric-label">Coordinator uptime</span>
+            <span class="metric-sub muted" x-text="`queue ${stats.queued_tasks || 0} · active ${stats.active_tasks || 0}`"></span>
+          </article>
+        </section>
+
         <section class="pane" id="build-history" aria-labelledby="build-history-heading">
           <div class="pane-header"><h2 id="build-history-heading">Build History</h2></div>
           <div class="pane-body flush">
             <template x-if="builds.length === 0"><p class="empty-state">No builds yet — run <span class="mono">HG_BUILD_ID=&lt;id&gt; make -j5</span> to group a build</p></template>
             <div class="table-scroll" x-show="builds.length > 0">
               <table>
-                <thead><tr><th class="ball-cell"><span class="sr-only">Status</span></th><th>Build</th><th>Type</th><th>Tasks</th><th>Cached</th><th>Started</th><th>Last activity</th></tr></thead>
+                <thead><tr><th class="ball-cell"><span class="sr-only">Status</span></th><th>Build</th><th>Type</th><th>Tasks</th><th>Cached</th><th>Duration</th><th>Started</th><th>Last activity</th></tr></thead>
                 <tbody>
                   <template x-for="build in builds" :key="build.id">
                     <tr class="build-row">
@@ -57,13 +98,22 @@
                       <td class="muted" x-text="build.build_type || 'native'"></td>
                       <td class="progress-cell"><span class="task-count" x-text="`${build.completed_tasks + build.failed_tasks}/${build.total_tasks}`"></span><span class="thin-progress"><span :style="`width: ${buildProgress(build)}%`"></span></span></td>
                       <td x-text="build.from_cache_count || 0"></td>
-                      <td class="mono muted" x-text="formatTime(build.first_task_at)"></td>
-                      <td class="mono muted" x-text="formatTime(build.last_task_at)"></td>
+                      <td class="mono muted" x-text="buildDurationLabel(build)"></td>
+                      <td class="mono muted" x-text="formatTime(build.first_task_at_ms)"></td>
+                      <td class="mono muted" x-text="formatTime(build.last_task_at_ms)"></td>
                     </tr>
                   </template>
                 </tbody>
               </table>
             </div>
+          </div>
+        </section>
+
+        <section class="pane" id="build-durations" aria-labelledby="build-durations-heading">
+          <div class="pane-header"><h2 id="build-durations-heading">Build Durations</h2><span class="pane-note muted">wall-clock span per build (last activity − first task)</span></div>
+          <div class="pane-body">
+            <template x-if="builds.length === 0"><p class="empty-state">No builds yet.</p></template>
+            <div class="chart-box" x-show="builds.length > 0"><canvas id="durations-canvas" role="img" aria-label="Bar chart of recent build durations in seconds"></canvas></div>
           </div>
         </section>
 
@@ -85,6 +135,10 @@
                       <span class="executor-slot" :class="{ busy: task }"><span class="executor-task" :title="task && task.id" x-text="task ? task.id : 'idle'"></span></span>
                     </template>
                   </div>
+                  <div class="utilization" aria-label="Worker utilization">
+                    <div class="util-bar"><span :style="`width: ${workerUtilization(worker)}%`"></span></div>
+                    <span class="util-label muted" x-text="`${worker.active_tasks || 0}/${worker.max_parallel_tasks || 0} busy`"></span>
+                  </div>
                 </article>
               </template>
             </div>
@@ -100,7 +154,7 @@
           <div class="pane-header"><h2 id="cache-statistics-heading">Cache Statistics</h2></div>
           <div class="pane-body cache-layout">
             <div><span class="cache-rate" x-text="cacheHitRate + '%'"></span><span class="cache-rate-label">overall cache hit rate</span></div>
-            <div class="sparkline" aria-label="Cache hit rate history"><template x-for="(rate, index) in cacheHistory" :key="index"><span class="sparkline-bar" :style="`height: ${Math.max(4, rate)}%`"></span></template></div>
+            <div class="chart-box chart-box--sm"><canvas id="cache-canvas" role="img" aria-label="Line chart of recent cache hit rate"></canvas></div>
             <div class="cache-breakdown"><span x-text="`flutter ${Number(stats.flutter_cache_hit_rate || 0).toFixed(1)}% (${stats.flutter_cache_hits || 0}/${(stats.flutter_cache_hits || 0) + (stats.flutter_cache_misses || 0)})`"></span> · <span x-text="`unity ${Number(stats.unity_cache_hit_rate || 0).toFixed(1)}% (${stats.unity_cache_hits || 0}/${(stats.unity_cache_hits || 0) + (stats.unity_cache_misses || 0)})`"></span></div>
           </div>
         </section>
@@ -111,7 +165,7 @@
             <template x-if="events.length === 0"><p class="empty-state">No events yet.</p></template>
             <ol class="event-list" x-show="events.length > 0">
               <template x-for="(event, index) in events.slice().reverse()" :key="`${event.timestamp || index}-${event.type}`">
-                <li class="event-item"><time class="event-time" x-text="formatTime(event.timestamp)"></time><span class="event-badge" :class="'event-' + event.type" x-text="event.type"></span><span class="event-message" x-text="formatEventData(event)"></span></li>
+                <li class="event-item"><time class="event-time" x-text="formatEventTime(event.timestamp)"></time><span class="event-badge" :class="'event-' + event.type" x-text="event.type"></span><span class="event-message" x-text="formatEventData(event)"></span></li>
               </template>
             </ol>
           </div>
@@ -124,6 +178,7 @@
         <p class="side-panel-heading">HybridGrid</p>
         <nav class="task-menu">
           <a href="#detail-top">Status</a>
+          <a href="#detail-timeline">Timeline</a>
           <a href="#detail-tasks">Tasks</a>
           <a href="#/">← Back to Dashboard</a>
         </nav>
@@ -144,16 +199,42 @@
 
             <section class="pane" aria-labelledby="detail-meta-heading">
               <div class="pane-header"><h2 id="detail-meta-heading">Status</h2><span class="truncated-badge" x-show="detail.build.truncated" x-cloak>retained subset — counts may be partial</span></div>
-              <div class="pane-body">
+              <div class="pane-body detail-meta">
                 <dl class="meta-grid">
                   <div><dt>Status</dt><dd x-text="buildStatus(detail.build)"></dd></div>
                   <div><dt>Type</dt><dd x-text="detail.build.build_type || 'native'"></dd></div>
                   <div><dt>Tasks</dt><dd x-text="`${detail.build.completed_tasks + detail.build.failed_tasks}/${detail.build.total_tasks}`"></dd></div>
                   <div><dt>Failed</dt><dd x-text="detail.build.failed_tasks"></dd></div>
                   <div><dt>From cache</dt><dd x-text="detail.build.from_cache_count"></dd></div>
-                  <div><dt>First task</dt><dd class="mono" x-text="formatTime(detail.build.first_task_at)"></dd></div>
-                  <div><dt>Last activity</dt><dd class="mono" x-text="formatTime(detail.build.last_task_at)"></dd></div>
+                  <div><dt>First task</dt><dd class="mono" x-text="formatTime(detail.build.first_task_at_ms)"></dd></div>
+                  <div><dt>Last activity</dt><dd class="mono" x-text="formatTime(detail.build.last_task_at_ms)"></dd></div>
+                  <div><dt>Span</dt><dd class="mono" x-text="timelineSpanLabel()"></dd></div>
                 </dl>
+                <div class="chart-box chart-box--sm detail-outcomes"><canvas id="outcomes-canvas" role="img" aria-label="Doughnut chart of task outcomes"></canvas></div>
+              </div>
+            </section>
+
+            <section class="pane" id="detail-timeline" aria-labelledby="detail-timeline-heading">
+              <div class="pane-header"><h2 id="detail-timeline-heading">Timeline</h2><span class="pane-note muted" x-text="timelineSpanLabel()"></span></div>
+              <div class="pane-body flush">
+                <template x-if="detailTimeline.rows.length === 0"><p class="empty-state">No task timestamps retained for this build.</p></template>
+                <div class="timeline" x-show="detailTimeline.rows.length > 0">
+                  <template x-for="row in detailTimeline.rows" :key="row.task.id">
+                    <div class="timeline-row">
+                      <a class="timeline-label mono" :href="'#/task/' + encodeURIComponent(row.task.id) + '/console'" :title="row.task.id" x-text="row.task.id"></a>
+                      <div class="timeline-track" :title="timelineTooltip(row)">
+                        <span class="tl-segment tl-queue" :style="`left: ${row.queueLeft}%; width: ${row.queueWidth}%`"></span>
+                        <span class="tl-segment" :class="'tl-' + taskBall(row.task)" :style="`left: ${row.runLeft}%; width: ${row.runWidth}%`"></span>
+                      </div>
+                    </div>
+                  </template>
+                  <div class="timeline-legend muted">
+                    <span><span class="tl-legend-swatch tl-queue"></span> queue (coordinator)</span>
+                    <span><span class="tl-legend-swatch tl-success"></span> compile</span>
+                    <span><span class="tl-legend-swatch tl-failed"></span> failed</span>
+                    <span><span class="tl-legend-swatch tl-running"></span> running</span>
+                  </div>
+                </div>
               </div>
             </section>
 

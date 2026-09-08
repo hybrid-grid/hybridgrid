@@ -247,8 +247,41 @@ func TestServer_StaticAssets(t *testing.T) {
 	if !strings.Contains(body, "Hybrid-Grid") {
 		t.Error("Response should contain 'Hybrid-Grid'")
 	}
-	if !strings.Contains(body, "alpinejs") {
-		t.Error("Response should contain Alpine.js")
+	if !strings.Contains(body, "chart.umd.js") {
+		t.Error("Response should reference the vendored Chart.js bundle")
+	}
+}
+
+func TestServer_ChartAsset(t *testing.T) {
+	cfg := DefaultConfig()
+	s := New(cfg, &mockProvider{})
+
+	// The vendored Chart.js bundle must be served — the dashboard is
+	// offline-capable and must not fall back to a CDN.
+	req := httptest.NewRequest(http.MethodGet, "/chart.umd.js", nil)
+	rec := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("chart.umd.js status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Chart") {
+		t.Error("chart.umd.js body should contain Chart.js code")
+	}
+	// The bundle must be loadable as a classic script. Chart.js ships
+	// both a UMD and an ESM build; the ESM one (top-level export{...})
+	// throws at parse time under a plain <script defer> tag and never
+	// defines window.Chart — a regression that leaves the dashboard
+	// chartless without any network error.
+	if strings.Contains(body, "export{") {
+		t.Error("chart.umd.js looks like the ESM build (top-level export); serve the UMD bundle instead")
+	}
+	if !strings.Contains(body, "!function(") {
+		t.Error("chart.umd.js should start with the UMD IIFE wrapper")
+	}
+	if n := rec.Body.Len(); n < 100_000 {
+		t.Errorf("chart.umd.js len = %d, want at least 100000 (suspiciously small bundle)", n)
 	}
 }
 
@@ -384,17 +417,17 @@ func TestWorkerInfo_JSON(t *testing.T) {
 
 func TestTaskInfo_JSON(t *testing.T) {
 	task := &TaskInfo{
-		ID:           "task-1",
-		BuildType:    "cpp",
-		BuildID:      "build-1",
-		Status:       "completed",
-		WorkerID:     "worker-1",
-		StartedAt:    1234567890,
-		CompletedAt:  1234567895,
-		DurationMs:   5000,
-		ExitCode:     0,
-		FromCache:    true,
-		ErrorMessage: "",
+		ID:            "task-1",
+		BuildType:     "cpp",
+		BuildID:       "build-1",
+		Status:        "completed",
+		WorkerID:      "worker-1",
+		StartedAtMs:   1234567890,
+		CompletedAtMs: 1234567895,
+		DurationMs:    5000,
+		ExitCode:      0,
+		FromCache:     true,
+		ErrorMessage:  "",
 	}
 
 	data, err := json.Marshal(task)
@@ -423,16 +456,16 @@ func TestTaskInfo_JSON(t *testing.T) {
 
 func TestTaskInfo_JSON_WithError(t *testing.T) {
 	task := &TaskInfo{
-		ID:           "task-2",
-		BuildType:    "rust",
-		Status:       "failed",
-		WorkerID:     "worker-2",
-		StartedAt:    1234567890,
-		CompletedAt:  1234567900,
-		DurationMs:   10000,
-		ExitCode:     1,
-		FromCache:    false,
-		ErrorMessage: "compilation error",
+		ID:            "task-2",
+		BuildType:     "rust",
+		Status:        "failed",
+		WorkerID:      "worker-2",
+		StartedAtMs:   1234567890,
+		CompletedAtMs: 1234567900,
+		DurationMs:    10000,
+		ExitCode:      1,
+		FromCache:     false,
+		ErrorMessage:  "compilation error",
 	}
 
 	data, err := json.Marshal(task)
@@ -901,22 +934,22 @@ func TestServer_HandleTasks(t *testing.T) {
 	defer s.hub.Stop()
 
 	s.hub.BroadcastTaskStarted(&TaskInfo{
-		ID:        "task-flutter-1",
-		BuildType: "flutter",
-		Status:    "running",
-		WorkerID:  "worker-1",
-		StartedAt: 1234567890,
+		ID:          "task-flutter-1",
+		BuildType:   "flutter",
+		Status:      "running",
+		WorkerID:    "worker-1",
+		StartedAtMs: 1234567890,
 	})
 	s.hub.BroadcastTaskCompleted(&TaskInfo{
-		ID:          "task-flutter-2",
-		BuildType:   "flutter",
-		Status:      "completed",
-		WorkerID:    "worker-1",
-		StartedAt:   1234567891,
-		CompletedAt: 1234567900,
-		DurationMs:  9000,
-		ExitCode:    0,
-		FromCache:   false,
+		ID:            "task-flutter-2",
+		BuildType:     "flutter",
+		Status:        "completed",
+		WorkerID:      "worker-1",
+		StartedAtMs:   1234567891,
+		CompletedAtMs: 1234567900,
+		DurationMs:    9000,
+		ExitCode:      0,
+		FromCache:     false,
 	})
 
 	time.Sleep(20 * time.Millisecond)
@@ -972,22 +1005,22 @@ func TestHub_GetTasks(t *testing.T) {
 	defer hub.Stop()
 
 	hub.BroadcastTaskStarted(&TaskInfo{
-		ID:        "task-cpp-1",
-		BuildType: "cpp",
-		Status:    "running",
-		WorkerID:  "w1",
-		StartedAt: 1000000,
+		ID:          "task-cpp-1",
+		BuildType:   "cpp",
+		Status:      "running",
+		WorkerID:    "w1",
+		StartedAtMs: 1000000,
 	})
 	hub.BroadcastTaskCompleted(&TaskInfo{
-		ID:          "task-flutter-1",
-		BuildType:   "flutter",
-		Status:      "completed",
-		WorkerID:    "w2",
-		StartedAt:   1000001,
-		CompletedAt: 1000010,
-		DurationMs:  9000,
-		ExitCode:    0,
-		FromCache:   false,
+		ID:            "task-flutter-1",
+		BuildType:     "flutter",
+		Status:        "completed",
+		WorkerID:      "w2",
+		StartedAtMs:   1000001,
+		CompletedAtMs: 1000010,
+		DurationMs:    9000,
+		ExitCode:      0,
+		FromCache:     false,
 	})
 	hub.BroadcastStats(&Stats{TotalTasks: 10})
 
@@ -1018,20 +1051,20 @@ func TestHub_GetTasks(t *testing.T) {
 func TestHub_GetTasks_DeduplicatesLatestState(t *testing.T) {
 	hub := NewHub()
 	hub.BroadcastTaskStarted(&TaskInfo{
-		ID:        "task-1",
-		BuildID:   "build-1",
-		BuildType: "cpp",
-		Status:    "running",
-		StartedAt: 100,
-	})
-	hub.BroadcastTaskCompleted(&TaskInfo{
 		ID:          "task-1",
 		BuildID:     "build-1",
 		BuildType:   "cpp",
-		Status:      "completed",
-		StartedAt:   100,
-		CompletedAt: 125,
-		DurationMs:  25,
+		Status:      "running",
+		StartedAtMs: 100,
+	})
+	hub.BroadcastTaskCompleted(&TaskInfo{
+		ID:            "task-1",
+		BuildID:       "build-1",
+		BuildType:     "cpp",
+		Status:        "completed",
+		StartedAtMs:   100,
+		CompletedAtMs: 125,
+		DurationMs:    25,
 	})
 
 	tasks := hub.GetTasks()
@@ -1044,43 +1077,43 @@ func TestHub_GetTasks_DeduplicatesLatestState(t *testing.T) {
 	if tasks[0].Status != "completed" {
 		t.Errorf("GetTasks Status = %q, want completed", tasks[0].Status)
 	}
-	if tasks[0].CompletedAt != 125 {
-		t.Errorf("GetTasks CompletedAt = %d, want 125", tasks[0].CompletedAt)
+	if tasks[0].CompletedAtMs != 125 {
+		t.Errorf("GetTasks CompletedAt = %d, want 125", tasks[0].CompletedAtMs)
 	}
 }
 
 func TestHub_GetBuilds_Grouping(t *testing.T) {
 	hub := NewHub()
 	hub.BroadcastTaskCompleted(&TaskInfo{
-		ID:          "old-completed",
-		BuildID:     "build-old",
-		BuildType:   "cpp",
-		Status:      "completed",
-		StartedAt:   10,
-		CompletedAt: 20,
-		FromCache:   true,
+		ID:            "old-completed",
+		BuildID:       "build-old",
+		BuildType:     "cpp",
+		Status:        "completed",
+		StartedAtMs:   10,
+		CompletedAtMs: 20,
+		FromCache:     true,
 	})
 	hub.BroadcastTaskStarted(&TaskInfo{
-		ID:        "new-running",
-		BuildID:   "build-new",
-		BuildType: "cpp",
-		Status:    "running",
-		StartedAt: 30,
-	})
-	hub.BroadcastTaskCompleted(&TaskInfo{
-		ID:          "new-failed",
+		ID:          "new-running",
 		BuildID:     "build-new",
 		BuildType:   "cpp",
-		Status:      "failed",
-		StartedAt:   35,
-		CompletedAt: 50,
+		Status:      "running",
+		StartedAtMs: 30,
 	})
 	hub.BroadcastTaskCompleted(&TaskInfo{
-		ID:          "ungrouped",
-		BuildType:   "cpp",
-		Status:      "completed",
-		StartedAt:   60,
-		CompletedAt: 70,
+		ID:            "new-failed",
+		BuildID:       "build-new",
+		BuildType:     "cpp",
+		Status:        "failed",
+		StartedAtMs:   35,
+		CompletedAtMs: 50,
+	})
+	hub.BroadcastTaskCompleted(&TaskInfo{
+		ID:            "ungrouped",
+		BuildType:     "cpp",
+		Status:        "completed",
+		StartedAtMs:   60,
+		CompletedAtMs: 70,
 	})
 
 	builds := hub.GetBuilds()
@@ -1105,11 +1138,11 @@ func TestHub_GetBuilds_Grouping(t *testing.T) {
 	if builds[0].CompletedTasks != 0 {
 		t.Errorf("build-new CompletedTasks = %d, want 0", builds[0].CompletedTasks)
 	}
-	if builds[0].FirstTaskAt != 30 {
-		t.Errorf("build-new FirstTaskAt = %d, want 30", builds[0].FirstTaskAt)
+	if builds[0].FirstTaskAtMs != 30 {
+		t.Errorf("build-new FirstTaskAt = %d, want 30", builds[0].FirstTaskAtMs)
 	}
-	if builds[0].LastTaskAt != 50 {
-		t.Errorf("build-new LastTaskAt = %d, want 50", builds[0].LastTaskAt)
+	if builds[0].LastTaskAtMs != 50 {
+		t.Errorf("build-new LastTaskAt = %d, want 50", builds[0].LastTaskAtMs)
 	}
 
 	if builds[1].ID != "build-old" {
@@ -1154,11 +1187,11 @@ func TestHub_GetBuilds_EvictsOldestBuild(t *testing.T) {
 func TestServer_HandleBuilds(t *testing.T) {
 	s := New(DefaultConfig(), &mockProvider{})
 	s.hub.BroadcastTaskStarted(&TaskInfo{
-		ID:        "task-1",
-		BuildID:   "build-1",
-		BuildType: "cpp",
-		Status:    "running",
-		StartedAt: 100,
+		ID:          "task-1",
+		BuildID:     "build-1",
+		BuildType:   "cpp",
+		Status:      "running",
+		StartedAtMs: 100,
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/builds", nil)
