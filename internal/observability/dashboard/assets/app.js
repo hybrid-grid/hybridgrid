@@ -13,6 +13,13 @@ function dashboard() {
         maxReconnectAttempts: 10,
         lastBuildFetchAt: 0,
         buildFetchTimer: null,
+        route: 'home',
+        detailId: '',
+        detail: null,
+        detailMissing: false,
+        detailLoading: false,
+        lastDetailFetchAt: 0,
+        detailFetchTimer: null,
 
         get cacheHitRate() {
             const hits = this.stats.cache_hits || 0;
@@ -22,6 +29,8 @@ function dashboard() {
         },
 
         init() {
+            window.addEventListener('hashchange', () => this.handleRoute());
+            this.handleRoute();
             this.fetchInitialData();
             this.connectWebSocket();
         },
@@ -71,6 +80,58 @@ function dashboard() {
                 this.buildFetchTimer = setTimeout(() => {
                     this.buildFetchTimer = null;
                     this.fetchBuilds();
+                }, remaining);
+            }
+        },
+
+        handleRoute() {
+            const match = /^#\/build\/(.+)$/.exec(window.location.hash);
+            if (match) {
+                const id = decodeURIComponent(match[1]);
+                if (id !== this.detailId) {
+                    this.detailId = id;
+                    this.detail = null;
+                    this.detailMissing = false;
+                    this.fetchDetail();
+                }
+                this.route = 'build';
+            } else {
+                this.route = 'home';
+            }
+        },
+
+        async fetchDetail() {
+            if (!this.detailId) return;
+            this.detailLoading = true;
+            try {
+                const response = await fetch(`/api/v1/builds/${encodeURIComponent(this.detailId)}`);
+                if (response.status === 404) {
+                    this.detail = null;
+                    this.detailMissing = true;
+                } else if (response.ok) {
+                    this.detail = await response.json();
+                    this.detailMissing = false;
+                }
+            } catch (err) {
+                console.error('Failed to fetch build detail:', err);
+            } finally {
+                this.detailLoading = false;
+                this.lastDetailFetchAt = Date.now();
+            }
+        },
+
+        refreshDetailThrottled() {
+            if (this.route !== 'build') return;
+            const interval = 2000;
+            const remaining = interval - (Date.now() - this.lastDetailFetchAt);
+            if (remaining <= 0) {
+                this.fetchDetail();
+                return;
+            }
+            if (!this.detailFetchTimer) {
+                this.detailFetchTimer = setTimeout(() => {
+                    this.detailFetchTimer = null;
+                    this.fetchDetail();
                 }, remaining);
             }
         },
@@ -132,6 +193,7 @@ function dashboard() {
                     this.recentTasks.unshift({ ...message.data, status: 'running' });
                     this.events.push(message);
                     this.refreshBuildsThrottled();
+                    if (message.data.build_id === this.detailId) this.refreshDetailThrottled();
                     break;
                 case 'task_completed': {
                     const index = this.recentTasks.findIndex((task) => task.id === message.data.id);
@@ -140,6 +202,7 @@ function dashboard() {
                     else this.recentTasks.unshift({ ...message.data, status });
                     this.events.push(message);
                     this.refreshBuildsThrottled();
+                    if (message.data.build_id === this.detailId) this.refreshDetailThrottled();
                     break;
                 }
             }
@@ -162,6 +225,18 @@ function dashboard() {
         workerSlots(worker) {
             const active = this.recentTasks.filter((task) => task.worker_id === worker.id && task.status === 'running');
             return Array.from({ length: Math.max(0, worker.max_parallel_tasks || 0) }, (_, index) => active[index] || null);
+        },
+
+        taskBall(task) {
+            if (task.status === 'running') return 'running';
+            if (task.status === 'failed' || (task.exit_code !== undefined && task.exit_code !== 0)) return 'failed';
+            if (task.status === 'pending' || task.status === 'queued') return 'queued';
+            return 'success';
+        },
+
+        formatMs(ms) {
+            if (ms === null || ms === undefined) return '—';
+            return `${ms} ms`;
         },
 
         capability(worker) {
