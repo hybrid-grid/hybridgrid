@@ -78,7 +78,7 @@
                   <p class="worker-capability" x-text="capability(worker)"></p>
                   <div class="executor-slots" aria-label="Executor slots">
                     <template x-for="(task, index) in workerSlots(worker)" :key="index">
-                      <span class="executor-slot" :class="{ busy: task }"><span x-show="task" class="executor-task" :title="task && task.id" x-text="task ? task.id : 'idle'"></span><span x-show="!task">idle</span></span>
+                      <span class="executor-slot" :class="{ busy: task }"><span class="executor-task" :title="task && task.id" x-text="task ? task.id : 'idle'"></span></span>
                     </template>
                   </div>
                 </article>
