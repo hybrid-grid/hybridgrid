@@ -16,6 +16,8 @@ const (
 	// MaxTaskIDLength is the maximum length of task ID
 	MaxTaskIDLength = 128
 
+	// MaxBuildIDLength is the maximum length of a build-session ID.
+	MaxBuildIDLength = 128
 	// MaxCompilerArgsCount is the maximum number of compiler arguments
 	MaxCompilerArgsCount = 256
 
@@ -26,6 +28,9 @@ const (
 var (
 	// taskIDRegex validates task IDs (alphanumeric, dash, underscore)
 	taskIDRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+	// buildIDRegex validates build-session IDs (alphanumeric, dot, dash, underscore).
+	buildIDRegex = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 )
 
 // Error represents a validation error.
@@ -36,6 +41,18 @@ type Error struct {
 
 func (e *Error) Error() string {
 	return fmt.Sprintf("%s: %s", e.Field, e.Message)
+}
+
+// NormalizeBuildID returns id when it is a valid build-session ID, or an empty
+// string otherwise. Invalid IDs are discarded rather than returned as errors
+// because a malformed grouping key must not fail the compile itself; the
+// coordinator calls this at handler entry and threads the result into
+// TaskEvent and TaskLogRecord.
+func NormalizeBuildID(id string) string {
+	if len(id) > MaxBuildIDLength || !buildIDRegex.MatchString(id) {
+		return ""
+	}
+	return id
 }
 
 // MultiError collects multiple validation errors.
