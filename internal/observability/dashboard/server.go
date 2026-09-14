@@ -20,6 +20,7 @@ var assetsFS embed.FS
 // Config holds dashboard server configuration.
 type Config struct {
 	Port            int
+	AuthToken       string
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
 	ShutdownTimeout time.Duration
@@ -75,8 +76,8 @@ func New(cfg Config, provider StatsProvider) *Server {
 	// Prometheus metrics endpoint
 	mux.Handle("/metrics", promhttp.Handler())
 
-	// Log level endpoint
-	mux.Handle("/log-level", logging.NewLogLevelHandler())
+	// Log level endpoint (gated by the coordinator auth token)
+	mux.Handle("/log-level", logging.NewLogLevelHandler(cfg.AuthToken))
 
 	// API endpoints
 	mux.HandleFunc("/api/v1/stats", s.handleStats)

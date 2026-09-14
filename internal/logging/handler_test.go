@@ -3,8 +3,10 @@ package logging
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -14,7 +16,7 @@ func TestLogLevelHandler_GET(t *testing.T) {
 	// Set a known level for testing
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 
-	handler := NewLogLevelHandler()
+	handler := NewLogLevelHandler("")
 	req := httptest.NewRequest(http.MethodGet, "/log-level", nil)
 	w := httptest.NewRecorder()
 
@@ -42,7 +44,7 @@ func TestLogLevelHandler_PUT_ValidLevel(t *testing.T) {
 	// Start with a known level
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 
-	handler := NewLogLevelHandler()
+	handler := NewLogLevelHandler("")
 
 	body := LogLevelRequest{Level: "debug"}
 	bodyBytes, _ := json.Marshal(body)
@@ -79,7 +81,7 @@ func TestLogLevelHandler_POST_ValidLevel(t *testing.T) {
 	// Start with a known level
 	zerolog.SetGlobalLevel(zerolog.WarnLevel)
 
-	handler := NewLogLevelHandler()
+	handler := NewLogLevelHandler("")
 
 	body := LogLevelRequest{Level: "error"}
 	bodyBytes, _ := json.Marshal(body)
@@ -115,7 +117,7 @@ func TestLogLevelHandler_POST_ValidLevel(t *testing.T) {
 func TestLogLevelHandler_InvalidLevel(t *testing.T) {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 
-	handler := NewLogLevelHandler()
+	handler := NewLogLevelHandler("")
 
 	body := LogLevelRequest{Level: "invalid"}
 	bodyBytes, _ := json.Marshal(body)
@@ -147,7 +149,7 @@ func TestLogLevelHandler_InvalidLevel(t *testing.T) {
 func TestLogLevelHandler_InvalidJSON(t *testing.T) {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 
-	handler := NewLogLevelHandler()
+	handler := NewLogLevelHandler("")
 
 	req := httptest.NewRequest(http.MethodPut, "/log-level", bytes.NewReader([]byte("invalid json")))
 	req.Header.Set("Content-Type", "application/json")
@@ -170,7 +172,7 @@ func TestLogLevelHandler_InvalidJSON(t *testing.T) {
 }
 
 func TestLogLevelHandler_AllValidLevels(t *testing.T) {
-	handler := NewLogLevelHandler()
+	handler := NewLogLevelHandler("")
 
 	levels := []string{"trace", "debug", "info", "warn", "error", "fatal", "panic"}
 
@@ -201,7 +203,7 @@ func TestLogLevelHandler_AllValidLevels(t *testing.T) {
 }
 
 func TestLogLevelHandler_MethodNotAllowed(t *testing.T) {
-	handler := NewLogLevelHandler()
+	handler := NewLogLevelHandler("")
 
 	req := httptest.NewRequest(http.MethodDelete, "/log-level", nil)
 	w := httptest.NewRecorder()
@@ -223,7 +225,7 @@ func TestLogLevelHandler_MethodNotAllowed(t *testing.T) {
 }
 
 func TestLogLevelHandler_ContentTypeHeader(t *testing.T) {
-	handler := NewLogLevelHandler()
+	handler := NewLogLevelHandler("")
 
 	req := httptest.NewRequest(http.MethodGet, "/log-level", nil)
 	w := httptest.NewRecorder()
@@ -233,5 +235,63 @@ func TestLogLevelHandler_ContentTypeHeader(t *testing.T) {
 	contentType := w.Header().Get("Content-Type")
 	if contentType != "application/json" {
 		t.Errorf("expected Content-Type 'application/json', got %q", contentType)
+	}
+}
+
+// --- Authentication gating ---
+
+const testToken = "0123456789abcdef0123456789abcdef" // 32 chars: auth.MinTokenLength
+
+func TestLogLevelHandler_AuthGating(t *testing.T) {
+	previous := zerolog.GlobalLevel()
+	t.Cleanup(func() { zerolog.SetGlobalLevel(previous) })
+
+	tests := []struct {
+		name     string
+		method   string
+		authHdr  string
+		body     string
+		wantCode int
+	}{
+		{name: "get without token is rejected", method: http.MethodGet, authHdr: "", wantCode: http.StatusUnauthorized},
+		{name: "get with wrong token is rejected", method: http.MethodGet, authHdr: "Bearer " + strings.Repeat("f", 32), wantCode: http.StatusUnauthorized},
+		{name: "get with short token is rejected", method: http.MethodGet, authHdr: "Bearer short", wantCode: http.StatusUnauthorized},
+		{name: "get with correct token passes", method: http.MethodGet, authHdr: "Bearer " + testToken, wantCode: http.StatusOK},
+		{name: "get with correct raw token (no Bearer prefix) passes", method: http.MethodGet, authHdr: testToken, wantCode: http.StatusOK},
+		{name: "set with correct token passes", method: http.MethodPut, authHdr: "Bearer " + testToken, body: `{"level":"debug"}`, wantCode: http.StatusOK},
+		{name: "set without token is rejected", method: http.MethodPut, authHdr: "", body: `{"level":"debug"}`, wantCode: http.StatusUnauthorized},
+		{name: "invalid level still validated after auth", method: http.MethodPut, authHdr: "Bearer " + testToken, body: `{"level":"nope"}`, wantCode: http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := NewLogLevelHandler(testToken)
+			var body io.Reader
+			if tt.body != "" {
+				body = strings.NewReader(tt.body)
+			}
+			req := httptest.NewRequest(tt.method, "/log-level", body)
+			if tt.authHdr != "" {
+				req.Header.Set("Authorization", tt.authHdr)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != tt.wantCode {
+				t.Errorf("status = %d, want %d; body: %s", rec.Code, tt.wantCode, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestLogLevelHandler_NoTokenConfiguredStaysOpen(t *testing.T) {
+	previous := zerolog.GlobalLevel()
+	t.Cleanup(func() { zerolog.SetGlobalLevel(previous) })
+
+	handler := NewLogLevelHandler("")
+	req := httptest.NewRequest(http.MethodGet, "/log-level", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("unconfigured handler must stay open: status = %d, want %d", rec.Code, http.StatusOK)
 	}
 }

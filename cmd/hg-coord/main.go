@@ -222,6 +222,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			// Start HTTP dashboard server
 			dashCfg := dashboard.DefaultConfig()
 			dashCfg.Port = httpPort
+			dashCfg.AuthToken = token
 			dashSrv := dashboard.New(dashCfg, srv.NewStatsProvider())
 
 			// Wire up event notifications from coordinator to dashboard
