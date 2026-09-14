@@ -164,10 +164,20 @@ function dashboard() {
             for (const id of laneIds) {
                 const rows = (byWorker.get(id) || []).slice().sort((a, b) => a.started - b.started);
                 // Greedy slot assignment: each task lands in the first
-                // sub-row whose previous task ended at or before its start.
+                // sub-row whose previous task ended at or before its
+                // queue entry (queuedAt, not started). Reserving from
+                // queuedAt gives a queued task its own sub-row for the
+                // wait: slotting by started lets the previous task's
+                // compile bar share the row with — and paint over —
+                // this task's queue segment, hiding exactly the wait
+                // the backpressure visualization exists to show. Tasks
+                // with no queue time are unaffected (queuedAt ==
+                // started). Sub-row depth therefore counts queue
+                // reservations too; the pane's peak-concurrency figure
+                // is computed from run intervals only.
                 const slotEnds = [];
                 for (const row of rows) {
-                    let slot = slotEnds.findIndex((end) => end <= row.started);
+                    let slot = slotEnds.findIndex((end) => end <= row.queuedAt);
                     if (slot === -1) {
                         slot = slotEnds.length;
                         slotEnds.push(0);
