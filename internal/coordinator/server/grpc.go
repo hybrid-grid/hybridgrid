@@ -26,6 +26,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 	hgtls "github.com/h3nr1-d14z/hybridgrid/internal/security/tls"
+	"github.com/h3nr1-d14z/hybridgrid/internal/security/validation"
 )
 
 const maxGRPCMessageSize = 512 * 1024 * 1024
@@ -300,6 +301,7 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 type TaskEvent struct {
 	ID           string
 	BuildType    string
+	BuildID      string
 	Status       string
 	WorkerID     string
 	StartedAt    int64
@@ -595,6 +597,7 @@ func (s *Server) Handshake(ctx context.Context, req *pb.HandshakeRequest) (*pb.H
 
 // Compile handles compilation requests by forwarding to workers.
 func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.CompileResponse, error) {
+	buildID := validation.NormalizeBuildID(req.BuildId)
 	start := time.Now()
 
 	// Start tracing span for the coordinator compile flow
@@ -753,6 +756,7 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 			s.eventNotifier.NotifyTaskStarted(&TaskEvent{
 				ID:        req.TaskId,
 				BuildType: "cpp",
+				BuildID:   buildID,
 				Status:    "running",
 				WorkerID:  worker.ID,
 				StartedAt: taskStartTime.Unix(),
@@ -861,6 +865,7 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 			Event:                       "task_completed",
 			TaskID:                      req.TaskId,
 			BuildType:                   "cpp",
+			BuildID:                     buildID,
 			Scheduler:                   s.config.SchedulerType,
 			WorkerID:                    worker.ID,
 			WorkerArch:                  workerNativeArch,
@@ -901,6 +906,7 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 		event := &TaskEvent{
 			ID:          req.TaskId,
 			BuildType:   "cpp",
+			BuildID:     buildID,
 			WorkerID:    worker.ID,
 			StartedAt:   taskStartTime.Unix(),
 			CompletedAt: taskCompletedTime.Unix(),
@@ -968,16 +974,17 @@ func (s *Server) forwardCompile(ctx context.Context, worker *registry.WorkerInfo
 
 // Build handles build requests.
 func (s *Server) Build(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+	buildID := validation.NormalizeBuildID(req.BuildId)
 	if req.TaskId == "" {
 		return nil, status.Error(codes.InvalidArgument, "task_id required")
 	}
 
 	if req.GetFlutterConfig() != nil {
-		return s.handleFlutterBuild(ctx, req)
+		return s.handleFlutterBuild(ctx, req, buildID)
 	}
 
 	if req.GetUnityConfig() != nil {
-		return s.handleUnityBuild(ctx, req)
+		return s.handleUnityBuild(ctx, req, buildID)
 	}
 
 	return &pb.BuildResponse{
@@ -987,7 +994,7 @@ func (s *Server) Build(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResp
 	}, nil
 }
 
-func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest, buildID string) (*pb.BuildResponse, error) {
 	start := time.Now()
 	m := metrics.Default()
 
@@ -1007,6 +1014,7 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest) (
 			s.eventNotifier.NotifyTaskStarted(&TaskEvent{
 				ID:        req.TaskId,
 				BuildType: "flutter",
+				BuildID:   buildID,
 				Status:    "running",
 				WorkerID:  "",
 				StartedAt: taskStart,
@@ -1014,6 +1022,7 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest) (
 			s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
 				ID:           req.TaskId,
 				BuildType:    "flutter",
+				BuildID:      buildID,
 				Status:       "completed",
 				WorkerID:     "",
 				StartedAt:    taskStart,
@@ -1056,6 +1065,7 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest) (
 			s.eventNotifier.NotifyTaskStarted(&TaskEvent{
 				ID:        req.TaskId,
 				BuildType: "flutter",
+				BuildID:   buildID,
 				Status:    "running",
 				WorkerID:  "",
 				StartedAt: taskStart,
@@ -1063,6 +1073,7 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest) (
 			s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
 				ID:           req.TaskId,
 				BuildType:    "flutter",
+				BuildID:      buildID,
 				Status:       "failed",
 				WorkerID:     "",
 				StartedAt:    taskStart,
@@ -1114,6 +1125,7 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest) (
 		s.eventNotifier.NotifyTaskStarted(&TaskEvent{
 			ID:        req.TaskId,
 			BuildType: "flutter",
+			BuildID:   buildID,
 			Status:    "running",
 			WorkerID:  worker.ID,
 			StartedAt: taskStartTime.Unix(),
@@ -1123,6 +1135,7 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest) (
 	client := pb.NewBuildServiceClient(conn)
 	buildResp, err := client.Build(ctx, &pb.BuildRequest{
 		TaskId:         req.TaskId,
+		BuildId:        req.BuildId,
 		SourceHash:     req.SourceHash,
 		SourceArchive:  req.SourceArchive,
 		BuildType:      req.BuildType,
@@ -1147,6 +1160,7 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest) (
 		event := &TaskEvent{
 			ID:          req.TaskId,
 			BuildType:   "flutter",
+			BuildID:     buildID,
 			WorkerID:    worker.ID,
 			StartedAt:   taskStartTime.Unix(),
 			CompletedAt: taskCompletedTime.Unix(),
@@ -1188,7 +1202,7 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest) (
 	return buildResp, nil
 }
 
-func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, buildID string) (*pb.BuildResponse, error) {
 	start := time.Now()
 	m := metrics.Default()
 
@@ -1208,6 +1222,7 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest) (*p
 			s.eventNotifier.NotifyTaskStarted(&TaskEvent{
 				ID:        req.TaskId,
 				BuildType: "unity",
+				BuildID:   buildID,
 				Status:    "running",
 				WorkerID:  "",
 				StartedAt: taskStart,
@@ -1215,6 +1230,7 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest) (*p
 			s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
 				ID:           req.TaskId,
 				BuildType:    "unity",
+				BuildID:      buildID,
 				Status:       "completed",
 				WorkerID:     "",
 				StartedAt:    taskStart,
@@ -1257,6 +1273,7 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest) (*p
 			s.eventNotifier.NotifyTaskStarted(&TaskEvent{
 				ID:        req.TaskId,
 				BuildType: "unity",
+				BuildID:   buildID,
 				Status:    "running",
 				WorkerID:  "",
 				StartedAt: taskStart,
@@ -1264,6 +1281,7 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest) (*p
 			s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
 				ID:           req.TaskId,
 				BuildType:    "unity",
+				BuildID:      buildID,
 				Status:       "failed",
 				WorkerID:     "",
 				StartedAt:    taskStart,
@@ -1315,6 +1333,7 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest) (*p
 		s.eventNotifier.NotifyTaskStarted(&TaskEvent{
 			ID:        req.TaskId,
 			BuildType: "unity",
+			BuildID:   buildID,
 			Status:    "running",
 			WorkerID:  worker.ID,
 			StartedAt: taskStartTime.Unix(),
@@ -1324,6 +1343,7 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest) (*p
 	client := pb.NewBuildServiceClient(conn)
 	buildResp, err := client.Build(ctx, &pb.BuildRequest{
 		TaskId:         req.TaskId,
+		BuildId:        req.BuildId,
 		SourceHash:     req.SourceHash,
 		SourceArchive:  req.SourceArchive,
 		BuildType:      req.BuildType,
@@ -1348,6 +1368,7 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest) (*p
 		event := &TaskEvent{
 			ID:          req.TaskId,
 			BuildType:   "unity",
+			BuildID:     buildID,
 			WorkerID:    worker.ID,
 			StartedAt:   taskStartTime.Unix(),
 			CompletedAt: taskCompletedTime.Unix(),

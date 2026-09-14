@@ -65,6 +65,7 @@ type WorkerInfo struct {
 type TaskInfo struct {
 	ID           string `json:"id"`
 	BuildType    string `json:"build_type"`
+	BuildID      string `json:"build_id"`
 	Status       string `json:"status"`
 	WorkerID     string `json:"worker_id"`
 	StartedAt    int64  `json:"started_at"`
@@ -73,6 +74,21 @@ type TaskInfo struct {
 	ExitCode     int32  `json:"exit_code,omitempty"`
 	FromCache    bool   `json:"from_cache"`
 	ErrorMessage string `json:"error_message,omitempty"`
+}
+
+// BuildInfo represents an aggregate logical build for the dashboard.
+type BuildInfo struct {
+	ID             string `json:"id"`
+	BuildType      string `json:"build_type"`
+	Status         string `json:"status"`
+	TotalTasks     int    `json:"total_tasks"`
+	CompletedTasks int    `json:"completed_tasks"`
+	FailedTasks    int    `json:"failed_tasks"`
+	RunningTasks   int    `json:"running_tasks"`
+	FromCacheCount int    `json:"from_cache_count"`
+	FirstTaskAt    int64  `json:"first_task_at"`
+	LastTaskAt     int64  `json:"last_task_at"`
+	Truncated      bool   `json:"truncated"`
 }
 
 // handleStats returns cluster statistics.
@@ -147,6 +163,23 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"tasks":     tasks,
 		"count":     len(tasks),
+		"timestamp": time.Now().Unix(),
+	})
+}
+
+// handleBuilds returns logical build aggregates.
+func (s *Server) handleBuilds(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	builds := s.hub.GetBuilds()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"builds":    builds,
+		"count":     len(builds),
 		"timestamp": time.Now().Unix(),
 	})
 }

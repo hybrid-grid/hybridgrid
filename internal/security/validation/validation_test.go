@@ -8,6 +8,32 @@ import (
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 )
 
+func TestNormalizeBuildID_Behavior(t *testing.T) {
+	maxLengthID := strings.Repeat("a", MaxBuildIDLength)
+	tooLongID := strings.Repeat("a", MaxBuildIDLength+1)
+	tests := []struct {
+		name string
+		id   string
+		want string
+	}{
+		{name: "empty", id: "", want: ""},
+		{name: "dots and version", id: "cpython-rel-3.14.0", want: "cpython-rel-3.14.0"},
+		{name: "maximum length", id: maxLengthID, want: maxLengthID},
+		{name: "space", id: "build 123", want: ""},
+		{name: "slash", id: "build/123", want: ""},
+		{name: "unicode", id: "build-你好", want: ""},
+		{name: "over maximum length", id: tooLongID, want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NormalizeBuildID(tt.id); got != tt.want {
+				t.Errorf("NormalizeBuildID(%q) = %q, want %q", tt.id, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateBuildRequest_Valid(t *testing.T) {
 	req := &pb.BuildRequest{
 		TaskId:         "build-123",

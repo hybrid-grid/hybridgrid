@@ -76,6 +76,7 @@ func New(cfg Config, provider StatsProvider) *Server {
 	mux.HandleFunc("/api/v1/workers", s.handleWorkers)
 	mux.HandleFunc("/api/v1/events", s.handleEvents)
 	mux.HandleFunc("/api/v1/tasks", s.handleTasks)
+	mux.HandleFunc("/api/v1/builds", s.handleBuilds)
 
 	// WebSocket endpoint
 	mux.HandleFunc("/ws", s.handleWebSocket)
@@ -128,19 +129,21 @@ type EventNotifierFunc struct {
 }
 
 // CreateEventNotifier creates event notifier callbacks for the coordinator.
-func (s *Server) CreateEventNotifier() (onStart func(id, buildType, status, workerID string, startedAt int64), onComplete func(id, buildType, status, workerID string, startedAt, completedAt, durationMs int64, exitCode int32, errorMsg string)) {
-	onStart = func(id, buildType, status, workerID string, startedAt int64) {
+func (s *Server) CreateEventNotifier() (onStart func(id, buildID, buildType, status, workerID string, startedAt int64), onComplete func(id, buildID, buildType, status, workerID string, startedAt, completedAt, durationMs int64, exitCode int32, errorMsg string)) {
+	onStart = func(id, buildID, buildType, status, workerID string, startedAt int64) {
 		s.hub.BroadcastTaskStarted(&TaskInfo{
 			ID:        id,
+			BuildID:   buildID,
 			BuildType: buildType,
 			Status:    status,
 			WorkerID:  workerID,
 			StartedAt: startedAt,
 		})
 	}
-	onComplete = func(id, buildType, status, workerID string, startedAt, completedAt, durationMs int64, exitCode int32, errorMsg string) {
+	onComplete = func(id, buildID, buildType, status, workerID string, startedAt, completedAt, durationMs int64, exitCode int32, errorMsg string) {
 		s.hub.BroadcastTaskCompleted(&TaskInfo{
 			ID:           id,
+			BuildID:      buildID,
 			BuildType:    buildType,
 			Status:       status,
 			WorkerID:     workerID,

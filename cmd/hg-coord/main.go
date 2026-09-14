@@ -304,18 +304,18 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 
 // eventNotifierWrapper adapts dashboard callbacks to coordinator's EventNotifier interface.
 type eventNotifierWrapper struct {
-	onStart    func(id, buildType, status, workerID string, startedAt int64)
-	onComplete func(id, buildType, status, workerID string, startedAt, completedAt, durationMs int64, exitCode int32, errorMsg string)
+	onStart    func(id, buildID, buildType, status, workerID string, startedAt int64)
+	onComplete func(id, buildID, buildType, status, workerID string, startedAt, completedAt, durationMs int64, exitCode int32, errorMsg string)
 }
 
 func (w *eventNotifierWrapper) NotifyTaskStarted(event *coordserver.TaskEvent) {
 	if w.onStart != nil {
-		w.onStart(event.ID, event.BuildType, event.Status, event.WorkerID, event.StartedAt)
+		w.onStart(event.ID, event.BuildID, event.BuildType, event.Status, event.WorkerID, event.StartedAt)
 	}
 }
 
 func (w *eventNotifierWrapper) NotifyTaskCompleted(event *coordserver.TaskEvent) {
 	if w.onComplete != nil {
-		w.onComplete(event.ID, event.BuildType, event.Status, event.WorkerID, event.StartedAt, event.CompletedAt, event.DurationMs, event.ExitCode, event.ErrorMessage)
+		w.onComplete(event.ID, event.BuildID, event.BuildType, event.Status, event.WorkerID, event.StartedAt, event.CompletedAt, event.DurationMs, event.ExitCode, event.ErrorMessage)
 	}
 }

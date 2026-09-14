@@ -386,6 +386,7 @@ func TestTaskInfo_JSON(t *testing.T) {
 	task := &TaskInfo{
 		ID:           "task-1",
 		BuildType:    "cpp",
+		BuildID:      "build-1",
 		Status:       "completed",
 		WorkerID:     "worker-1",
 		StartedAt:    1234567890,
@@ -414,6 +415,9 @@ func TestTaskInfo_JSON(t *testing.T) {
 	}
 	if decoded.FromCache != task.FromCache {
 		t.Errorf("FromCache = %v, want %v", decoded.FromCache, task.FromCache)
+	}
+	if decoded.BuildID != task.BuildID {
+		t.Errorf("BuildID = %s, want %s", decoded.BuildID, task.BuildID)
 	}
 }
 
@@ -1008,6 +1012,210 @@ func TestHub_GetTasks(t *testing.T) {
 	}
 	if !hasFlutter {
 		t.Error("Expected at least one Flutter task")
+	}
+}
+
+func TestHub_GetTasks_DeduplicatesLatestState(t *testing.T) {
+	hub := NewHub()
+	hub.BroadcastTaskStarted(&TaskInfo{
+		ID:        "task-1",
+		BuildID:   "build-1",
+		BuildType: "cpp",
+		Status:    "running",
+		StartedAt: 100,
+	})
+	hub.BroadcastTaskCompleted(&TaskInfo{
+		ID:          "task-1",
+		BuildID:     "build-1",
+		BuildType:   "cpp",
+		Status:      "completed",
+		StartedAt:   100,
+		CompletedAt: 125,
+		DurationMs:  25,
+	})
+
+	tasks := hub.GetTasks()
+	if len(tasks) != 1 {
+		t.Fatalf("GetTasks len = %d, want 1", len(tasks))
+	}
+	if tasks[0].ID != "task-1" {
+		t.Errorf("GetTasks ID = %q, want task-1", tasks[0].ID)
+	}
+	if tasks[0].Status != "completed" {
+		t.Errorf("GetTasks Status = %q, want completed", tasks[0].Status)
+	}
+	if tasks[0].CompletedAt != 125 {
+		t.Errorf("GetTasks CompletedAt = %d, want 125", tasks[0].CompletedAt)
+	}
+}
+
+func TestHub_GetBuilds_Grouping(t *testing.T) {
+	hub := NewHub()
+	hub.BroadcastTaskCompleted(&TaskInfo{
+		ID:          "old-completed",
+		BuildID:     "build-old",
+		BuildType:   "cpp",
+		Status:      "completed",
+		StartedAt:   10,
+		CompletedAt: 20,
+		FromCache:   true,
+	})
+	hub.BroadcastTaskStarted(&TaskInfo{
+		ID:        "new-running",
+		BuildID:   "build-new",
+		BuildType: "cpp",
+		Status:    "running",
+		StartedAt: 30,
+	})
+	hub.BroadcastTaskCompleted(&TaskInfo{
+		ID:          "new-failed",
+		BuildID:     "build-new",
+		BuildType:   "cpp",
+		Status:      "failed",
+		StartedAt:   35,
+		CompletedAt: 50,
+	})
+	hub.BroadcastTaskCompleted(&TaskInfo{
+		ID:          "ungrouped",
+		BuildType:   "cpp",
+		Status:      "completed",
+		StartedAt:   60,
+		CompletedAt: 70,
+	})
+
+	builds := hub.GetBuilds()
+	if len(builds) != 2 {
+		t.Fatalf("GetBuilds len = %d, want 2", len(builds))
+	}
+	if builds[0].ID != "build-new" {
+		t.Errorf("newest build ID = %q, want build-new", builds[0].ID)
+	}
+	if builds[0].Status != "running" {
+		t.Errorf("build-new Status = %q, want running", builds[0].Status)
+	}
+	if builds[0].TotalTasks != 2 {
+		t.Errorf("build-new TotalTasks = %d, want 2", builds[0].TotalTasks)
+	}
+	if builds[0].RunningTasks != 1 {
+		t.Errorf("build-new RunningTasks = %d, want 1", builds[0].RunningTasks)
+	}
+	if builds[0].FailedTasks != 1 {
+		t.Errorf("build-new FailedTasks = %d, want 1", builds[0].FailedTasks)
+	}
+	if builds[0].CompletedTasks != 0 {
+		t.Errorf("build-new CompletedTasks = %d, want 0", builds[0].CompletedTasks)
+	}
+	if builds[0].FirstTaskAt != 30 {
+		t.Errorf("build-new FirstTaskAt = %d, want 30", builds[0].FirstTaskAt)
+	}
+	if builds[0].LastTaskAt != 50 {
+		t.Errorf("build-new LastTaskAt = %d, want 50", builds[0].LastTaskAt)
+	}
+
+	if builds[1].ID != "build-old" {
+		t.Errorf("oldest build ID = %q, want build-old", builds[1].ID)
+	}
+	if builds[1].Status != "completed" {
+		t.Errorf("build-old Status = %q, want completed", builds[1].Status)
+	}
+	if builds[1].TotalTasks != 1 {
+		t.Errorf("build-old TotalTasks = %d, want 1", builds[1].TotalTasks)
+	}
+	if builds[1].CompletedTasks != 1 {
+		t.Errorf("build-old CompletedTasks = %d, want 1", builds[1].CompletedTasks)
+	}
+	if builds[1].FromCacheCount != 1 {
+		t.Errorf("build-old FromCacheCount = %d, want 1", builds[1].FromCacheCount)
+	}
+}
+
+func TestHub_GetBuilds_EvictsOldestBuild(t *testing.T) {
+	hub := NewHub()
+	hub.maxBuilds = 1
+	hub.BroadcastTaskStarted(&TaskInfo{ID: "old-task", BuildID: "old-build", Status: "running"})
+	hub.BroadcastTaskStarted(&TaskInfo{ID: "new-task", BuildID: "new-build", Status: "running"})
+
+	builds := hub.GetBuilds()
+	if len(builds) != 1 {
+		t.Fatalf("GetBuilds len = %d, want 1", len(builds))
+	}
+	if builds[0].ID != "new-build" {
+		t.Errorf("GetBuilds ID = %q, want new-build", builds[0].ID)
+	}
+	tasks := hub.GetTasks()
+	if len(tasks) != 1 {
+		t.Fatalf("GetTasks len = %d, want 1", len(tasks))
+	}
+	if tasks[0].ID != "new-task" {
+		t.Errorf("GetTasks ID = %q, want new-task", tasks[0].ID)
+	}
+}
+
+func TestServer_HandleBuilds(t *testing.T) {
+	s := New(DefaultConfig(), &mockProvider{})
+	s.hub.BroadcastTaskStarted(&TaskInfo{
+		ID:        "task-1",
+		BuildID:   "build-1",
+		BuildType: "cpp",
+		Status:    "running",
+		StartedAt: 100,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/builds", nil)
+	rec := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Status = %d, want 200", rec.Code)
+	}
+	var response struct {
+		Builds    []*BuildInfo `json:"builds"`
+		Count     int          `json:"count"`
+		Timestamp int64        `json:"timestamp"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	if response.Count != 1 {
+		t.Errorf("Count = %d, want 1", response.Count)
+	}
+	if len(response.Builds) != 1 {
+		t.Fatalf("Builds len = %d, want 1", len(response.Builds))
+	}
+	if response.Builds[0].ID != "build-1" {
+		t.Errorf("Build ID = %q, want build-1", response.Builds[0].ID)
+	}
+	if response.Timestamp == 0 {
+		t.Error("Timestamp should be set")
+	}
+}
+
+func TestServer_HandleBuilds_MethodNotAllowed(t *testing.T) {
+	s := New(DefaultConfig(), &mockProvider{})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/builds", nil)
+	rec := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("Status = %d, want 405", rec.Code)
+	}
+}
+
+func TestServer_CreateEventNotifier_ForwardsBuildID(t *testing.T) {
+	s := New(DefaultConfig(), &mockProvider{})
+	onStart, onComplete := s.CreateEventNotifier()
+	onStart("task-1", "build-1", "cpp", "running", "worker-1", 100)
+	onComplete("task-1", "build-1", "cpp", "completed", "worker-1", 100, 120, 20, 0, "")
+
+	tasks := s.hub.GetTasks()
+	if len(tasks) != 1 {
+		t.Fatalf("GetTasks len = %d, want 1", len(tasks))
+	}
+	if tasks[0].BuildID != "build-1" {
+		t.Errorf("BuildID = %q, want build-1", tasks[0].BuildID)
+	}
+	if tasks[0].Status != "completed" {
+		t.Errorf("Status = %q, want completed", tasks[0].Status)
 	}
 }
 
