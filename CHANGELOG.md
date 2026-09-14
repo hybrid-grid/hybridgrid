@@ -135,7 +135,9 @@ Production-ready Windows support and foundation stabilization.
 - **Colored CLI Output** - Visual build progress and status indicators
 - **Prometheus Metrics** - Comprehensive observability
 
-[Unreleased]: https://github.com/h3nr1-d14z/hybridgrid/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/h3nr1-d14z/hybridgrid/compare/v0.4.0...HEAD
+[v0.4.0]: https://github.com/h3nr1-d14z/hybridgrid/compare/v0.3.0...v0.4.0
+[v0.3.0]: https://github.com/h3nr1-d14z/hybridgrid/compare/v0.2.3...v0.3.0
 [v0.2.3]: https://github.com/h3nr1-d14z/hybridgrid/compare/v0.2.2...v0.2.3
 [v0.2.2]: https://github.com/h3nr1-d14z/hybridgrid/compare/v0.2.1...v0.2.2
 [v0.2.1]: https://github.com/h3nr1-d14z/hybridgrid/compare/v0.2.0...v0.2.1
