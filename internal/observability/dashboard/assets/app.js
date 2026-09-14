@@ -1,3 +1,20 @@
+// Chart instances live outside Alpine's reactive proxy on purpose —
+// wrapping Chart.js controllers in a reactive proxy breaks their
+// internal bookkeeping (resize observers, animation state).
+const chartRegistry = {};
+
+// Single scratch canvas for token rasterization, reused across every
+// chartTheme() call — allocating five fresh 2d contexts per call (and
+// chartTheme() runs on every stats refresh) is pointless garbage.
+let scratchCanvas = null;
+
+function destroyCharts() {
+    Object.keys(chartRegistry).forEach((key) => {
+        try { chartRegistry[key].destroy(); } catch (err) { /* already gone */ }
+        delete chartRegistry[key];
+    });
+}
+
 function dashboard() {
     return {
         connected: false,
@@ -5,9 +22,10 @@ function dashboard() {
         stats: {},
         workers: [],
         builds: [],
+        durationChartBuilds: [],
         events: [],
         recentTasks: [],
-        cacheHistory: Array(12).fill(0),
+        cacheHistory: Array(24).fill(0),
         lastUpdate: 'Never',
         reconnectAttempts: 0,
         maxReconnectAttempts: 10,
@@ -24,6 +42,7 @@ function dashboard() {
         consoleData: null,
         consoleMissing: false,
         consoleLoading: false,
+        themeQuery: null,
 
         get cacheHitRate() {
             const hits = this.stats.cache_hits || 0;
@@ -32,11 +51,85 @@ function dashboard() {
             return total > 0 ? ((hits / total) * 100).toFixed(1) : '0.0';
         },
 
+        // Metric-card derivations — every value traces to a live API field.
+        get passRateDisplay() {
+            const succeeded = Number(this.stats.success_tasks || 0);
+            const failed = Number(this.stats.failed_tasks || 0);
+            const total = succeeded + failed;
+            return total > 0 ? `${((succeeded / total) * 100).toFixed(1)}%` : '—';
+        },
+
+        get avgBuildDurationDisplay() {
+            const finished = this.builds.filter((b) => !b.running_tasks && this.buildDurationMs(b) !== null);
+            if (finished.length === 0) return '—';
+            const avgSeconds = finished.reduce((acc, b) => acc + this.buildDurationMs(b), 0) / finished.length / 1000;
+            // toFixed(2) matches buildDurationLabel — a 17 ms average must
+            // not print "0.0 s" on the card while the history column next to
+            // it prints "0.02 s" for the same builds.
+            return avgSeconds >= 60 ? `${(avgSeconds / 60).toFixed(1)} min` : `${avgSeconds.toFixed(2)} s`;
+        },
+
+        get executorUtilizationDisplay() {
+            const max = this.workers.reduce((acc, w) => acc + (w.max_parallel_tasks || 0), 0);
+            if (max === 0) return '—';
+            const active = this.workers.reduce((acc, w) => acc + (w.active_tasks || 0), 0);
+            return `${Math.min(100, Math.round((active / max) * 100))}%`;
+        },
+
+        // Build-detail task timeline. Times are Unix milliseconds from the
+        // coordinator; the queue segment uses the measured coordinator-side
+        // queue time (started_at_ms - queue_ms). Running tasks extend to now.
+        get detailTimeline() {
+            if (!this.detail || !this.detail.tasks) return { rows: [], spanMs: 0 };
+            const now = Date.now();
+            const rows = this.detail.tasks
+                .map((task) => {
+                    const started = task.started_at_ms || 0;
+                    if (!started) return null;
+                    const queuedAt = started - (task.queue_ms || 0);
+                    const end = task.completed_at_ms || (task.status === 'running' ? now : started + (task.duration_ms || 0));
+                    return { task, queuedAt, started, end };
+                })
+                .filter(Boolean);
+            if (rows.length === 0) return { rows: [], spanMs: 0 };
+            const t0 = Math.min(...rows.map((r) => r.queuedAt));
+            // Running rows already carry end = now, so the max of ends
+            // covers the live case. An unconditional `now` here would
+            // keep inflating the span of a settled build with wall clock.
+            const t1 = Math.max(...rows.map((r) => r.end));
+            const span = Math.max(t1 - t0, 1);
+            rows.forEach((r) => {
+                r.queueLeft = ((r.queuedAt - t0) / span) * 100;
+                r.queueWidth = Math.max(((r.started - r.queuedAt) / span) * 100, 0.25);
+                r.runLeft = ((r.started - t0) / span) * 100;
+                r.runWidth = Math.max(((r.end - r.started) / span) * 100, 0.35);
+            });
+            rows.sort((a, b) => a.started - b.started);
+            return { rows, spanMs: span };
+        },
+
+        timelineSpanLabel() {
+            const span = this.detailTimeline.spanMs;
+            if (!span) return '';
+            return span >= 60000 ? `span ${(span / 60000).toFixed(1)} min` : `span ${(span / 1000).toFixed(1)} s`;
+        },
+
+        timelineTooltip(row) {
+            const t = row.task;
+            return `${t.id}\nqueue ${this.formatMs(t.queue_ms)} · duration ${this.formatMs(t.duration_ms)}${t.completed_at_ms ? '' : ' · running'}`;
+        },
+
         init() {
             window.addEventListener('hashchange', () => this.handleRoute());
             this.handleRoute();
             this.fetchInitialData();
             this.connectWebSocket();
+            if (window.matchMedia) {
+                this.themeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+                const recreate = () => { destroyCharts(); this.renderRouteCharts(); };
+                if (this.themeQuery.addEventListener) this.themeQuery.addEventListener('change', recreate);
+                else if (this.themeQuery.addListener) this.themeQuery.addListener(recreate);
+            }
         },
 
         async fetchInitialData() {
@@ -55,8 +148,9 @@ function dashboard() {
                 const buildsData = await buildsRes.json();
                 this.builds = buildsData.builds || buildsData || [];
                 this.lastBuildFetchAt = Date.now();
-                this.lastUpdate = this.formatTime(Date.now() / 1000);
+                this.lastUpdate = this.formatEventTime(Date.now() / 1000);
                 this.updateCacheHistory();
+                this.$nextTick(() => this.renderRouteCharts());
             } catch (err) {
                 console.error('Failed to fetch initial dashboard data:', err);
             }
@@ -68,6 +162,7 @@ function dashboard() {
                 const data = await response.json();
                 this.builds = data.builds || data || [];
                 this.lastBuildFetchAt = Date.now();
+                this.$nextTick(() => this.updateDurationsChart());
             } catch (err) {
                 console.error('Failed to fetch builds:', err);
             }
@@ -99,6 +194,7 @@ function dashboard() {
                     this.fetchConsole();
                 }
                 this.route = 'console';
+                this.$nextTick(() => this.renderRouteCharts());
                 return;
             }
             const match = /^#\/build\/(.+)$/.exec(window.location.hash);
@@ -114,6 +210,7 @@ function dashboard() {
             } else {
                 this.route = 'home';
             }
+            this.$nextTick(() => this.renderRouteCharts());
         },
 
         async fetchConsole() {
@@ -146,6 +243,7 @@ function dashboard() {
                 } else if (response.ok) {
                     this.detail = await response.json();
                     this.detailMissing = false;
+                    this.$nextTick(() => this.updateDetailCharts());
                 }
             } catch (err) {
                 console.error('Failed to fetch build detail:', err);
@@ -208,11 +306,12 @@ function dashboard() {
         },
 
         handleMessage(message) {
-            this.lastUpdate = this.formatTime(message.timestamp || Date.now() / 1000);
+            this.lastUpdate = this.formatEventTime(message.timestamp || Date.now() / 1000);
             switch (message.type) {
                 case 'stats':
                     this.stats = message.data;
                     this.updateCacheHistory();
+                    this.updateCacheChart();
                     break;
                 case 'worker_added':
                     this.workers = this.workers.filter((worker) => worker.id !== message.data.id);
@@ -257,9 +356,38 @@ function dashboard() {
             return Math.min(100, ((build.completed_tasks + build.failed_tasks) / build.total_tasks) * 100);
         },
 
+        // Shared build-duration predicate. Every display that derives a
+        // duration from first/last task timestamps (avg card, history
+        // column, durations chart) must go through here — site-local
+        // guards already drifted once (> here, >= there) and made two
+        // numbers on one screen disagree about the same build set.
+        // Same-millisecond builds return 0 (a real, renderable duration);
+        // missing fields or inverted order return null (no duration).
+        // Deliberate call-site policy, not absorbed here: the avg card
+        // excludes running builds (their span is still growing), the
+        // chart includes them as grey bars. A 0 prints "0.00 s" on every
+        // surface — matching the chart tooltip — rather than "—".
+        buildDurationMs(build) {
+            if (!build.first_task_at_ms || !build.last_task_at_ms || build.last_task_at_ms < build.first_task_at_ms) return null;
+            return build.last_task_at_ms - build.first_task_at_ms;
+        },
+
+        buildDurationLabel(build) {
+            const ms = this.buildDurationMs(build);
+            if (ms === null) return '—';
+            const seconds = ms / 1000;
+            return seconds >= 60 ? `${(seconds / 60).toFixed(1)} min` : `${seconds.toFixed(2)} s`;
+        },
+
         workerSlots(worker) {
             const active = this.recentTasks.filter((task) => task.worker_id === worker.id && task.status === 'running');
             return Array.from({ length: Math.max(0, worker.max_parallel_tasks || 0) }, (_, index) => active[index] || null);
+        },
+
+        workerUtilization(worker) {
+            const max = worker.max_parallel_tasks || 0;
+            if (max <= 0) return 0;
+            return Math.min(100, Math.round(((worker.active_tasks || 0) / max) * 100));
         },
 
         taskBall(task) {
@@ -285,9 +413,16 @@ function dashboard() {
             return `circuit-${String(worker.circuit_state || 'CLOSED').toLowerCase().replace('_', '-')}`;
         },
 
-        formatTime(timestamp) {
-            if (!timestamp) return '';
-            return new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        // Task and build timestamps are Unix milliseconds; WebSocket event
+        // timestamps are Unix seconds — two formatters, no silent mixing.
+        formatTime(timestampMs) {
+            if (!timestampMs) return '';
+            return new Date(timestampMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        },
+
+        formatEventTime(timestampSeconds) {
+            if (!timestampSeconds) return '';
+            return new Date(timestampSeconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         },
 
         formatUptime(seconds) {
@@ -310,6 +445,191 @@ function dashboard() {
             if (event.type === 'task_started') return `Task ${event.data.id} started on ${event.data.worker_id}`;
             if (event.type === 'task_completed') return `Task ${event.data.id} completed (${event.data.status || 'finished'})`;
             return JSON.stringify(event.data);
+        },
+
+        // ---- Chart.js wiring ------------------------------------------------
+
+        renderRouteCharts() {
+            if (typeof Chart === 'undefined') return;
+            if (this.route === 'home') {
+                this.updateDurationsChart();
+                this.updateCacheChart();
+            } else if (this.route === 'build' && this.detail) {
+                this.updateDetailCharts();
+            }
+        },
+
+        // Chart colors are resolved from CSS custom properties via probe
+        // elements (custom properties are not computed values, so reading
+        // a real color property is the reliable way). The resolved string
+        // is then rasterized through a 1x1 canvas and read back with
+        // getImageData: Chromium returns authored forms like oklch(...)
+        // from computed styles AND from canvas fillStyle serialization,
+        // but Chart.js's @kurkle/color parser only understands
+        // hex/rgb/hsl — every parsed path (hover alpha, legend swatches,
+        // tooltip backgrounds) would render black/transparent. The
+        // rasterizer converts the token to concrete sRGB bytes, so the
+        // returned rgba(...) string parses correctly everywhere.
+        // Fallbacks are neutral greys from the existing token values
+        // (not approximations of the Jenkins colors) and only apply when
+        // even the browser cannot paint the token.
+        chartTheme() {
+            const roundTrip = (cssColor, fallback) => {
+                try {
+                    if (!scratchCanvas) {
+                        scratchCanvas = document.createElement('canvas');
+                        scratchCanvas.width = 1;
+                        scratchCanvas.height = 1;
+                    }
+                    const ctx = scratchCanvas.getContext('2d', { willReadFrequently: true });
+                    if (!ctx) return fallback;
+                    ctx.clearRect(0, 0, 1, 1);
+                    ctx.fillStyle = '#123456';
+                    ctx.fillStyle = cssColor;
+                    if (ctx.fillStyle === '#123456') return fallback;
+                    ctx.fillRect(0, 0, 1, 1);
+                    const d = ctx.getImageData(0, 0, 1, 1).data;
+                    if (d[3] === 0) return fallback;
+                    return `rgba(${d[0]}, ${d[1]}, ${d[2]}, ${(d[3] / 255).toFixed(4)})`;
+                } catch (err) {
+                    return fallback;
+                }
+            };
+            const resolved = (id, fallback) => {
+                try {
+                    const el = document.getElementById(id);
+                    return el ? roundTrip(getComputedStyle(el).color, fallback) : fallback;
+                } catch (err) {
+                    return fallback;
+                }
+            };
+            return {
+                text: resolved('probe-text', '#4d545d'),
+                grid: resolved('probe-grid', 'rgba(77, 84, 93, 0.2)'),
+                blue: resolved('probe-blue', '#4d545d'),
+                red: resolved('probe-red', '#4d545d'),
+                green: resolved('probe-green', '#4d545d'),
+                grey: resolved('probe-grey', '#9ba7af')
+            };
+        },
+
+        ensureChart(key, canvasId, makeConfig) {
+            if (chartRegistry[key]) return chartRegistry[key];
+            const canvas = document.getElementById(canvasId);
+            if (!canvas || typeof Chart === 'undefined') return null;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return null;
+            chartRegistry[key] = new Chart(ctx, makeConfig(this.chartTheme()));
+            return chartRegistry[key];
+        },
+
+        updateDurationsChart() {
+            if (this.route !== 'home') return;
+            const chart = this.ensureChart('durations', 'durations-canvas', (c) => ({
+                type: 'bar',
+                // minBarLength keeps sub-second builds visible and
+                // hoverable — without it a 0.02 s build renders 0 px tall
+                // on a chart whose y-axis spans tens of seconds, silently
+                // dropping exactly the builds the tooltip exists to inspect.
+                data: { labels: [], datasets: [{ label: 'duration (s)', data: [], backgroundColor: [], minBarLength: 2 }] },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    // Whole-column hover target (Buildkite build-history
+                    // style): with minBarLength a sub-second bar paints
+                    // ~1.5 px, and the default intersect:true hit box
+                    // equals the drawn height — a mouse sweep sails past
+                    // the very builds the tooltip exists to inspect. With
+                    // one dataset, items[0].dataIndex is unambiguous.
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                title: (items) => this.durationChartBuilds[items[0].dataIndex] ? this.durationChartBuilds[items[0].dataIndex].id : '',
+                                label: (item) => {
+                                    const build = this.durationChartBuilds[item.dataIndex];
+                                    if (!build) return '';
+                                    const status = this.buildStatus(build);
+                                    const cached = build.from_cache_count || 0;
+                                    return [`${item.parsed.y.toFixed(2)} s · ${status}`, `${build.completed_tasks + build.failed_tasks}/${build.total_tasks} tasks · ${cached} cached`];
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { ticks: { color: c.text, maxRotation: 0, autoSkip: true, callback: function (value) { return String(this.getLabelForValue(value)).slice(0, 8); } }, grid: { display: false } },
+                        y: { beginAtZero: true, ticks: { color: c.text }, grid: { color: c.grid }, title: { display: true, text: 'seconds', color: c.text } }
+                    }
+                }
+            }));
+            if (!chart) return;
+            // Oldest → newest, most recent 20 builds. Stored on the
+            // component so tooltip callbacks resolve dataIndex against
+            // the exact array the dataset was built from — this.builds
+            // is newest-first and may contain entries the filter
+            // dropped, which would mislabel every hover. The >= guard
+            // (via buildDurationMs) matters: a build whose first and
+            // last task land in the same millisecond still reaches the
+            // dataset — the minBarLength floor only helps builds that
+            // render at all.
+            const builds = this.builds
+                .filter((b) => this.buildDurationMs(b) !== null)
+                .slice(0, 20)
+                .reverse();
+            this.durationChartBuilds = builds;
+            const t = this.chartTheme();
+            const colors = { success: t.blue, failed: t.red, running: t.grey, queued: t.grey };
+            chart.data.labels = builds.map((b) => b.id);
+            chart.data.datasets[0].data = builds.map((b) => this.buildDurationMs(b) / 1000);
+            chart.data.datasets[0].backgroundColor = builds.map((b) => colors[this.buildStatus(b)] || t.grey);
+            chart.update('none');
+        },
+
+        updateCacheChart() {
+            if (this.route !== 'home') return;
+            const chart = this.ensureChart('cache', 'cache-canvas', (c) => ({
+                type: 'line',
+                data: { labels: this.cacheHistory.map((_, i) => i - this.cacheHistory.length + 1), datasets: [{ label: 'hit rate %', data: [...this.cacheHistory], borderColor: c.blue, backgroundColor: c.blue, tension: 0.35, pointRadius: 0, borderWidth: 2, fill: false }] },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { color: c.text, autoSkip: true, callback: function (value) { return `${Number(value) * 2}s`; } }, grid: { display: false } },
+                        y: { min: 0, max: 100, ticks: { color: c.text, callback: (value) => `${value}%` }, grid: { color: c.grid } }
+                    }
+                }
+            }));
+            if (!chart) return;
+            chart.data.datasets[0].data = [...this.cacheHistory];
+            chart.data.labels = this.cacheHistory.map((_, i) => i - this.cacheHistory.length + 1);
+            chart.update('none');
+        },
+
+        updateDetailCharts() {
+            if (this.route !== 'build' || !this.detail) return;
+            const build = this.detail.build;
+            const chart = this.ensureChart('outcomes', 'outcomes-canvas', (c) => ({
+                type: 'doughnut',
+                data: { labels: ['passed', 'failed', 'running', 'other'], datasets: [{ data: [0, 0, 0, 0], backgroundColor: [c.blue, c.red, c.grey, c.grid], borderWidth: 0 }] },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    cutout: '62%',
+                    plugins: { legend: { position: 'right', labels: { color: c.text, boxWidth: 10, boxHeight: 10 } } }
+                }
+            }));
+            if (!chart) return;
+            const completed = build.completed_tasks || 0;
+            const failed = build.failed_tasks || 0;
+            const running = build.running_tasks || 0;
+            const other = Math.max(0, (build.total_tasks || 0) - completed - failed - running);
+            chart.data.datasets[0].data = [completed, failed, running, other];
+            chart.update('none');
         }
     };
 }

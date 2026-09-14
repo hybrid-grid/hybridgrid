@@ -138,32 +138,32 @@ type EventNotifierFunc struct {
 	OnTaskCompleted func(task *TaskInfo)
 }
 
-// CreateEventNotifier creates event notifier callbacks for the coordinator.
-func (s *Server) CreateEventNotifier() (onStart func(id, buildID, buildType, status, workerID string, startedAt int64), onComplete func(id, buildID, buildType, status, workerID string, startedAt, completedAt, durationMs, queueMs, compileMs int64, exitCode int32, errorMsg string)) {
-	onStart = func(id, buildID, buildType, status, workerID string, startedAt int64) {
+// CreateEventNotifier creates event notifier callbacks for the coordinator. Timestamps are Unix milliseconds (TaskInfo.StartedAtMs).
+func (s *Server) CreateEventNotifier() (onStart func(id, buildID, buildType, status, workerID string, startedAtMs int64), onComplete func(id, buildID, buildType, status, workerID string, startedAtMs, completedAtMs, durationMs, queueMs, compileMs int64, exitCode int32, errorMsg string)) {
+	onStart = func(id, buildID, buildType, status, workerID string, startedAtMs int64) {
 		s.hub.BroadcastTaskStarted(&TaskInfo{
-			ID:        id,
-			BuildID:   buildID,
-			BuildType: buildType,
-			Status:    status,
-			WorkerID:  workerID,
-			StartedAt: startedAt,
+			ID:          id,
+			BuildID:     buildID,
+			BuildType:   buildType,
+			Status:      status,
+			WorkerID:    workerID,
+			StartedAtMs: startedAtMs,
 		})
 	}
-	onComplete = func(id, buildID, buildType, status, workerID string, startedAt, completedAt, durationMs, queueMs, compileMs int64, exitCode int32, errorMsg string) {
+	onComplete = func(id, buildID, buildType, status, workerID string, startedAtMs, completedAtMs, durationMs, queueMs, compileMs int64, exitCode int32, errorMsg string) {
 		s.hub.BroadcastTaskCompleted(&TaskInfo{
-			ID:           id,
-			BuildID:      buildID,
-			BuildType:    buildType,
-			Status:       status,
-			WorkerID:     workerID,
-			StartedAt:    startedAt,
-			CompletedAt:  completedAt,
-			DurationMs:   durationMs,
-			QueueMs:      queueMs,
-			CompileMs:    compileMs,
-			ExitCode:     exitCode,
-			ErrorMessage: errorMsg,
+			ID:            id,
+			BuildID:       buildID,
+			BuildType:     buildType,
+			Status:        status,
+			WorkerID:      workerID,
+			StartedAtMs:   startedAtMs,
+			CompletedAtMs: completedAtMs,
+			DurationMs:    durationMs,
+			QueueMs:       queueMs,
+			CompileMs:     compileMs,
+			ExitCode:      exitCode,
+			ErrorMessage:  errorMsg,
 		})
 	}
 	return

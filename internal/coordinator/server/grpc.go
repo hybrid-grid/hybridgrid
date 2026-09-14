@@ -299,13 +299,18 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 
 // TaskEvent represents a task event for the dashboard.
 type TaskEvent struct {
-	ID            string
-	BuildType     string
-	BuildID       string
-	Status        string
-	WorkerID      string
-	StartedAt     int64
-	CompletedAt   int64
+	ID        string
+	BuildType string
+	BuildID   string
+	Status    string
+	WorkerID  string
+	// StartedAtMs and CompletedAtMs are Unix milliseconds so the
+	// dashboard can place tasks on a sub-second timeline (second
+	// granularity collapses builds where every TU lands within one
+	// second). The JSONL task log is unaffected — it carries its own
+	// TS and durations.
+	StartedAtMs   int64
+	CompletedAtMs int64
 	DurationMs    int64
 	QueueTimeMs   int64
 	CompileTimeMs int64
@@ -758,12 +763,12 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 		// sees the assignment move.
 		if s.eventNotifier != nil {
 			s.eventNotifier.NotifyTaskStarted(&TaskEvent{
-				ID:        req.TaskId,
-				BuildType: "cpp",
-				BuildID:   buildID,
-				Status:    "running",
-				WorkerID:  worker.ID,
-				StartedAt: taskStartTime.Unix(),
+				ID:          req.TaskId,
+				BuildType:   "cpp",
+				BuildID:     buildID,
+				Status:      "running",
+				WorkerID:    worker.ID,
+				StartedAtMs: taskStartTime.UnixMilli(),
 			})
 		}
 
@@ -917,8 +922,8 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 			BuildType:     "cpp",
 			BuildID:       buildID,
 			WorkerID:      worker.ID,
-			StartedAt:     taskStartTime.Unix(),
-			CompletedAt:   taskCompletedTime.Unix(),
+			StartedAtMs:   taskStartTime.UnixMilli(),
+			CompletedAtMs: taskCompletedTime.UnixMilli(),
 			DurationMs:    taskCompletedTime.Sub(taskStartTime).Milliseconds(),
 			QueueTimeMs:   resp.GetQueueTimeMs(),
 			CompileTimeMs: resp.GetCompilationTimeMs(),
@@ -1021,14 +1026,14 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest, b
 		atomic.AddInt64(&s.successTasks, 1)
 
 		if s.eventNotifier != nil {
-			taskStart := start.Unix()
+			taskStartMs := start.UnixMilli()
 			s.eventNotifier.NotifyTaskStarted(&TaskEvent{
-				ID:        req.TaskId,
-				BuildType: "flutter",
-				BuildID:   buildID,
-				Status:    "running",
-				WorkerID:  "",
-				StartedAt: taskStart,
+				ID:          req.TaskId,
+				BuildType:   "flutter",
+				BuildID:     buildID,
+				Status:      "running",
+				WorkerID:    "",
+				StartedAtMs: taskStartMs,
 			})
 			s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
 				ID:            req.TaskId,
@@ -1036,8 +1041,8 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest, b
 				BuildID:       buildID,
 				Status:        "completed",
 				WorkerID:      "",
-				StartedAt:     taskStart,
-				CompletedAt:   time.Now().Unix(),
+				StartedAtMs:   taskStartMs,
+				CompletedAtMs: time.Now().UnixMilli(),
 				DurationMs:    cached.buildTimeMs,
 				QueueTimeMs:   0,
 				CompileTimeMs: cached.buildTimeMs,
@@ -1074,27 +1079,27 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest, b
 			Msg("No worker available for flutter build")
 
 		if s.eventNotifier != nil {
-			taskStart := start.Unix()
+			taskStartMs := start.UnixMilli()
 			s.eventNotifier.NotifyTaskStarted(&TaskEvent{
-				ID:        req.TaskId,
-				BuildType: "flutter",
-				BuildID:   buildID,
-				Status:    "running",
-				WorkerID:  "",
-				StartedAt: taskStart,
+				ID:          req.TaskId,
+				BuildType:   "flutter",
+				BuildID:     buildID,
+				Status:      "running",
+				WorkerID:    "",
+				StartedAtMs: taskStartMs,
 			})
 			s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
-				ID:           req.TaskId,
-				BuildType:    "flutter",
-				BuildID:      buildID,
-				Status:       "failed",
-				WorkerID:     "",
-				StartedAt:    taskStart,
-				CompletedAt:  time.Now().Unix(),
-				DurationMs:   0,
-				ExitCode:     1,
-				FromCache:    false,
-				ErrorMessage: fmt.Sprintf("no worker available: %v", err),
+				ID:            req.TaskId,
+				BuildType:     "flutter",
+				BuildID:       buildID,
+				Status:        "failed",
+				WorkerID:      "",
+				StartedAtMs:   taskStartMs,
+				CompletedAtMs: time.Now().UnixMilli(),
+				DurationMs:    0,
+				ExitCode:      1,
+				FromCache:     false,
+				ErrorMessage:  fmt.Sprintf("no worker available: %v", err),
 			})
 		}
 
@@ -1136,12 +1141,12 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest, b
 
 	if s.eventNotifier != nil {
 		s.eventNotifier.NotifyTaskStarted(&TaskEvent{
-			ID:        req.TaskId,
-			BuildType: "flutter",
-			BuildID:   buildID,
-			Status:    "running",
-			WorkerID:  worker.ID,
-			StartedAt: taskStartTime.Unix(),
+			ID:          req.TaskId,
+			BuildType:   "flutter",
+			BuildID:     buildID,
+			Status:      "running",
+			WorkerID:    worker.ID,
+			StartedAtMs: taskStartTime.UnixMilli(),
 		})
 	}
 
@@ -1178,8 +1183,8 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest, b
 			BuildType:     "flutter",
 			BuildID:       buildID,
 			WorkerID:      worker.ID,
-			StartedAt:     taskStartTime.Unix(),
-			CompletedAt:   taskCompletedTime.Unix(),
+			StartedAtMs:   taskStartTime.UnixMilli(),
+			CompletedAtMs: taskCompletedTime.UnixMilli(),
 			DurationMs:    taskCompletedTime.Sub(taskStartTime).Milliseconds(),
 			QueueTimeMs:   buildResp.GetQueueTimeMs(),
 			CompileTimeMs: buildResp.GetBuildTimeMs(),
@@ -1236,14 +1241,14 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 		atomic.AddInt64(&s.successTasks, 1)
 
 		if s.eventNotifier != nil {
-			taskStart := start.Unix()
+			taskStartMs := start.UnixMilli()
 			s.eventNotifier.NotifyTaskStarted(&TaskEvent{
-				ID:        req.TaskId,
-				BuildType: "unity",
-				BuildID:   buildID,
-				Status:    "running",
-				WorkerID:  "",
-				StartedAt: taskStart,
+				ID:          req.TaskId,
+				BuildType:   "unity",
+				BuildID:     buildID,
+				Status:      "running",
+				WorkerID:    "",
+				StartedAtMs: taskStartMs,
 			})
 			s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
 				ID:            req.TaskId,
@@ -1251,8 +1256,8 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 				BuildID:       buildID,
 				Status:        "completed",
 				WorkerID:      "",
-				StartedAt:     taskStart,
-				CompletedAt:   time.Now().Unix(),
+				StartedAtMs:   taskStartMs,
+				CompletedAtMs: time.Now().UnixMilli(),
 				DurationMs:    cached.buildTimeMs,
 				QueueTimeMs:   0,
 				CompileTimeMs: cached.buildTimeMs,
@@ -1289,27 +1294,27 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 			Msg("No worker available for unity build")
 
 		if s.eventNotifier != nil {
-			taskStart := start.Unix()
+			taskStartMs := start.UnixMilli()
 			s.eventNotifier.NotifyTaskStarted(&TaskEvent{
-				ID:        req.TaskId,
-				BuildType: "unity",
-				BuildID:   buildID,
-				Status:    "running",
-				WorkerID:  "",
-				StartedAt: taskStart,
+				ID:          req.TaskId,
+				BuildType:   "unity",
+				BuildID:     buildID,
+				Status:      "running",
+				WorkerID:    "",
+				StartedAtMs: taskStartMs,
 			})
 			s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
-				ID:           req.TaskId,
-				BuildType:    "unity",
-				BuildID:      buildID,
-				Status:       "failed",
-				WorkerID:     "",
-				StartedAt:    taskStart,
-				CompletedAt:  time.Now().Unix(),
-				DurationMs:   0,
-				ExitCode:     1,
-				FromCache:    false,
-				ErrorMessage: fmt.Sprintf("no worker available: %v", err),
+				ID:            req.TaskId,
+				BuildType:     "unity",
+				BuildID:       buildID,
+				Status:        "failed",
+				WorkerID:      "",
+				StartedAtMs:   taskStartMs,
+				CompletedAtMs: time.Now().UnixMilli(),
+				DurationMs:    0,
+				ExitCode:      1,
+				FromCache:     false,
+				ErrorMessage:  fmt.Sprintf("no worker available: %v", err),
 			})
 		}
 
@@ -1351,12 +1356,12 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 
 	if s.eventNotifier != nil {
 		s.eventNotifier.NotifyTaskStarted(&TaskEvent{
-			ID:        req.TaskId,
-			BuildType: "unity",
-			BuildID:   buildID,
-			Status:    "running",
-			WorkerID:  worker.ID,
-			StartedAt: taskStartTime.Unix(),
+			ID:          req.TaskId,
+			BuildType:   "unity",
+			BuildID:     buildID,
+			Status:      "running",
+			WorkerID:    worker.ID,
+			StartedAtMs: taskStartTime.UnixMilli(),
 		})
 	}
 
@@ -1392,8 +1397,8 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 			ID:            req.TaskId,
 			BuildType:     "unity",
 			WorkerID:      worker.ID,
-			StartedAt:     taskStartTime.Unix(),
-			CompletedAt:   taskCompletedTime.Unix(),
+			StartedAtMs:   taskStartTime.UnixMilli(),
+			CompletedAtMs: taskCompletedTime.UnixMilli(),
 			DurationMs:    taskCompletedTime.Sub(taskStartTime).Milliseconds(),
 			QueueTimeMs:   buildResp.GetQueueTimeMs(),
 			CompileTimeMs: buildResp.GetBuildTimeMs(),
