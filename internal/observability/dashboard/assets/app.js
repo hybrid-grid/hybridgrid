@@ -217,6 +217,40 @@ function dashboard() {
             return (task.status === 'failed' || task.exit_code) ? 'failed' : 'success';
         },
 
+        // Finished-task throughput per worker, bucketed over the
+        // recentTasks window. "Finished" = completed_at_ms present (any
+        // terminal status: success or failed — a worker failing fast
+        // still shows activity, which is the point of the pane). 12
+        // buckets span oldest-finish to now, clamped to >=1s each so a
+        // burst of same-second finishes doesn't collapse the axis.
+        workerThroughput() {
+            const done = this.recentTasks.filter((t) => t.completed_at_ms && t.worker_id);
+            if (done.length === 0) return { note: '', buckets: [], workers: [] };
+            const now = Date.now();
+            const finishes = done.map((t) => t.completed_at_ms);
+            const newest = Math.max(now, ...finishes);
+            const oldest = Math.min(...finishes);
+            const bucketMs = Math.max(Math.ceil((newest - oldest) / 12), 1000);
+            const start = newest - bucketMs * 12;
+            const buckets = [];
+            for (let i = 0; i < 12; i++) {
+                buckets.push(new Date(start + i * bucketMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+            }
+            const ids = [...new Set(done.map((t) => t.worker_id))];
+            const countsById = new Map(ids.map((id) => [id, new Array(12).fill(0)]));
+            for (const t of done) {
+                const b = Math.floor((t.completed_at_ms - start) / bucketMs);
+                if (b < 0 || b >= 12) continue;
+                countsById.get(t.worker_id)[b]++;
+            }
+            const bucketLabel = bucketMs < 90 * 1000 ? `${Math.round(bucketMs / 1000)}s` : `${(bucketMs / 60000).toFixed(bucketMs % 60000 === 0 ? 0 : 1)}min`;
+            return {
+                note: `finished tasks per ${bucketLabel} bucket · newest ${this.recentTasks.length} tasks`,
+                buckets,
+                workers: ids.map((id) => ({ id, counts: countsById.get(id) }))
+            };
+        },
+
         clusterTooltip(row) {
             const t = row.task;
             return `${t.id}\n${t.build_id || 'no build'} · ${t.worker_id}\nqueue ${this.formatMs(t.queue_ms)} · compile ${this.formatMs(t.compile_ms)} · total ${this.formatMs(t.duration_ms)}${t.completed_at_ms ? '' : ' · running'}`;
@@ -574,6 +608,7 @@ function dashboard() {
             if (this.route === 'home') {
                 this.updateDurationsChart();
                 this.updateCacheChart();
+                this.updateThroughputChart();
             } else if (this.route === 'build' && this.detail) {
                 this.updateDetailCharts();
             }
@@ -714,6 +749,51 @@ function dashboard() {
             chart.data.labels = builds.map((b) => b.id);
             chart.data.datasets[0].data = builds.map((b) => this.buildDurationMs(b) / 1000);
             chart.data.datasets[0].backgroundColor = builds.map((b) => colors[this.buildStatus(b)] || t.grey);
+            chart.update('none');
+        },
+
+        updateThroughputChart() {
+            if (this.route !== 'home') return;
+            // Grouped bars, not lines: balanced workers produce identical
+            // curves, and Chart.js paints dataset 0 last — a line chart
+            // would hide the second worker's line under the first at
+            // exactly the moment the scheduler is doing its job well.
+            // Bars sit side by side per bucket and never occlude.
+            const chart = this.ensureChart('throughput', 'throughput-canvas', (c) => ({
+                type: 'bar',
+                data: { labels: [], datasets: [] },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: true, labels: { color: c.text, boxWidth: 12 } },
+                        tooltip: {
+                            callbacks: {
+                                label: (item) => `${item.dataset.label}: ${item.parsed.y} task${item.parsed.y === 1 ? '' : 's'}`
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { ticks: { color: c.text, maxRotation: 0, autoSkip: true }, grid: { display: false } },
+                        y: { beginAtZero: true, ticks: { color: c.text, precision: 0 }, grid: { color: c.grid }, title: { display: true, text: 'tasks', color: c.text } }
+                    }
+                }
+            }));
+            if (!chart) return;
+            const tp = this.workerThroughput();
+            // Three resolved tokens cycled for worker identity; the
+            // legend names each line, so hue reuse beyond three workers
+            // stays unambiguous in practice for a LAN cluster.
+            const theme = this.chartTheme();
+            const palette = [theme.blue, theme.green, theme.red];
+            chart.data.labels = tp.buckets;
+            chart.data.datasets = tp.workers.map((w, i) => ({
+                label: w.id,
+                data: w.counts,
+                backgroundColor: palette[i % palette.length]
+            }));
             chart.update('none');
         },
 

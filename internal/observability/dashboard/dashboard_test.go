@@ -312,6 +312,28 @@ func TestServer_AppAssetMinBarLength(t *testing.T) {
 	}
 }
 
+func TestServer_AppAssetWorkerThroughput(t *testing.T) {
+	cfg := DefaultConfig()
+	s := New(cfg, &mockProvider{})
+
+	for path, want := range map[string][]string{
+		"/app.js": {"workerThroughput", "throughput-canvas"},
+		"/":       {"worker-throughput", "throughput-canvas"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		s.server.Handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200", path, rec.Code)
+		}
+		for _, fragment := range want {
+			if !strings.Contains(rec.Body.String(), fragment) {
+				t.Errorf("%s should reference %q for the worker throughput pane", path, fragment)
+			}
+		}
+	}
+}
+
 func TestServer_MetricsEndpoint(t *testing.T) {
 	cfg := DefaultConfig()
 	s := New(cfg, &mockProvider{})
