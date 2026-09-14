@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
+	"github.com/h3nr1-d14z/hybridgrid/internal/cli/sourcearchive"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/taskid"
 )
 
@@ -136,7 +137,7 @@ func normalizeScriptingBackend(value string) (string, error) {
 }
 
 func buildRequest(projectPath string, platform pb.TargetPlatform, unityVersion, buildMethod, scriptingBackend string, buildTimeout time.Duration) (*pb.BuildRequest, error) {
-	archive, hash, err := createSourceArchive(projectPath)
+	archive, hash, err := sourcearchive.Create(projectPath, shouldExclude)
 	if err != nil {
 		return nil, err
 	}
