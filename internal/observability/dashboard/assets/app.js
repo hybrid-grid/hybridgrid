@@ -119,6 +119,109 @@ function dashboard() {
             return `${t.id}\nqueue ${this.formatMs(t.queue_ms)} · duration ${this.formatMs(t.duration_ms)}${t.completed_at_ms ? '' : ' · running'}`;
         },
 
+        // Cluster activity swimlanes: one lane per worker (registered ones
+        // first, then any worker only known from task history), one sub-row
+        // per executor slot via greedy interval assignment. The queue
+        // segment uses the coordinator-side queue time (same convention as
+        // detailTimeline); running tasks extend to now. Reading
+        // stats.active_tasks ties recomputation to the 2 s stats broadcast
+        // so running bars advance between task events.
+        get activityLanes() {
+            const activeTasks = this.stats.active_tasks || 0;
+            void activeTasks;
+            const now = Date.now();
+            const dispatched = [];
+            let queuedHidden = 0;
+            for (const task of this.recentTasks) {
+                if (!task.started_at_ms || !task.worker_id) {
+                    if (!task.started_at_ms) queuedHidden += 1;
+                    continue;
+                }
+                const started = task.started_at_ms;
+                const queuedAt = started - (task.queue_ms || 0);
+                const end = task.completed_at_ms || (task.status === 'running' ? now : started + (task.duration_ms || 0));
+                dispatched.push({ task, started, queuedAt, end });
+            }
+            if (dispatched.length === 0) return { lanes: [], spanMs: 0, peak: 0, queuedHidden, t0: 0, axisTicks: [] };
+            const t0 = Math.min(...dispatched.map((r) => r.queuedAt));
+            const t1 = Math.max(...dispatched.map((r) => r.end));
+            const span = Math.max(t1 - t0, 1);
+            for (const row of dispatched) {
+                row.queueLeft = ((row.queuedAt - t0) / span) * 100;
+                row.queueWidth = Math.max(((row.started - row.queuedAt) / span) * 100, 0.25);
+                row.runLeft = ((row.started - t0) / span) * 100;
+                row.runWidth = Math.max(((row.end - row.started) / span) * 100, 0.35);
+                row.statusClass = this.taskStatusClass(row.task);
+            }
+            const byWorker = new Map();
+            for (const row of dispatched) {
+                if (!byWorker.has(row.task.worker_id)) byWorker.set(row.task.worker_id, []);
+                byWorker.get(row.task.worker_id).push(row);
+            }
+            const registered = new Set(this.workers.map((w) => w.id));
+            const laneIds = [...this.workers.map((w) => w.id), ...[...byWorker.keys()].filter((id) => !registered.has(id))];
+            const lanes = [];
+            for (const id of laneIds) {
+                const rows = (byWorker.get(id) || []).slice().sort((a, b) => a.started - b.started);
+                // Greedy slot assignment: each task lands in the first
+                // sub-row whose previous task ended at or before its start.
+                const slotEnds = [];
+                for (const row of rows) {
+                    let slot = slotEnds.findIndex((end) => end <= row.started);
+                    if (slot === -1) {
+                        slot = slotEnds.length;
+                        slotEnds.push(0);
+                    }
+                    slotEnds[slot] = row.end;
+                    row.slot = slot;
+                }
+                const worker = this.workers.find((w) => w.id === id);
+                // Render only occupied sub-rows: default --max-parallel is
+                // auto (one per core — 16 on the dev box) and drawing
+                // unoccupied capacity as empty tracks is noise; idle
+                // capacity is already visible in the Executor Status
+                // pane. The rendered depth is the concurrency this
+                // worker actually reached in the window.
+                const depth = Math.max(slotEnds.length, 1);
+                const slotRows = Array.from({ length: depth }, () => []);
+                for (const row of rows) slotRows[row.slot].push(row);
+                lanes.push({
+                    id,
+                    host: (worker && worker.host) || id,
+                    taskCount: rows.length,
+                    slotRows,
+                    known: !!worker,
+                    idle: rows.length === 0
+                });
+            }
+            // Peak concurrency of compile phases. At equal timestamps ends
+            // sort before starts so back-to-back tasks do not count as
+            // overlapping.
+            const marks = dispatched.flatMap((r) => [[r.started, 1], [r.end, -1]])
+                .sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
+            let peak = 0;
+            let current = 0;
+            for (const [, delta] of marks) {
+                current += delta;
+                if (current > peak) peak = current;
+            }
+            return { lanes, spanMs: span, peak, queuedHidden, t0, axisTicks: [t0, t0 + span * 0.25, t0 + span * 0.5, t0 + span * 0.75, t1] };
+        },
+
+        taskStatusClass(task) {
+            if (task.status === 'running') return 'running';
+            if (task.status === 'success') return 'success';
+            // Server task state is running/completed/failed. exit_code is
+            // omitempty in the API — zero is omitted — so for anything not
+            // explicitly failed, a missing or zero exit code means success.
+            return (task.status === 'failed' || task.exit_code) ? 'failed' : 'success';
+        },
+
+        clusterTooltip(row) {
+            const t = row.task;
+            return `${t.id}\n${t.build_id || 'no build'} · ${t.worker_id}\nqueue ${this.formatMs(t.queue_ms)} · compile ${this.formatMs(t.compile_ms)} · total ${this.formatMs(t.duration_ms)}${t.completed_at_ms ? '' : ' · running'}`;
+        },
+
         init() {
             window.addEventListener('hashchange', () => this.handleRoute());
             this.handleRoute();
@@ -134,11 +237,12 @@ function dashboard() {
 
         async fetchInitialData() {
             try {
-                const [statsRes, workersRes, eventsRes, buildsRes] = await Promise.all([
+                const [statsRes, workersRes, eventsRes, buildsRes, tasksRes] = await Promise.all([
                     fetch('/api/v1/stats'),
                     fetch('/api/v1/workers'),
                     fetch('/api/v1/events'),
-                    fetch('/api/v1/builds')
+                    fetch('/api/v1/builds'),
+                    fetch('/api/v1/tasks?limit=200')
                 ]);
                 this.stats = await statsRes.json();
                 const workersData = await workersRes.json();
@@ -147,6 +251,11 @@ function dashboard() {
                 this.events = eventsData.events || [];
                 const buildsData = await buildsRes.json();
                 this.builds = buildsData.builds || buildsData || [];
+                // Seed task state: recentTasks was previously websocket-only,
+                // so the executor slots and any task-derived view went blank
+                // after a page reload until new events arrived.
+                const tasksData = await tasksRes.json();
+                this.recentTasks = (tasksData.tasks || []).slice(0, 200);
                 this.lastBuildFetchAt = Date.now();
                 this.lastUpdate = this.formatEventTime(Date.now() / 1000);
                 this.updateCacheHistory();
@@ -158,9 +267,18 @@ function dashboard() {
 
         async fetchBuilds() {
             try {
-                const response = await fetch('/api/v1/builds');
+                // Tasks refresh alongside builds on the same throttle:
+                // websocket events update task state instantly, and this
+                // refetch heals any gap (reconnect window, reload) while
+                // keeping the activity window bounded.
+                const [response, tasksResponse] = await Promise.all([
+                    fetch('/api/v1/builds'),
+                    fetch('/api/v1/tasks?limit=200')
+                ]);
                 const data = await response.json();
                 this.builds = data.builds || data || [];
+                const tasksData = await tasksResponse.json();
+                this.recentTasks = (tasksData.tasks || []).slice(0, 200);
                 this.lastBuildFetchAt = Date.now();
                 this.$nextTick(() => this.updateDurationsChart());
             } catch (err) {
@@ -331,7 +449,9 @@ function dashboard() {
                     break;
                 case 'task_completed': {
                     const index = this.recentTasks.findIndex((task) => task.id === message.data.id);
-                    const status = message.data.exit_code === 0 ? 'success' : 'failed';
+                    // exit_code is omitempty in the API: zero is omitted,
+                    // so a missing exit_code IS the success case.
+                    const status = message.data.exit_code ? 'failed' : 'success';
                     if (index >= 0) this.recentTasks[index] = { ...message.data, status };
                     else this.recentTasks.unshift({ ...message.data, status });
                     this.events.push(message);
@@ -341,7 +461,7 @@ function dashboard() {
                 }
             }
             this.events = this.events.slice(-100);
-            this.recentTasks = this.recentTasks.slice(0, 20);
+            this.recentTasks = this.recentTasks.slice(0, 200);
         },
 
         buildStatus(build) {
@@ -543,6 +663,16 @@ function dashboard() {
                     // the very builds the tooltip exists to inspect. With
                     // one dataset, items[0].dataIndex is unambiguous.
                     interaction: { mode: 'index', intersect: false },
+                    // Hover cursor and click-through: a bar is the shortest
+                    // path to its build's detail page.
+                    onHover: (evt, elements) => {
+                        evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+                    },
+                    onClick: (evt, elements) => {
+                        if (!elements.length) return;
+                        const build = this.durationChartBuilds[elements[0].index];
+                        if (build) window.location.hash = '#/build/' + encodeURIComponent(build.id);
+                    },
                     plugins: {
                         legend: { display: false },
                         tooltip: {

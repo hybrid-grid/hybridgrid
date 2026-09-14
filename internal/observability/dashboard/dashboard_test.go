@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1008,6 +1009,74 @@ func TestServer_HandleTasks(t *testing.T) {
 	}
 	if firstTask["build_type"] != "flutter" {
 		t.Errorf("build_type = %v, want flutter", firstTask["build_type"])
+	}
+}
+
+// TestServer_HandleTasks_Limit guards the bounded activity window: the
+// cluster activity pane polls ?limit=N instead of the full retained set,
+// and the response must stay newest-first when truncated.
+func TestServer_HandleTasks_Limit(t *testing.T) {
+	cfg := DefaultConfig()
+	s := New(cfg, &mockProvider{})
+
+	go s.hub.Run()
+	defer s.hub.Stop()
+
+	for i := 0; i < 5; i++ {
+		s.hub.BroadcastTaskCompleted(&TaskInfo{
+			ID:            fmt.Sprintf("task-%d", i),
+			BuildType:     "cpp",
+			Status:        "completed",
+			WorkerID:      "worker-1",
+			StartedAtMs:   int64(1000000 + i),
+			CompletedAtMs: int64(1000010 + i),
+			DurationMs:    10,
+			ExitCode:      0,
+		})
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	get := func(path string) (tasks []*TaskInfo, count int) {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		s.handleTasks(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200", path, rec.Code)
+		}
+		var response struct {
+			Tasks []*TaskInfo `json:"tasks"`
+			Count int         `json:"count"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+			t.Fatalf("%s decode error: %v", path, err)
+		}
+		return response.Tasks, response.Count
+	}
+
+	tasks, count := get("/api/v1/tasks?limit=2")
+	if len(tasks) != 2 || count != 2 {
+		t.Errorf("limit=2 returned len=%d count=%d, want 2/2", len(tasks), count)
+	}
+	// GetTasks is newest-first; truncation keeps the newest end.
+	if tasks[0].ID != "task-4" || tasks[1].ID != "task-3" {
+		t.Errorf("limit=2 returned [%s, %s], want newest two [task-4, task-3]", tasks[0].ID, tasks[1].ID)
+	}
+
+	// Invalid and non-positive limits are ignored, not errors.
+	tasks, count = get("/api/v1/tasks?limit=banana")
+	if len(tasks) != 5 || count != 5 {
+		t.Errorf("limit=banana returned len=%d, want all 5", len(tasks))
+	}
+	tasks, _ = get("/api/v1/tasks?limit=-1")
+	if len(tasks) != 5 {
+		t.Errorf("limit=-1 returned len=%d, want all 5", len(tasks))
+	}
+
+	// A limit above the retained count returns everything.
+	tasks, _ = get("/api/v1/tasks?limit=50")
+	if len(tasks) != 5 {
+		t.Errorf("limit=50 returned len=%d, want all 5", len(tasks))
 	}
 }
 
