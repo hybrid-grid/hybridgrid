@@ -90,9 +90,12 @@ jobs:
       - name: Run golangci-lint
         # Action major must track the golangci-lint major: v4 predates
         # golangci-lint v2 and invokes it with removed v1 flags (exit 3).
+        # The lint version is pinned so results are reproducible: with
+        # `latest`, an upstream release can change lint findings under
+        # an open PR. Bumping the pin is a one-line, reviewable change.
         uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v2.13.2
           args: --timeout=5m
 
   # ============================================
