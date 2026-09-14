@@ -176,13 +176,19 @@ function dashboard() {
                     row.slot = slot;
                 }
                 const worker = this.workers.find((w) => w.id === id);
-                const slots = Math.max((worker && worker.max_parallel_tasks) || 1, slotEnds.length, 1);
-                const slotRows = Array.from({ length: slots }, () => []);
+                // Render only occupied sub-rows: default --max-parallel is
+                // auto (one per core — 16 on the dev box) and drawing
+                // unoccupied capacity as empty tracks is noise; idle
+                // capacity is already visible in the Executor Status
+                // pane. The rendered depth is the concurrency this
+                // worker actually reached in the window.
+                const depth = Math.max(slotEnds.length, 1);
+                const slotRows = Array.from({ length: depth }, () => []);
                 for (const row of rows) slotRows[row.slot].push(row);
                 lanes.push({
                     id,
                     host: (worker && worker.host) || id,
-                    slots,
+                    taskCount: rows.length,
                     slotRows,
                     known: !!worker,
                     idle: rows.length === 0

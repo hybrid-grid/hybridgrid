@@ -137,7 +137,7 @@
                 <div class="cluster-lane">
                   <div class="cluster-lane-label">
                     <strong :class="lane.known ? '' : 'muted'" :title="lane.id" x-text="lane.host"></strong>
-                    <span class="muted" x-text="lane.idle ? 'idle' : `${lane.slots} slot${lane.slots === 1 ? '' : 's'}`"></span>
+                    <span class="muted" x-text="lane.idle ? 'idle' : `${lane.taskCount} task${lane.taskCount === 1 ? '' : 's'}`"></span>
                   </div>
                   <div class="cluster-tracks">
                     <template x-for="(rows, slotIndex) in lane.slotRows" :key="slotIndex">
