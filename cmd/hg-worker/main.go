@@ -279,7 +279,7 @@ It executes build tasks received from the coordinator.`,
 				w.Write([]byte("OK\n"))
 			})
 			metricsMux.Handle("/metrics", promhttp.Handler())
-			metricsMux.Handle("/log-level", logging.NewLogLevelHandler())
+			metricsMux.Handle("/log-level", logging.NewLogLevelHandler(token))
 			metricsServer := &http.Server{
 				Addr:    fmt.Sprintf(":%d", httpPort),
 				Handler: metricsMux,

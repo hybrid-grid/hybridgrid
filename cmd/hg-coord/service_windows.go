@@ -71,6 +71,7 @@ func (s *coordService) Execute(args []string, r <-chan svc.ChangeRequest, change
 	// Start HTTP dashboard server
 	dashCfg := dashboard.DefaultConfig()
 	dashCfg.Port = s.httpPort
+	dashCfg.AuthToken = s.token
 	dashSrv := dashboard.New(dashCfg, srv.NewStatsProvider())
 
 	go func() {

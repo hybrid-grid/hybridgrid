@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+
+	"github.com/h3nr1-d14z/hybridgrid/internal/security/auth"
 )
 
 // LogLevelRequest represents a log level change request.
@@ -42,10 +45,20 @@ var validLevels = map[string]zerolog.Level{
 //   - GET /log-level: returns current log level as JSON
 //   - PUT /log-level or POST /log-level: changes log level from JSON body
 //
-// TODO(v0.3.0): Add authentication for log-level endpoint
-func NewLogLevelHandler() http.Handler {
+// When token is non-empty, every request must present it in the
+// Authorization header ("Authorization: Bearer <token>"; the Bearer
+// prefix is optional). An empty token keeps the endpoint open — the
+// unauthenticated LAN default. Validation is constant-time via
+// auth.ValidateToken, the same primitive the gRPC interceptors use.
+func NewLogLevelHandler(token string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+
+		if token != "" && !authorized(r, token) {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(ErrorResponse{Error: "unauthorized"}) //nolint:errcheck
+			return
+		}
 
 		switch r.Method {
 		case http.MethodGet:
@@ -114,4 +127,14 @@ func handleSetLogLevel(w http.ResponseWriter, r *http.Request) {
 		Level:    req.Level,
 		Previous: previousLevelName,
 	}) //nolint:errcheck
+}
+
+// authorized checks the request's Authorization header against the
+// expected token. The RFC 7235 Bearer scheme prefix is accepted and
+// optional, so both `Authorization: $TOKEN` and
+// `Authorization: Bearer $TOKEN` work.
+func authorized(r *http.Request, token string) bool {
+	provided := strings.TrimSpace(r.Header.Get("Authorization"))
+	provided = strings.TrimPrefix(provided, "Bearer ")
+	return auth.ValidateToken(provided, token)
 }
