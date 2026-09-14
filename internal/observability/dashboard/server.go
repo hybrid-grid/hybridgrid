@@ -77,6 +77,8 @@ func New(cfg Config, provider StatsProvider) *Server {
 	mux.HandleFunc("/api/v1/events", s.handleEvents)
 	mux.HandleFunc("/api/v1/tasks", s.handleTasks)
 	mux.HandleFunc("/api/v1/builds", s.handleBuilds)
+	mux.HandleFunc("GET /api/v1/builds/{id}", s.handleBuildByID)
+	mux.HandleFunc("/api/v1/builds/{id}", s.handleBuildByID)
 
 	// WebSocket endpoint
 	mux.HandleFunc("/ws", s.handleWebSocket)
@@ -129,7 +131,7 @@ type EventNotifierFunc struct {
 }
 
 // CreateEventNotifier creates event notifier callbacks for the coordinator.
-func (s *Server) CreateEventNotifier() (onStart func(id, buildID, buildType, status, workerID string, startedAt int64), onComplete func(id, buildID, buildType, status, workerID string, startedAt, completedAt, durationMs int64, exitCode int32, errorMsg string)) {
+func (s *Server) CreateEventNotifier() (onStart func(id, buildID, buildType, status, workerID string, startedAt int64), onComplete func(id, buildID, buildType, status, workerID string, startedAt, completedAt, durationMs, queueMs, compileMs int64, exitCode int32, errorMsg string)) {
 	onStart = func(id, buildID, buildType, status, workerID string, startedAt int64) {
 		s.hub.BroadcastTaskStarted(&TaskInfo{
 			ID:        id,
@@ -140,7 +142,7 @@ func (s *Server) CreateEventNotifier() (onStart func(id, buildID, buildType, sta
 			StartedAt: startedAt,
 		})
 	}
-	onComplete = func(id, buildID, buildType, status, workerID string, startedAt, completedAt, durationMs int64, exitCode int32, errorMsg string) {
+	onComplete = func(id, buildID, buildType, status, workerID string, startedAt, completedAt, durationMs, queueMs, compileMs int64, exitCode int32, errorMsg string) {
 		s.hub.BroadcastTaskCompleted(&TaskInfo{
 			ID:           id,
 			BuildID:      buildID,
@@ -150,6 +152,8 @@ func (s *Server) CreateEventNotifier() (onStart func(id, buildID, buildType, sta
 			StartedAt:    startedAt,
 			CompletedAt:  completedAt,
 			DurationMs:   durationMs,
+			QueueMs:      queueMs,
+			CompileMs:    compileMs,
 			ExitCode:     exitCode,
 			ErrorMessage: errorMsg,
 		})
