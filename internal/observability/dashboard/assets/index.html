@@ -45,6 +45,7 @@
           <a href="#build-history">Build History</a>
           <a href="#build-durations">Build Durations</a>
           <a href="#cluster-activity">Cluster Activity</a>
+          <a href="#worker-throughput">Worker Throughput</a>
           <a href="#executor-status">Executor Status</a>
           <a href="#build-queue">Build Queue</a>
           <a href="#cache-statistics">Cache Statistics</a>
@@ -154,6 +155,17 @@
                 </div>
               </template>
             </div>
+          </div>
+        </section>
+
+        <section class="pane" id="worker-throughput" aria-labelledby="worker-throughput-heading">
+          <div class="pane-header">
+            <h2 id="worker-throughput-heading">Worker Throughput</h2>
+            <span class="pane-note muted" x-show="workerThroughput().workers.length > 0" x-text="workerThroughput().note"></span>
+          </div>
+          <div class="pane-body">
+            <template x-if="workerThroughput().workers.length === 0"><p class="empty-state">No finished tasks yet — lines appear as builds complete.</p></template>
+            <div class="chart-box" x-show="workerThroughput().workers.length > 0"><canvas id="throughput-canvas" role="img" aria-label="Grouped bar chart of finished tasks per worker over time"></canvas></div>
           </div>
         </section>
 
