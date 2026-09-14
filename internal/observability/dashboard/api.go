@@ -3,6 +3,7 @@ package dashboard
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -152,7 +153,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleTasks returns recent task information.
+// handleTasks returns recent task information. An optional ?limit=N bounds
+// the response to the newest N tasks — the cluster activity pane polls a
+// bounded window rather than the full retained set (up to 20k tasks).
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -160,6 +163,11 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tasks := s.hub.GetTasks()
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if limit, err := strconv.Atoi(raw); err == nil && limit > 0 && len(tasks) > limit {
+			tasks = tasks[:limit]
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{

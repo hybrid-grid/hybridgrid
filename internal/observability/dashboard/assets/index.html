@@ -44,6 +44,7 @@
           <a href="#status">Overview</a>
           <a href="#build-history">Build History</a>
           <a href="#build-durations">Build Durations</a>
+          <a href="#cluster-activity">Cluster Activity</a>
           <a href="#executor-status">Executor Status</a>
           <a href="#build-queue">Build Queue</a>
           <a href="#cache-statistics">Cache Statistics</a>
@@ -115,6 +116,44 @@
           <div class="pane-body">
             <template x-if="builds.length === 0"><p class="empty-state">No builds yet.</p></template>
             <div class="chart-box" x-show="builds.length > 0"><canvas id="durations-canvas" role="img" aria-label="Bar chart of recent build durations in seconds"></canvas></div>
+          </div>
+        </section>
+
+        <section class="pane" id="cluster-activity" aria-labelledby="cluster-activity-heading">
+          <div class="pane-header">
+            <h2 id="cluster-activity-heading">Cluster Activity</h2>
+            <span class="pane-note muted" x-show="activityLanes.lanes.length > 0" x-text="`peak ${activityLanes.peak} concurrent compile${activityLanes.peak === 1 ? '' : 's'} · newest ${recentTasks.length} task${recentTasks.length === 1 ? '' : 's'}${activityLanes.queuedHidden ? ' · ' + activityLanes.queuedHidden + ' undispatched' : ''}`"></span>
+          </div>
+          <div class="pane-body">
+            <template x-if="activityLanes.lanes.length === 0"><p class="empty-state">No dispatched tasks yet — bars appear as builds run.</p></template>
+            <div class="cluster" x-show="activityLanes.lanes.length > 0">
+              <div class="cluster-lane cluster-axis-row" aria-hidden="true">
+                <div class="cluster-lane-label"><span class="muted">time</span></div>
+                <div class="cluster-ticks">
+                  <template x-for="tick in activityLanes.axisTicks" :key="tick"><span class="mono muted" x-text="formatTime(tick)"></span></template>
+                </div>
+              </div>
+              <template x-for="lane in activityLanes.lanes" :key="lane.id">
+                <div class="cluster-lane">
+                  <div class="cluster-lane-label">
+                    <strong :class="lane.known ? '' : 'muted'" :title="lane.id" x-text="lane.host"></strong>
+                    <span class="muted" x-text="lane.idle ? 'idle' : `${lane.slots} slot${lane.slots === 1 ? '' : 's'}`"></span>
+                  </div>
+                  <div class="cluster-tracks">
+                    <template x-for="(rows, slotIndex) in lane.slotRows" :key="slotIndex">
+                      <div class="cluster-track">
+                        <template x-for="row in rows" :key="'q-' + row.task.id">
+                          <span class="tl-segment tl-queue" :style="`left:${row.queueLeft}%; width:${row.queueWidth}%`" :title="clusterTooltip(row)"></span>
+                        </template>
+                        <template x-for="row in rows" :key="'r-' + row.task.id">
+                          <a class="tl-segment" :class="'tl-' + row.statusClass" :style="`left:${row.runLeft}%; width:${row.runWidth}%`" :title="clusterTooltip(row)" :href="row.task.build_id ? '#/build/' + encodeURIComponent(row.task.build_id) : '#status'"></a>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </template>
+            </div>
           </div>
         </section>
 
