@@ -1249,9 +1249,9 @@ func TestHub_GetBuilds_TotalEvictionMarksTruncated(t *testing.T) {
 	hub := NewHub()
 	hub.maxTasksTotal = 2
 
-	hub.BroadcastTaskCompleted(&TaskInfo{ID: "a1", BuildID: "build-a", Status: "completed", StartedAt: 100, CompletedAt: 110})
-	hub.BroadcastTaskCompleted(&TaskInfo{ID: "a2", BuildID: "build-a", Status: "completed", StartedAt: 101, CompletedAt: 111})
-	hub.BroadcastTaskCompleted(&TaskInfo{ID: "b1", BuildID: "build-b", Status: "completed", StartedAt: 102, CompletedAt: 112})
+	hub.BroadcastTaskCompleted(&TaskInfo{ID: "a1", BuildID: "build-a", Status: "completed", StartedAtMs: 100, CompletedAtMs: 110})
+	hub.BroadcastTaskCompleted(&TaskInfo{ID: "a2", BuildID: "build-a", Status: "completed", StartedAtMs: 101, CompletedAtMs: 111})
+	hub.BroadcastTaskCompleted(&TaskInfo{ID: "b1", BuildID: "build-b", Status: "completed", StartedAtMs: 102, CompletedAtMs: 112})
 
 	// maxTasksTotal=2 evicted a1: build-a now holds a subset of its real
 	// tasks and must say so rather than report 1/1 as complete counts.
