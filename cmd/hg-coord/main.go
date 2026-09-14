@@ -70,6 +70,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			noMdns, _ := cmd.Flags().GetBool("no-mdns")
 			schedulerType, _ := cmd.Flags().GetString("scheduler")
 			taskLogPath, _ := cmd.Flags().GetString("task-log")
+			dispatchQueueTimeout, _ := cmd.Flags().GetDuration("dispatch-queue-timeout")
 			epsilonValue, _ := cmd.Flags().GetFloat64("epsilon")
 			alphaValue, _ := cmd.Flags().GetFloat64("alpha")
 			warmStart, _ := cmd.Flags().GetInt("warm-start")
@@ -168,6 +169,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			cfg.EnableRequestID = true
 			cfg.SchedulerType = schedulerType
 			cfg.TaskLogPath = taskLogPath
+			cfg.DispatchQueueTimeout = dispatchQueueTimeout
 			cfg.EpsilonValue = epsilonValue
 			cfg.AlphaValue = alphaValue
 			cfg.WarmStartTasks = warmStart
@@ -282,6 +284,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 	serveCmd.Flags().Float64("alpha", 1.0, "LinUCB exploration coefficient α (in [0, 10]; ignored for other schedulers)")
 	serveCmd.Flags().Int("warm-start", 100, "Hybrid-LinUCB warm-start dispatch count (>= 0; ignored for other schedulers)")
 	serveCmd.Flags().Float64("load-penalty", 0.5, "Hybrid-LinUCB load penalty λ (in [0, 5]; ignored for other schedulers)")
+	serveCmd.Flags().Duration("dispatch-queue-timeout", 30*time.Second, "How long an over-capacity compile waits in the dispatch queue before failing (0 disables queueing)")
 	serveCmd.Flags().String("tls-cert", "", "Path to TLS certificate file (PEM format)")
 	serveCmd.Flags().String("tls-key", "", "Path to TLS private key file (PEM format)")
 	serveCmd.Flags().String("tls-ca", "", "Path to CA certificate for client verification (mTLS)")

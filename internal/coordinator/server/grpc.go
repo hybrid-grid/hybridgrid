@@ -39,6 +39,14 @@ const maxGRPCMessageSize = 512 * 1024 * 1024
 // dispatchLoop's own (sub-microsecond) processing rate.
 const dispatchQueueSize = 256
 
+// maxQueuedCompiles bounds how many Compile() calls may sit in the
+// dispatch queue (the backpressure path entered when the fast dispatch
+// budget is exhausted) before the coordinator reverts to rejecting.
+// Mirrors dispatchQueueSize: large enough for a make -j storm, small
+// enough that a wedged cluster fails fast instead of accumulating
+// unbounded waiters.
+const maxQueuedCompiles = 256
+
 // dispatchRequest is one pending "pick a worker and book it" decision.
 // Compile() submits these to s.dispatchCh instead of calling
 // scheduler.SelectWith and s.registry.IncrementTasks directly, so every
@@ -141,6 +149,81 @@ func (s *Server) dispatch(buildType pb.BuildType, arch pb.Architecture, clientOS
 	return res.worker, res.info, res.activeAtDispatch, res.err
 }
 
+// signalDispatchCapacity wakes every Compile() call waiting in the
+// dispatch queue: a task completed (slot freed) or a worker registered
+// (new capacity). Broadcast by close-and-replace, so a signal that
+// arrives while no waiter is listening is not lost — the next waiter
+// sees the already-closed channel immediately and retries once.
+func (s *Server) signalDispatchCapacity() {
+	s.dispatchSignalMu.Lock()
+	if s.dispatchSignal != nil {
+		close(s.dispatchSignal)
+		s.dispatchSignal = make(chan struct{})
+	}
+	s.dispatchSignalMu.Unlock()
+}
+
+// dispatchCapacitySignal returns the current broadcast channel. Grab it
+// once per wait; a channel replaced after the grab still fires on the
+// next signal.
+func (s *Server) dispatchCapacitySignal() chan struct{} {
+	s.dispatchSignalMu.Lock()
+	defer s.dispatchSignalMu.Unlock()
+	return s.dispatchSignal
+}
+
+// awaitDispatchCapacity blocks until a capacity signal fires, deadline
+// passes, or the client context is cancelled. Returns true when the
+// caller should retry worker selection — races between woken waiters
+// mean the retry can still find every slot taken, in which case the
+// caller re-enters with the same deadline. Callers must have entered
+// the queue via enterDispatchQueue (the waiter cap is checked there,
+// once per queued Compile, not per wake).
+func (s *Server) awaitDispatchCapacity(ctx context.Context, deadline time.Time) bool {
+	// The re-check tick bounds signal loss: a capacity signal that
+	// fires between the caller's last failed dispatch attempt and this
+	// wait is invisible (the waiter grabs the replacement channel), so
+	// without the tick it would sleep to the deadline despite free
+	// capacity. With it, worst case the caller re-checks capacity one
+	// tick late. It also makes the queue robust against any future
+	// capacity-freeing path that forgets to signal.
+	const recheckInterval = 250 * time.Millisecond
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return false
+	}
+	timer := time.NewTimer(min(remaining, recheckInterval))
+	defer timer.Stop()
+	select {
+	case <-s.dispatchCapacitySignal():
+		return true
+	case <-timer.C:
+		// Tick: not a timeout — the deadline may still be far away.
+		// Returning true lets the caller run a fresh dispatch budget,
+		// which re-reads actual capacity.
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// enterDispatchQueue admits one Compile() into the backpressure queue,
+// refusing when the waiter cap is reached so overload surfaces to the
+// client instead of piling up. Pair with leaveDispatchQueue.
+func (s *Server) enterDispatchQueue() bool {
+	if atomic.AddInt64(&s.queuedCompiles, 1) > maxQueuedCompiles {
+		atomic.AddInt64(&s.queuedCompiles, -1)
+		return false
+	}
+	return true
+}
+
+// leaveDispatchQueue releases a queue admission taken by
+// enterDispatchQueue.
+func (s *Server) leaveDispatchQueue() {
+	atomic.AddInt64(&s.queuedCompiles, -1)
+}
+
 // connPool caches gRPC client connections to workers by address.
 type connPool struct {
 	mu       sync.Mutex
@@ -223,6 +306,12 @@ type Config struct {
 	// TaskLogPath is the path to the JSON Lines per-task log file.
 	// Empty or "stdout" routes records to standard output.
 	TaskLogPath string
+	// DispatchQueueTimeout bounds how long a Compile() call may wait
+	// in the dispatch queue after the fast dispatch budget (~700 ms)
+	// is exhausted, before the coordinator gives up and returns the
+	// "no worker available" failure. 0 disables queueing entirely
+	// (ablation: the pre-backpressure reject-after-budget behavior).
+	DispatchQueueTimeout time.Duration
 }
 
 // DefaultConfig returns sensible defaults.
@@ -238,6 +327,8 @@ func DefaultConfig() Config {
 		// live here rather than in the factory.
 		WarmStartTasks:   100,
 		LoadPenaltyValue: 0.5,
+
+		DispatchQueueTimeout: 30 * time.Second,
 	}
 }
 
@@ -342,6 +433,15 @@ type Server struct {
 	dispatchWG     sync.WaitGroup
 	dispatchOnce   sync.Once
 
+	// dispatchSignal broadcasts "a slot may have freed" to Compile()
+	// calls waiting in the dispatch queue (backpressure path). It is
+	// closed and replaced under dispatchSignalMu; waiters select on
+	// the channel they grabbed. queuedCompiles counts current waiters
+	// against maxQueuedCompiles.
+	dispatchSignalMu sync.Mutex
+	dispatchSignal   chan struct{}
+	queuedCompiles   int64
+
 	activeTasks         int64
 	queuedTasks         int64
 	totalTasks          int64
@@ -436,6 +536,7 @@ func New(cfg Config) *Server {
 		flutterCache:   make(map[string]*flutterCacheEntry),
 		unityCache:     make(map[string]*unityCacheEntry),
 		dispatchCh:     make(chan *dispatchRequest, dispatchQueueSize),
+		dispatchSignal: make(chan struct{}),
 	}
 	go s.dispatchLoop()
 	return s
@@ -578,6 +679,9 @@ func (s *Server) Handshake(ctx context.Context, req *pb.HandshakeRequest) (*pb.H
 		if err := s.registry.UpdateHeartbeat(workerID); err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to register worker: %v", err)
 		}
+	} else {
+		// Fresh capacity joined the cluster — wake queued waiters.
+		s.signalDispatchCapacity()
 	}
 
 	// Log C++ capabilities for debugging
@@ -698,6 +802,13 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	)
 	atomic.AddInt64(&s.activeTasks, 1)
 	defer atomic.AddInt64(&s.activeTasks, -1)
+	// queued marks entry into the backpressure path; queueDeadline
+	// spans the whole queued phase (NOT reset per wake) so total wait
+	// stays bounded.
+	var (
+		queued        bool
+		queueDeadline time.Time
+	)
 	for attempt := 1; ; attempt++ {
 		worker, dispatchInfo, activeAtDispatch, err = s.dispatch(pb.BuildType_BUILD_TYPE_CPP, req.TargetArch, clientOSFilter, taskCtx)
 		if err != nil {
@@ -723,6 +834,53 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 					Int("attempt", attempt).
 					Msg("No worker currently has capacity; retrying")
 				time.Sleep(time.Duration(attempt) * 25 * time.Millisecond)
+				continue
+			}
+			// Fast budget exhausted (~700 ms): every eligible worker
+			// has been at capacity the whole time. Instead of failing
+			// the build, queue — wait for a completion or registration
+			// signal and retry with a fresh budget, bounded by
+			// DispatchQueueTimeout and the client's own context. This
+			// is dispatch backpressure: a make -jN storm larger than
+			// cluster capacity now stretches over time instead of
+			// hard-failing the over-capacity compiles. A
+			// DispatchQueueTimeout of 0 (ablation) or a full queue
+			// keeps the pre-backpressure reject behavior.
+			if s.config.DispatchQueueTimeout > 0 && !queued {
+				if s.enterDispatchQueue() {
+					queued = true
+					defer s.leaveDispatchQueue()
+					queueDeadline = time.Now().Add(s.config.DispatchQueueTimeout)
+					log.Warn().
+						Str("task_id", req.TaskId).
+						Dur("timeout", s.config.DispatchQueueTimeout).
+						Msg("All workers at capacity; queued for dispatch")
+					// A fresh budget immediately (no await first):
+					// capacity freed during the just-exhausted budget
+					// is caught by these attempts — going straight to
+					// await-on-signal could miss a signal that already
+					// fired.
+					attempt = 0
+					continue
+				}
+			}
+			if queued {
+				if !s.awaitDispatchCapacity(ctx, queueDeadline) {
+					span.SetStatus(otelcodes.Error, "dispatch queue timeout")
+					tracing.RecordError(ctx, err)
+					log.Error().Err(err).
+						Str("task_id", req.TaskId).
+						Str("client_os", req.ClientOs).
+						Bool("cross_compile", len(req.RawSource) > 0).
+						Msg("Dispatch queue timeout exceeded; no worker capacity became available")
+					return &pb.CompileResponse{
+						Status:   pb.TaskStatus_STATUS_FAILED,
+						ExitCode: 1,
+						Stderr:   fmt.Sprintf("dispatch queue timeout (%v) exceeded: no worker capacity became available: %v", s.config.DispatchQueueTimeout, err),
+					}, nil
+				}
+				// A slot may have freed: retry with a fresh fast budget.
+				attempt = 0
 				continue
 			}
 			span.SetStatus(otelcodes.Error, "no worker available")
@@ -818,6 +976,8 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 		compileTime = time.Duration(resp.CompilationTimeMs) * time.Millisecond
 	}
 	s.registry.DecrementTasks(worker.ID, success, compileTime)
+	// A cpp slot just freed — wake queued Compile() waiters.
+	s.signalDispatchCapacity()
 
 	// Feedback loop for online-learning schedulers. Reward convention:
 	// higher is better. We use a normalised negative log-latency so the
@@ -924,7 +1084,13 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 			StartedAtMs:   taskStartTime.UnixMilli(),
 			CompletedAtMs: taskCompletedTime.UnixMilli(),
 			DurationMs:    taskCompletedTime.Sub(taskStartTime).Milliseconds(),
-			QueueTimeMs:   resp.GetQueueTimeMs(),
+			// Coordinator-side queue time (Compile entry → dispatch),
+			// the same span the JSONL task log records: with dispatch
+			// backpressure the real wait happens here, before the
+			// worker is involved — the worker's own QueueTimeMs is
+			// always 0 (its admission control rejects rather than
+			// queues).
+			QueueTimeMs:   queueTime.Milliseconds(),
 			CompileTimeMs: resp.GetCompilationTimeMs(),
 		}
 		if success {
@@ -1164,6 +1330,9 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest, b
 	success := err == nil && buildResp != nil && buildResp.Status == pb.TaskStatus_STATUS_COMPLETED
 
 	s.registry.DecrementTasks(worker.ID, success, time.Duration(0))
+	// A slot just freed (flutter/unity) — queued cpp Compile() waiters
+	// can use it (ActiveTasks accounting is shared across build types).
+	s.signalDispatchCapacity()
 
 	taskCompletedTime := time.Now()
 
@@ -1379,6 +1548,9 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 	success := err == nil && buildResp != nil && buildResp.Status == pb.TaskStatus_STATUS_COMPLETED
 
 	s.registry.DecrementTasks(worker.ID, success, time.Duration(0))
+	// A slot just freed (flutter/unity) — queued cpp Compile() waiters
+	// can use it (ActiveTasks accounting is shared across build types).
+	s.signalDispatchCapacity()
 
 	taskCompletedTime := time.Now()
 

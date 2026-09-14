@@ -317,7 +317,7 @@ a.task-link:hover { text-decoration: underline; }
 .timeline-label:hover { text-decoration: underline; }
 .timeline-track { position: relative; height: 1.05rem; background: color-mix(in sRGB, var(--text-color-secondary) 8%, transparent); border-radius: 2px; overflow: hidden; }
 .tl-segment { position: absolute; top: 0; height: 100%; border-radius: 2px; transition: left var(--standard-transition), width var(--standard-transition); }
-.tl-queue { background: color-mix(in sRGB, var(--medium-grey) 60%, transparent); }
+.tl-queue { background: color-mix(in sRGB, var(--medium-grey) 60%, transparent); z-index: 1; }
 .tl-success { background: var(--blue); }
 .tl-failed { background: var(--red); }
 .tl-running { background: var(--blue); animation: tl-pulse 1.4s ease-in-out infinite; }
