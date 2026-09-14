@@ -12,8 +12,9 @@ import (
 )
 
 // TestDispatch_NeverOverbooksUnderConcurrency is a regression test for the
-// race documented in undersubscription-explains-tie /
-// cgroup-fix-verified-live: concurrent Compile() handlers used to call
+// race documented in docs/thesis/hybrid-linucb-implementation.md
+// (ResourceExhausted blocker) and PR hybrid-grid/hybridgrid#9: concurrent
+// Compile() handlers used to call
 // scheduler.SelectWith (read ActiveTasks) and registry.IncrementTasks
 // (write it) as two separate, unsynchronized steps, so multiple goroutines
 // racing on the same tightly-capacity-limited worker could all read the

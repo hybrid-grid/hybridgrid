@@ -185,8 +185,8 @@ func TestLeastLoadedScheduler_SkipsUnhealthy(t *testing.T) {
 }
 
 // TestLeastLoadedScheduler_RespectsCapacityOnHeterogeneousCluster is a
-// regression test for the bug documented in undersubscription-explains-tie
-// / cgroup-fix-verified-live: on a heterogeneous cluster (workers with
+// regression test for the capacity bug fixed in PR
+// hybrid-grid/hybridgrid#9: on a heterogeneous cluster (workers with
 // different MaxParallel), comparing raw ActiveTasks without a capacity
 // check picks an already-full low-capacity worker whenever its absolute
 // count is still numerically smaller than a higher-capacity worker's
@@ -349,7 +349,7 @@ func TestP2CScheduler_PrefersBetterWorker(t *testing.T) {
 
 // TestP2CScheduler_ScoreDistinguishesFractionalCPUQuotas is a regression
 // test mirroring TestLinUCB_FeatureVector_DistinguishesFractionalCPUQuotas
-// (see undersubscription-explains-tie): P2C's CPU scoring term used the
+// (see docs/thesis/bao-cao-tien-do-260809.md §1.5): P2C's CPU scoring term used the
 // raw, cgroup-blind caps.CpuCores, which is identical across every
 // worker on a Docker --cpus-limited cluster (host core count), making
 // the term a worker-independent constant. Asserts the CPU contribution
