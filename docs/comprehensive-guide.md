@@ -129,8 +129,8 @@ docker compose up -d
 # Scale to more workers
 docker compose up -d --scale worker=4
 
-# View dashboard (standalone hg-dashboard, default :8080; compose publishes :8081)
-open http://localhost:8080
+# View dashboard (standalone hg-dashboard, default :8081; compose publishes :8081)
+open http://localhost:8081
 ```
 
 ---
@@ -853,7 +853,7 @@ hg-coord serve
 # Terminal 2: Worker
 hg-worker serve
 
-# Terminal 3: (Optional) Dashboard — then open http://localhost:8080
+# Terminal 3: (Optional) Dashboard — then open http://localhost:8081
 hg-dashboard serve --coordinator=localhost:9000 --insecure
 
 # Terminal 4: Build

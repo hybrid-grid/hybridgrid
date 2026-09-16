@@ -227,13 +227,6 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-			errCh := make(chan error, 2)
-			go func() {
-				if err := srv.Start(); err != nil {
-					errCh <- fmt.Errorf("gRPC server: %w", err)
-				}
-			}()
-
 			// Wire task events from the coordinator to the telemetry
 			// service; the standalone dashboard binary consumes them
 			// over gRPC StreamEvents, so the coordinator no longer
@@ -243,6 +236,13 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 				onStart:    teleStart,
 				onComplete: teleComplete,
 			})
+
+			errCh := make(chan error, 2)
+			go func() {
+				if err := srv.Start(); err != nil {
+					errCh <- fmt.Errorf("gRPC server: %w", err)
+				}
+			}()
 
 			// Start ops HTTP server (health, metrics, log-level).
 			opsSrv := &opshttp.Server{Port: httpPort, AuthToken: token}

@@ -51,6 +51,13 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" \
     -o /bin/hgbuild ./cmd/hgbuild
 
+# hg-dashboard: Standalone dashboard service
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -trimpath \
+    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" \
+    -o /bin/hg-dashboard ./cmd/hg-dashboard
+
 # =============================================================================
 # Stage 2: hg-coord - Coordinator image
 # =============================================================================
@@ -64,8 +71,6 @@ COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 # Copy the binary
 COPY --from=builder /bin/hg-coord /usr/local/bin/hg-coord
 
-# Copy embedded dashboard assets (if any static files)
-# The dashboard uses go:embed, so assets are in binary
 
 # Run as non-root user (numeric UID for scratch)
 USER 65534:65534
@@ -112,7 +117,25 @@ USER 65534:65534
 ENTRYPOINT ["/usr/local/bin/hgbuild"]
 
 # =============================================================================
-# Stage 5: All-in-one image (for development/testing)
+# Stage 5: hg-dashboard - Standalone dashboard image
+# =============================================================================
+FROM scratch AS hg-dashboard
+
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+
+COPY --from=builder /bin/hg-dashboard /usr/local/bin/hg-dashboard
+
+USER 65534:65534
+
+# Dashboard HTTP port (SPA, REST API, WebSocket)
+EXPOSE 8081
+
+ENTRYPOINT ["/usr/local/bin/hg-dashboard"]
+CMD ["serve"]
+
+# =============================================================================
+# Stage 6: All-in-one image (for development/testing)
 # =============================================================================
 FROM alpine:3.19 AS all-in-one
 
@@ -124,6 +147,7 @@ RUN addgroup -S hybridgrid && adduser -S hybridgrid -G hybridgrid
 COPY --from=builder /bin/hg-coord /usr/local/bin/
 COPY --from=builder /bin/hg-worker /usr/local/bin/
 COPY --from=builder /bin/hgbuild /usr/local/bin/
+COPY --from=builder /bin/hg-dashboard /usr/local/bin/
 
 USER hybridgrid
 

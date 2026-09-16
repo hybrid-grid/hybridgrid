@@ -343,7 +343,7 @@ Flutter workers may not be available. Check:
 hgbuild workers -v
 
 # Verify worker has Flutter capability
-curl http://localhost:8080/api/v1/workers | jq '.workers[] | select(.build_types | contains(["FLUTTER"]))'
+curl http://localhost:8081/api/v1/workers | jq '.workers[] | select(.build_types | contains(["FLUTTER"]))'
 ```
 
 ### "project not found"

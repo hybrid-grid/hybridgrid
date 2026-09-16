@@ -36,6 +36,12 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" \
     -o /bin/hgbuild ./cmd/hgbuild
 
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -trimpath \
+    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" \
+    -o /bin/hg-dashboard ./cmd/hg-dashboard
+
 FROM debian:bookworm-slim
 
 RUN set -eux; \
@@ -58,5 +64,6 @@ RUN set -eux; \
 COPY --from=builder /bin/hg-coord /usr/local/bin/
 COPY --from=builder /bin/hg-worker /usr/local/bin/
 COPY --from=builder /bin/hgbuild /usr/local/bin/
+COPY --from=builder /bin/hg-dashboard /usr/local/bin/
 
 WORKDIR /workspace
