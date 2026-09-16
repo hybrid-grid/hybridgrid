@@ -336,6 +336,8 @@ To evaluate HG-LinUCB fairly we implemented five other schedulers behind the *sa
 
 Of these five, the blocked evaluation of Section 7 carries three: LeastLoaded, P2C and LinUCB. **LinUCB is the ablation our central claim rests on** — it differs from HG-LinUCB only in $N$ and $\lambda$, on one shared code path, so the gap between them isolates the two proposed mechanisms and nothing else. HEFT and ε-greedy were implemented and exercised only in preliminary single-run measurements; we did not carry them into the 10-block protocol, so this paper makes no statistically supported claim about either, and the value of context *as such* remains untested under a controlled protocol. Section 8.3 records this as a limitation.
 
+A sixth scheduler, **icecc-fastest**, is also implemented behind the same interface. It is a faithful Go port of the `fastest` selection rule from icecream (icecc) — the open-source, include-what-you-use-based distributed C/C++ compiler widely deployed on production build clusters — reimplemented natively inside Hybrid-Grid rather than run end-to-end, so that any difference in makespan is attributable to the decision rule alone and not to transport, compression or toolchain-shipping differences. The `icecc-fastest` row appears in the results tables produced by the analysis pipeline (`scripts/analyze_rigorous.py`); it was not carried into the blocked evaluation protocol of Section 7 and carries no statistically supported claim in this paper. We name it here only to ensure every scheduler identifier present in the released data is accounted for in the paper narrative.
+
 ## 7. Experimental Evaluation
 
 ### 7.1. Setup and protocol
@@ -351,6 +353,10 @@ Of these five, the blocked evaluation of Section 7 carries three: LeastLoaded, P
 **Statistical design.** Preliminary measurements showed that Docker on a single host has a substantial run-to-run noise floor, so single-run comparisons cannot support conclusions. More importantly, a "scheduler-major" layout — running all repetitions of one scheduler before moving to the next — *confounds* scheduler identity with slow host drift (thermal, background load). We therefore use a **full randomised block design**: 10 rounds, each running every scheduler configuration under test exactly once in a per-round seeded shuffled order, with a discarded warm-up build, a barrier waiting for all workers to register, a fixed cooldown between builds and sub-second timing. Each round executed five configurations; the four analysed here are the ones that bear on the research question, and because Holm's procedure steps down from the smallest $p$, the corrected $p$ of the weakest comparison — the one that decides the LeastLoaded verdict — is the same whether three or four comparisons accompany it. Each round is a statistical block, enabling **paired** tests: Friedman omnibus, one-sided Wilcoxon signed-rank, Holm–Bonferroni correction, Cliff's delta effect sizes, and bootstrap confidence intervals [18–21]. The coordinator restarts for every build, so the learners cold-start every time — a handicap that makes any bandit win a conservative conclusion.
 
 **Why blocking is mandatory.** An earlier pilot of this very measurement, in scheduler-major layout, showed HG-LinUCB beating LeastLoaded by 7.9% at $p = 0.0001$. When run order was blocked, that advantage vanished completely: the apparent difference was an artifact of thermal drift and background load, with LeastLoaded simply having been measured while the host was in a different state. We report this because it calibrates how much confidence any single-layout result on this class of platform deserves — including our own.
+
+**Throughput source.** All per-task timings and the `-j5` throughput figures reported in this paper are derived from the coordinator's JSONL task log (Section 3.4): each line is one task-level record emitted by `TaskLogger` on completion of a `Compile()` call, carrying the dispatch timestamp, worker context, and full latency decomposition. Throughput is thus counted as the number of completed task records, not by parsing console output or `wc -l` on build logs — the latter conflates one task with many lines of verbose compiler output and depends on the logging level. The JSONL log is the single, reproducible source: loading it into pandas via `read_json(lines=True)` yields exactly the per-task measurements that feed every table and mechanism analysis below.
+
+**Separate `-j5` datasets.** Two independent `-j5` measurement sets were collected under slightly different run conditions (different sessions, separated in time). They are reported and analysed **separately** throughout this paper and are never pooled or merged: the blocked comparison of Section 7.2 (Table 3) and the warm-bandit verification of Section 7.5 each draw from their own set, and no aggregate combines records across the two. This conservative choice — keeping $n$ at its per-set value rather than inflating statistical weight by pooling — is made so that readers can compare the two sets side by side without confounding session effects.
 
 ### 7.2. Makespan at typical load (`-j5`)
 
@@ -482,6 +488,10 @@ Future work follows directly from those boundaries. The most immediate is **true
 ## Acknowledgements
 
 The authors thank Nguyen Trong Khanh for steering this work toward the scheduling problem — the direction that shaped the entire paper — and for feedback on successive drafts.
+
+## Declaration of Generative AI and AI-assisted technologies in the writing process
+
+During the preparation of this work the authors used generative AI assistants to support software development — including code refactoring of the Hybrid-Grid system, implementation of the real-time dashboard, and continuous-integration hygiene — and for editorial assistance on this manuscript, including drafting revisions and improving language clarity. The authors reviewed and edited all AI-assisted output and take full responsibility for the content of this article.
 
 ## References
 
