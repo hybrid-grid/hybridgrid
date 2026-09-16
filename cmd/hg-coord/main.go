@@ -279,7 +279,9 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 				if mdnsAnnouncer != nil {
 					mdnsAnnouncer.Stop()
 				}
-				opsSrv.Stop()
+				if err := opsSrv.Stop(); err != nil {
+					log.Warn().Err(err).Msg("Ops HTTP server shutdown error")
+				}
 				srv.Stop()
 				return nil
 			case err := <-errCh:

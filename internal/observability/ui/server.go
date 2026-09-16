@@ -176,7 +176,10 @@ func (s *Server) pumpStream(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if err := s.runStream(ctx); err != nil && ctx.Err() == nil {
+		// runStream only returns on error (including ctx cancel via
+		// Recv), so the nil check would be vacuous; suppress the
+		// reconnect warning during intentional shutdown instead.
+		if err := s.runStream(ctx); ctx.Err() == nil {
 			log.Warn().Err(err).Msg("telemetry stream ended; reconnecting")
 		}
 		select {
