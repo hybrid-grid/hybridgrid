@@ -336,6 +336,8 @@ Quét $\alpha$ trên cấu hình 5 worker (sau khi cả bốn yêu cầu đượ
 
 Trong năm bộ này, đánh giá chặn khối ở Mục 7 chỉ mang theo ba: LeastLoaded, P2C và LinUCB. **LinUCB là ablation mà luận điểm trung tâm của chúng tôi dựa vào** — nó khác HG-LinUCB đúng ở $N$ và $\lambda$, trên cùng một code path, nên khoảng cách giữa hai bên cô lập đúng hai cơ chế đề xuất chứ không lẫn thứ gì khác. HEFT và ε-greedy được cài đặt và chỉ chạy trong các phép đo chạy đơn sơ bộ; chúng tôi không đưa chúng vào quy trình 10 khối, nên bài báo này không đưa ra khẳng định nào có hậu thuẫn thống kê về chúng, và giá trị của *bản thân ngữ cảnh* vẫn chưa được kiểm chứng dưới một quy trình có kiểm soát. Mục 8.3 ghi nhận đây là một hạn chế.
 
+Bộ lập lịch thứ sáu, **icecc-fastest**, cũng được cài đặt sau cùng giao diện trên. Đây là port Go trung thực cho luật chọn `fastest` của icecream (icecc) — trình biên dịch phân tán C/C++ mã nguồn mở dựa trên include-what-you-use, triển khai rộng rãi trên các cụm build sản xuất — được viết lại native bên trong Hybrid-Grid thay vì chạy đầu-cuối, sao cho mọi khác biệt makespan đều quy về được luật quyết định mà không lẫn khác biệt về transport, nén hay vận chuyển toolchain. Hàng `icecc-fastest` xuất hiện trong các bảng kết quả do pipeline phân tích (`scripts/analyze_rigorous.py`) sinh ra; nó không được đưa vào quy trình đánh giá chặn khối ở Mục 7 và không mang phát biểu nào có hậu thuẫn thống kê trong bài báo này. Chúng tôi nêu tên ở đây chỉ để đảm bảo mọi định danh scheduler có mặt trong dữ liệu công bố đều được liệt kê trong phần tường thuật của bài.
+
 ## 7. Đánh giá thực nghiệm
 
 ### 7.1. Thiết lập và quy trình
@@ -349,6 +351,10 @@ Trong năm bộ này, đánh giá chặn khối ở Mục 7 chỉ mang theo ba: 
 **Chỉ số.** Makespan (wall-clock) là chỉ số chính; ngoài ra phân phối dispatch theo worker (Mục 7.6) và phân vị thời gian biên dịch gộp trên 11.800 tác vụ ở mỗi điểm vận hành — P50 / P95 / P99 là 257 / 2.119 / 6.623 ms ở `-j5` và 426 / 3.250 / 10.311 ms ở `-j10`.
 
 **Thiết kế thống kê.** Đo lường sơ bộ cho thấy nền tảng Docker trên một host có sàn nhiễu chạy-lại đáng kể, nên các phép so sánh chạy đơn không đủ để kết luận. Quan trọng hơn, bố trí "scheduler-major" — chạy hết các lần lặp của một scheduler rồi mới sang scheduler khác — *trộn lẫn* danh tính scheduler với trôi dạt chậm của host (nhiệt, tải nền). Chúng tôi vì vậy dùng **thiết kế khối ngẫu nhiên hoá đầy đủ**: 10 round, mỗi round chạy mỗi cấu hình scheduler được thử đúng một lần theo thứ tự xáo trộn có seed riêng từng round, kèm một build warm-up bị loại, rào chắn chờ đủ worker đăng ký, cooldown cố định giữa các build và đo thời gian dưới-giây. Mỗi round thực thi năm cấu hình; bốn cấu hình được phân tích ở đây là những cấu hình liên quan tới câu hỏi nghiên cứu, và vì Holm bước xuống từ giá trị $p$ nhỏ nhất, $p$ hiệu chỉnh của phép so sánh yếu nhất — chính phép so sánh quyết định kết luận về LeastLoaded — không đổi dù đi kèm ba hay bốn phép so sánh. Mỗi round là một khối thống kê, cho phép kiểm định **ghép cặp**: Friedman omnibus, Wilcoxon signed-rank một phía, hiệu chỉnh Holm–Bonferroni, effect size Cliff's delta, và khoảng tin cậy bootstrap [18–21]. Coordinator khởi động lại mỗi build, nên các bộ học đều cold-start mỗi lần — một bất lợi khiến mọi chiến thắng của bandit đều là kết luận thận trọng.
+
+**Nguồn số liệu throughput.** Mọi thời gian theo từng tác vụ và các con số throughput `-j5` báo cáo trong bài được trích từ task log JSONL của coordinator (Mục 3.4): mỗi dòng là một bản ghi cấp tác vụ do `TaskLogger` phát ra khi lời gọi `Compile()` hoàn tất, mang dấu thời điểm dispatch, ngữ cảnh worker, và phân rã độ trễ đầy đủ. Throughput do đó được đếm là số bản ghi tác vụ hoàn tất, chứ không phải bằng cách phân tích console output hay `wc -l` trên log build — cách sau trộn lẫn một tác vụ với nhiều dòng output verbose của trình biên dịch và phụ thuộc mức ghi log. Task log JSONL là nguồn duy nhất, tái lập được: nạp vào pandas bằng `read_json(lines=True)` cho ra chính xác các phép đo theo từng tác vụ nuôi mọi bảng và phân tích cơ chế dưới đây.
+
+**Giữ riêng hai dataset `-j5`.** Hai bộ đo `-j5` độc lập được thu thập dưới điều kiện chạy hơi khác nhau (session khác nhau, cách nhau về thời gian). Chúng được báo cáo và phân tích **riêng biệt** xuyên suốt bài báo và không bao giờ gộp hay pool: phép so sánh chặn khối ở Mục 7.2 (Bảng 3) và phép kiểm chứng warm-bandit ở Mục 7.5 mỗi cái rút từ bộ của riêng nó, và không có kết quả tổng hợp nào kết hợp bản ghi qua hai bộ. Lựa chọn bảo thủ này — giữ $n$ ở giá trị mỗi bộ thay vì phồng trọng số thống kê bằng cách pool — được thực hiện để bạn đọc có thể đối chiếu hai bộ song song mà không trộn lẫn hiệu ứng session.
 
 **Vì sao chặn khối là bắt buộc.** Một lần chạy thử trước đó của chính phép đo này, theo bố trí scheduler-major, cho thấy HG-LinUCB vượt LeastLoaded 7,9% tại $p = 0{,}0001$. Khi thứ tự chạy được chặn theo khối, ưu thế đó biến mất hoàn toàn: chênh lệch biểu kiến là artifact của trôi nhiệt và tải nền, với LeastLoaded đơn giản bị đo khi host ở trạng thái khác. Chúng tôi báo cáo điều này vì nó hiệu chuẩn mức độ tin cậy đáng dành cho bất kỳ kết quả bố trí đơn nào trên lớp nền tảng này — kể cả của chính chúng tôi.
 
@@ -482,6 +488,10 @@ Hướng phát triển bám sát ngay các ranh giới trên. Trực tiếp nh�
 ## Lời cảm ơn
 
 Nhóm tác giả xin chân thành cảm ơn thầy Nguyễn Trọng Khánh đã định hướng nghiên cứu tập trung vào bài toán lập lịch — hướng đi định hình toàn bộ nội dung bài báo này — và đã góp ý cho các bản thảo trong suốt quá trình thực hiện.
+
+## Tuyên bố về Generative AI và công nghệ hỗ trợ AI trong quá trình viết
+
+Trong quá trình thực hiện nghiên cứu này, nhóm tác giả đã sử dụng các trợ lý AI tạo sinh để hỗ trợ phát triển phần mềm — bao gồm tái cấu trúc mã nguồn hệ thống Hybrid-Grid, triển khai dashboard thời gian thực, và dọn dẹp continuous integration — cũng như hỗ trợ biên tập cho bản thảo này, bao gồm soạn thảo các bản sửa đổi và cải thiện độ rõ ràng của văn phong. Nhóm tác giả đã xem xét và chỉnh sửa toàn bộ nội dung được AI hỗ trợ và chịu hoàn toàn trách nhiệm về nội dung của bài báo này.
 
 ## Tài liệu tham khảo
 
