@@ -220,6 +220,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			teleSvc.Token = token
 			srv.SetTelemetry(teleSvc)
 			statsCtx, statsCancel := context.WithCancel(ctx)
+			defer statsCancel()
 			go teleSvc.RunStatsLoop(statsCtx)
 
 			// Handle shutdown signals
@@ -290,7 +291,6 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 					mdnsAnnouncer.Stop()
 				}
 				dashSrv.Stop()
-				statsCancel()
 				srv.Stop()
 				return nil
 			case err := <-errCh:
