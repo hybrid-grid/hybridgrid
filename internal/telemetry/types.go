@@ -3,10 +3,11 @@
 // TelemetryService that exposes it to out-of-process consumers such
 // as the standalone dashboard binary.
 //
-// The types here are the single definition of the dashboard's wire
-// shapes; internal/observability/dashboard aliases them so the
-// browser-facing REST API and the gRPC telemetry contract cannot
-// drift apart.
+// The types here are the single definition of the observation
+// plane's wire shapes: internal/observability/ui (the standalone
+// dashboard service) serves them over REST/WebSocket from the gRPC
+// telemetry contract, so the browser-facing API and the contract
+// cannot drift apart.
 package telemetry
 
 // Stats represents cluster statistics.
