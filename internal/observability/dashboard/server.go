@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/h3nr1-d14z/hybridgrid/internal/logging"
+	"github.com/h3nr1-d14z/hybridgrid/internal/telemetry"
 )
 
 //go:embed assets/*
@@ -36,18 +37,13 @@ func DefaultConfig() Config {
 	}
 }
 
-// StatsProvider provides statistics for the dashboard.
-type StatsProvider interface {
-	GetStats() *Stats
-	GetWorkers() []*WorkerInfo
-}
-
-// ConsoleProvider is an optional StatsProvider extension exposing
-// retained per-task console output. The coordinator's provider
-// implements it; tests can inject it to exercise the console endpoint.
-type ConsoleProvider interface {
-	GetConsole(taskID string) (stdout, stderr string, truncated bool, ok bool)
-}
+// Provider interfaces alias internal/telemetry so one coordinator
+// implementation satisfies both the embedded dashboard and the gRPC
+// telemetry service.
+type (
+	StatsProvider   = telemetry.StatsProvider
+	ConsoleProvider = telemetry.ConsoleProvider
+)
 
 // Server is the HTTP dashboard server.
 type Server struct {

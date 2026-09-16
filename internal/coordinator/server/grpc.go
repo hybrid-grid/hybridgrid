@@ -27,6 +27,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 	hgtls "github.com/h3nr1-d14z/hybridgrid/internal/security/tls"
 	"github.com/h3nr1-d14z/hybridgrid/internal/security/validation"
+	"github.com/h3nr1-d14z/hybridgrid/internal/telemetry"
 )
 
 const maxGRPCMessageSize = 512 * 1024 * 1024
@@ -426,6 +427,7 @@ type Server struct {
 	scheduler      scheduler.Scheduler
 	circuitManager *resilience.CircuitManager
 	eventNotifier  EventNotifier
+	telemetry      *telemetry.Service
 	workerConns    *connPool
 	taskLogger     *TaskLogger
 	console        *consoleStore
@@ -583,6 +585,9 @@ func (s *Server) Start() error {
 
 	s.server = grpc.NewServer(opts...)
 	pb.RegisterBuildServiceServer(s.server, s)
+	if s.telemetry != nil {
+		pb.RegisterTelemetryServiceServer(s.server, s.telemetry)
+	}
 
 	log.Info().Int("port", s.config.Port).Msg("Coordinator gRPC server starting")
 	return s.server.Serve(lis)
@@ -631,6 +636,13 @@ func (s *Server) Registry() registry.Registry {
 // SetEventNotifier sets the event notifier for task events.
 func (s *Server) SetEventNotifier(notifier EventNotifier) {
 	s.eventNotifier = notifier
+}
+
+// SetTelemetry attaches a telemetry service to the coordinator gRPC
+// server. Must be called before Start; the service is registered on
+// the same port as the build plane.
+func (s *Server) SetTelemetry(svc *telemetry.Service) {
+	s.telemetry = svc
 }
 
 // Handshake handles worker registration.
