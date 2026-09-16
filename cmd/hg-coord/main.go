@@ -19,6 +19,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/dashboard"
 	observabilitymetrics "github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
+	"github.com/h3nr1-d14z/hybridgrid/internal/telemetry"
 )
 
 var version = "v0.0.0-dev"
@@ -210,6 +211,17 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 
 			srv := coordserver.New(cfg)
 
+			// Telemetry service: the observation plane exposed over
+			// gRPC for out-of-process consumers (the standalone
+			// dashboard binary, third-party UIs). Registered on the
+			// build-plane port; read-only and token-gated like it.
+			teleStore := telemetry.NewStore()
+			teleSvc := telemetry.NewService(teleStore, srv.NewStatsProvider())
+			teleSvc.Token = token
+			srv.SetTelemetry(teleSvc)
+			statsCtx, statsCancel := context.WithCancel(ctx)
+			go teleSvc.RunStatsLoop(statsCtx)
+
 			// Handle shutdown signals
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -227,9 +239,20 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			dashCfg.AuthToken = token
 			dashSrv := dashboard.New(dashCfg, srv.NewStatsProvider())
 
-			// Wire up event notifications from coordinator to dashboard
-			onStart, onComplete := dashSrv.CreateEventNotifier()
-			srv.SetEventNotifier(&eventNotifierWrapper{onStart: onStart, onComplete: onComplete})
+			// Wire up event notifications from coordinator to both
+			// the embedded dashboard and the telemetry service.
+			dashStart, dashComplete := dashSrv.CreateEventNotifier()
+			teleStart, teleComplete := teleSvc.CreateEventNotifier()
+			srv.SetEventNotifier(&eventNotifierWrapper{
+				onStart: func(id, buildID, buildType, status, workerID string, startedAtMs int64) {
+					dashStart(id, buildID, buildType, status, workerID, startedAtMs)
+					teleStart(id, buildID, buildType, status, workerID, startedAtMs)
+				},
+				onComplete: func(id, buildID, buildType, status, workerID string, startedAtMs, completedAtMs, durationMs, queueMs, compileMs int64, exitCode int32, errorMsg string) {
+					dashComplete(id, buildID, buildType, status, workerID, startedAtMs, completedAtMs, durationMs, queueMs, compileMs, exitCode, errorMsg)
+					teleComplete(id, buildID, buildType, status, workerID, startedAtMs, completedAtMs, durationMs, queueMs, compileMs, exitCode, errorMsg)
+				},
+			})
 
 			go func() {
 				if err := dashSrv.Start(); err != nil {
@@ -267,6 +290,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 					mdnsAnnouncer.Stop()
 				}
 				dashSrv.Stop()
+				statsCancel()
 				srv.Stop()
 				return nil
 			case err := <-errCh:
