@@ -99,6 +99,53 @@ jobs:
           args: --timeout=5m
 
   # ============================================
+  # Workflow YAML guard
+  # ============================================
+  workflows:
+    name: Workflow YAML
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Strict-parse every workflow
+        # Nothing else validates .github/workflows: a duplicate mapping
+        # key (e.g. two `target:` lines in one matrix) silently invalidates
+        # the workflow, and no other job parses these files.
+        run: |
+          pip install --quiet pyyaml
+          python - <<'PY'
+          import glob, yaml
+
+          class Loader(yaml.SafeLoader):
+              pass
+
+          def no_dup(loader, node, deep=False):
+              seen = set()
+              for key_node, _ in node.value:
+                  key = loader.construct_object(key_node, deep=deep)
+                  if key in seen:
+                      raise ValueError(f"duplicate mapping key {key!r}")
+                  seen.add(key)
+              return yaml.SafeLoader.construct_mapping(loader, node, deep)
+
+          Loader.add_constructor(
+              yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, no_dup)
+          for path in sorted(glob.glob(".github/workflows/*.yml")):
+              with open(path) as fh:
+                  try:
+                      yaml.load(fh, Loader)
+                  except Exception as exc:
+                      raise SystemExit(f"{path}: {exc}")
+              print("ok", path)
+          PY
+
+  # ============================================
   # Security Scan
   # ============================================
   security:
