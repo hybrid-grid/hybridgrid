@@ -5,17 +5,17 @@ import (
 	"time"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
-	"github.com/h3nr1-d14z/hybridgrid/internal/observability/dashboard"
+	"github.com/h3nr1-d14z/hybridgrid/internal/telemetry"
 )
 
-// statsProvider implements dashboard.StatsProvider for the coordinator.
+// statsProvider implements telemetry.StatsProvider for the coordinator.
 type statsProvider struct {
 	server    *Server
 	startTime time.Time
 }
 
 // NewStatsProvider creates a new stats provider for the coordinator.
-func (s *Server) NewStatsProvider() dashboard.StatsProvider {
+func (s *Server) NewStatsProvider() telemetry.StatsProvider {
 	return &statsProvider{
 		server:    s,
 		startTime: time.Now(),
@@ -23,7 +23,7 @@ func (s *Server) NewStatsProvider() dashboard.StatsProvider {
 }
 
 // GetStats returns current cluster statistics.
-func (p *statsProvider) GetStats() *dashboard.Stats {
+func (p *statsProvider) GetStats() *telemetry.Stats {
 	workers := p.server.registry.List()
 
 	healthyCount := 0
@@ -57,7 +57,7 @@ func (p *statsProvider) GetStats() *dashboard.Stats {
 		unityCacheHitRate = float64(unityCacheHits) / float64(unityCacheTotal)
 	}
 
-	return &dashboard.Stats{
+	return &telemetry.Stats{
 		TotalTasks:          atomic.LoadInt64(&p.server.totalTasks),
 		SuccessTasks:        atomic.LoadInt64(&p.server.successTasks),
 		FailedTasks:         atomic.LoadInt64(&p.server.failedTasks),
@@ -82,9 +82,9 @@ func (p *statsProvider) GetStats() *dashboard.Stats {
 }
 
 // GetWorkers returns current worker information.
-func (p *statsProvider) GetWorkers() []*dashboard.WorkerInfo {
+func (p *statsProvider) GetWorkers() []*telemetry.WorkerInfo {
 	workers := p.server.registry.List()
-	result := make([]*dashboard.WorkerInfo, 0, len(workers))
+	result := make([]*telemetry.WorkerInfo, 0, len(workers))
 
 	for _, w := range workers {
 		// Calculate success rate
@@ -107,7 +107,7 @@ func (p *statsProvider) GetWorkers() []*dashboard.WorkerInfo {
 			compilers = append(compilers, cppCaps.GetCompilers()...)
 		}
 
-		info := &dashboard.WorkerInfo{
+		info := &telemetry.WorkerInfo{
 			ID:                w.ID,
 			Host:              caps.Hostname,
 			Address:           w.Address,
@@ -143,7 +143,7 @@ func (p *statsProvider) GetWorkers() []*dashboard.WorkerInfo {
 }
 
 // GetConsole returns retained console output for a task. It implements
-// dashboard.ConsoleProvider.
+// telemetry.ConsoleProvider.
 func (p *statsProvider) GetConsole(taskID string) (stdout, stderr string, truncated bool, ok bool) {
 	return p.server.console.Get(taskID)
 }
