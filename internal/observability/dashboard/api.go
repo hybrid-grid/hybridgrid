@@ -3,6 +3,7 @@ package dashboard
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -63,16 +64,38 @@ type WorkerInfo struct {
 
 // TaskInfo represents task information for the dashboard.
 type TaskInfo struct {
-	ID           string `json:"id"`
-	BuildType    string `json:"build_type"`
-	Status       string `json:"status"`
-	WorkerID     string `json:"worker_id"`
-	StartedAt    int64  `json:"started_at"`
-	CompletedAt  int64  `json:"completed_at,omitempty"`
-	DurationMs   int64  `json:"duration_ms,omitempty"`
-	ExitCode     int32  `json:"exit_code,omitempty"`
-	FromCache    bool   `json:"from_cache"`
-	ErrorMessage string `json:"error_message,omitempty"`
+	ID            string `json:"id"`
+	BuildType     string `json:"build_type"`
+	BuildID       string `json:"build_id"`
+	Status        string `json:"status"`
+	WorkerID      string `json:"worker_id"`
+	StartedAtMs   int64  `json:"started_at_ms"`
+	CompletedAtMs int64  `json:"completed_at_ms,omitempty"`
+	DurationMs    int64  `json:"duration_ms,omitempty"`
+	QueueMs       int64  `json:"queue_ms"`
+	CompileMs     int64  `json:"compile_ms"`
+	ExitCode      int32  `json:"exit_code,omitempty"`
+	FromCache     bool   `json:"from_cache"`
+	ErrorMessage  string `json:"error_message,omitempty"`
+}
+
+// BuildInfo represents an aggregate logical build for the dashboard.
+// All counts describe the RETAINED task set, which may be a subset of
+// the build's real tasks: capped per build (maxTasksPerBuild) and/or
+// shrunk when total-task eviction removes the oldest rows. Truncated
+// marks both cases; totals are not the build's lifetime counts.
+type BuildInfo struct {
+	ID             string `json:"id"`
+	BuildType      string `json:"build_type"`
+	Status         string `json:"status"`
+	TotalTasks     int    `json:"total_tasks"`
+	CompletedTasks int    `json:"completed_tasks"`
+	FailedTasks    int    `json:"failed_tasks"`
+	RunningTasks   int    `json:"running_tasks"`
+	FromCacheCount int    `json:"from_cache_count"`
+	FirstTaskAtMs  int64  `json:"first_task_at_ms"`
+	LastTaskAtMs   int64  `json:"last_task_at_ms"`
+	Truncated      bool   `json:"truncated"`
 }
 
 // handleStats returns cluster statistics.
@@ -134,7 +157,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleTasks returns recent task information.
+// handleTasks returns recent task information. An optional ?limit=N bounds
+// the response to the newest N tasks — the cluster activity pane polls a
+// bounded window rather than the full retained set (up to 20k tasks).
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -142,6 +167,11 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tasks := s.hub.GetTasks()
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if limit, err := strconv.Atoi(raw); err == nil && limit > 0 && len(tasks) > limit {
+			tasks = tasks[:limit]
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -149,4 +179,68 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		"count":     len(tasks),
 		"timestamp": time.Now().Unix(),
 	})
+}
+
+// handleBuilds returns logical build aggregates.
+func (s *Server) handleBuilds(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	builds := s.hub.GetBuilds()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"builds":    builds,
+		"count":     len(builds),
+		"timestamp": time.Now().Unix(),
+	})
+}
+
+// handleTaskConsole returns retained console output for one task.
+// Console data lives in the coordinator (responses are unary, so
+// output arrives complete at task completion); the dashboard reaches it
+// through the optional ConsoleProvider. Without such a provider the
+// endpoint reports 503 rather than pretending no output exists.
+func (s *Server) handleTaskConsole(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	provider, ok := s.provider.(ConsoleProvider)
+	if !ok {
+		http.Error(w, "console output not available", http.StatusServiceUnavailable)
+		return
+	}
+	taskID := r.PathValue("id")
+	stdout, stderr, truncated, found := provider.GetConsole(taskID)
+	if !found {
+		http.Error(w, "task not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"task_id":   taskID,
+		"stdout":    stdout,
+		"stderr":    stderr,
+		"truncated": truncated,
+	})
+}
+
+// handleBuildByID returns a logical build and its tasks.
+func (s *Server) handleBuildByID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	build, tasks, ok := s.hub.GetBuildDetail(r.PathValue("id"))
+	w.Header().Set("Content-Type", "application/json")
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "build not found"})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"build": build, "tasks": tasks})
 }

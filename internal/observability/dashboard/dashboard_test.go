@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -247,8 +248,89 @@ func TestServer_StaticAssets(t *testing.T) {
 	if !strings.Contains(body, "Hybrid-Grid") {
 		t.Error("Response should contain 'Hybrid-Grid'")
 	}
-	if !strings.Contains(body, "alpinejs") {
-		t.Error("Response should contain Alpine.js")
+	if !strings.Contains(body, "chart.umd.js") {
+		t.Error("Response should reference the vendored Chart.js bundle")
+	}
+}
+
+func TestServer_ChartAsset(t *testing.T) {
+	cfg := DefaultConfig()
+	s := New(cfg, &mockProvider{})
+
+	// The vendored Chart.js bundle must be served — the dashboard is
+	// offline-capable and must not fall back to a CDN.
+	req := httptest.NewRequest(http.MethodGet, "/chart.umd.js", nil)
+	rec := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("chart.umd.js status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Chart") {
+		t.Error("chart.umd.js body should contain Chart.js code")
+	}
+	// The bundle must be loadable as a classic script. Chart.js ships
+	// both a UMD and an ESM build; the ESM one (top-level export{...})
+	// throws at parse time under a plain <script defer> tag and never
+	// defines window.Chart — a regression that leaves the dashboard
+	// chartless without any network error.
+	if strings.Contains(body, "export{") {
+		t.Error("chart.umd.js looks like the ESM build (top-level export); serve the UMD bundle instead")
+	}
+	if !strings.Contains(body, "!function(") {
+		t.Error("chart.umd.js should start with the UMD IIFE wrapper")
+	}
+	if n := rec.Body.Len(); n < 100_000 {
+		t.Errorf("chart.umd.js len = %d, want at least 100000 (suspiciously small bundle)", n)
+	}
+}
+
+// TestServer_AppAssetMinBarLength guards the sub-second-build floor in
+// the durations bar chart. Without it a 0.02 s build on a y-axis
+// spanning tens of seconds renders 0 px tall — invisible and with no
+// hover target — and on real clusters most cpp TUs are client-side
+// cache hits or sub-second compiles, so the chart would silently drop
+// exactly the builds the tooltip exists to inspect.
+func TestServer_AppAssetMinBarLength(t *testing.T) {
+	cfg := DefaultConfig()
+	s := New(cfg, &mockProvider{})
+
+	req := httptest.NewRequest(http.MethodGet, "/app.js", nil)
+	rec := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("app.js status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "minBarLength") {
+		t.Error("app.js should set minBarLength on the durations bar dataset; without it sub-second builds render 0 px and become invisible/unhoverable")
+	}
+	if !strings.Contains(body, "interaction: { mode: 'index', intersect: false }") {
+		t.Error("app.js should set whole-column interaction on the durations chart; the default intersect:true hit box equals the drawn bar height, so a ~1.5 px bar is effectively unhoverable on a mouse sweep")
+	}
+}
+
+func TestServer_AppAssetWorkerThroughput(t *testing.T) {
+	cfg := DefaultConfig()
+	s := New(cfg, &mockProvider{})
+
+	for path, want := range map[string][]string{
+		"/app.js": {"workerThroughput", "throughput-canvas"},
+		"/":       {"worker-throughput", "throughput-canvas"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		s.server.Handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200", path, rec.Code)
+		}
+		for _, fragment := range want {
+			if !strings.Contains(rec.Body.String(), fragment) {
+				t.Errorf("%s should reference %q for the worker throughput pane", path, fragment)
+			}
+		}
 	}
 }
 
@@ -384,16 +466,17 @@ func TestWorkerInfo_JSON(t *testing.T) {
 
 func TestTaskInfo_JSON(t *testing.T) {
 	task := &TaskInfo{
-		ID:           "task-1",
-		BuildType:    "cpp",
-		Status:       "completed",
-		WorkerID:     "worker-1",
-		StartedAt:    1234567890,
-		CompletedAt:  1234567895,
-		DurationMs:   5000,
-		ExitCode:     0,
-		FromCache:    true,
-		ErrorMessage: "",
+		ID:            "task-1",
+		BuildType:     "cpp",
+		BuildID:       "build-1",
+		Status:        "completed",
+		WorkerID:      "worker-1",
+		StartedAtMs:   1234567890,
+		CompletedAtMs: 1234567895,
+		DurationMs:    5000,
+		ExitCode:      0,
+		FromCache:     true,
+		ErrorMessage:  "",
 	}
 
 	data, err := json.Marshal(task)
@@ -415,20 +498,23 @@ func TestTaskInfo_JSON(t *testing.T) {
 	if decoded.FromCache != task.FromCache {
 		t.Errorf("FromCache = %v, want %v", decoded.FromCache, task.FromCache)
 	}
+	if decoded.BuildID != task.BuildID {
+		t.Errorf("BuildID = %s, want %s", decoded.BuildID, task.BuildID)
+	}
 }
 
 func TestTaskInfo_JSON_WithError(t *testing.T) {
 	task := &TaskInfo{
-		ID:           "task-2",
-		BuildType:    "rust",
-		Status:       "failed",
-		WorkerID:     "worker-2",
-		StartedAt:    1234567890,
-		CompletedAt:  1234567900,
-		DurationMs:   10000,
-		ExitCode:     1,
-		FromCache:    false,
-		ErrorMessage: "compilation error",
+		ID:            "task-2",
+		BuildType:     "rust",
+		Status:        "failed",
+		WorkerID:      "worker-2",
+		StartedAtMs:   1234567890,
+		CompletedAtMs: 1234567900,
+		DurationMs:    10000,
+		ExitCode:      1,
+		FromCache:     false,
+		ErrorMessage:  "compilation error",
 	}
 
 	data, err := json.Marshal(task)
@@ -897,22 +983,22 @@ func TestServer_HandleTasks(t *testing.T) {
 	defer s.hub.Stop()
 
 	s.hub.BroadcastTaskStarted(&TaskInfo{
-		ID:        "task-flutter-1",
-		BuildType: "flutter",
-		Status:    "running",
-		WorkerID:  "worker-1",
-		StartedAt: 1234567890,
+		ID:          "task-flutter-1",
+		BuildType:   "flutter",
+		Status:      "running",
+		WorkerID:    "worker-1",
+		StartedAtMs: 1234567890,
 	})
 	s.hub.BroadcastTaskCompleted(&TaskInfo{
-		ID:          "task-flutter-2",
-		BuildType:   "flutter",
-		Status:      "completed",
-		WorkerID:    "worker-1",
-		StartedAt:   1234567891,
-		CompletedAt: 1234567900,
-		DurationMs:  9000,
-		ExitCode:    0,
-		FromCache:   false,
+		ID:            "task-flutter-2",
+		BuildType:     "flutter",
+		Status:        "completed",
+		WorkerID:      "worker-1",
+		StartedAtMs:   1234567891,
+		CompletedAtMs: 1234567900,
+		DurationMs:    9000,
+		ExitCode:      0,
+		FromCache:     false,
 	})
 
 	time.Sleep(20 * time.Millisecond)
@@ -948,6 +1034,74 @@ func TestServer_HandleTasks(t *testing.T) {
 	}
 }
 
+// TestServer_HandleTasks_Limit guards the bounded activity window: the
+// cluster activity pane polls ?limit=N instead of the full retained set,
+// and the response must stay newest-first when truncated.
+func TestServer_HandleTasks_Limit(t *testing.T) {
+	cfg := DefaultConfig()
+	s := New(cfg, &mockProvider{})
+
+	go s.hub.Run()
+	defer s.hub.Stop()
+
+	for i := 0; i < 5; i++ {
+		s.hub.BroadcastTaskCompleted(&TaskInfo{
+			ID:            fmt.Sprintf("task-%d", i),
+			BuildType:     "cpp",
+			Status:        "completed",
+			WorkerID:      "worker-1",
+			StartedAtMs:   int64(1000000 + i),
+			CompletedAtMs: int64(1000010 + i),
+			DurationMs:    10,
+			ExitCode:      0,
+		})
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	get := func(path string) (tasks []*TaskInfo, count int) {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		s.handleTasks(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200", path, rec.Code)
+		}
+		var response struct {
+			Tasks []*TaskInfo `json:"tasks"`
+			Count int         `json:"count"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+			t.Fatalf("%s decode error: %v", path, err)
+		}
+		return response.Tasks, response.Count
+	}
+
+	tasks, count := get("/api/v1/tasks?limit=2")
+	if len(tasks) != 2 || count != 2 {
+		t.Errorf("limit=2 returned len=%d count=%d, want 2/2", len(tasks), count)
+	}
+	// GetTasks is newest-first; truncation keeps the newest end.
+	if tasks[0].ID != "task-4" || tasks[1].ID != "task-3" {
+		t.Errorf("limit=2 returned [%s, %s], want newest two [task-4, task-3]", tasks[0].ID, tasks[1].ID)
+	}
+
+	// Invalid and non-positive limits are ignored, not errors.
+	tasks, count = get("/api/v1/tasks?limit=banana")
+	if len(tasks) != 5 || count != 5 {
+		t.Errorf("limit=banana returned len=%d, want all 5", len(tasks))
+	}
+	tasks, _ = get("/api/v1/tasks?limit=-1")
+	if len(tasks) != 5 {
+		t.Errorf("limit=-1 returned len=%d, want all 5", len(tasks))
+	}
+
+	// A limit above the retained count returns everything.
+	tasks, _ = get("/api/v1/tasks?limit=50")
+	if len(tasks) != 5 {
+		t.Errorf("limit=50 returned len=%d, want all 5", len(tasks))
+	}
+}
+
 func TestServer_HandleTasks_MethodNotAllowed(t *testing.T) {
 	cfg := DefaultConfig()
 	s := New(cfg, &mockProvider{})
@@ -968,22 +1122,22 @@ func TestHub_GetTasks(t *testing.T) {
 	defer hub.Stop()
 
 	hub.BroadcastTaskStarted(&TaskInfo{
-		ID:        "task-cpp-1",
-		BuildType: "cpp",
-		Status:    "running",
-		WorkerID:  "w1",
-		StartedAt: 1000000,
+		ID:          "task-cpp-1",
+		BuildType:   "cpp",
+		Status:      "running",
+		WorkerID:    "w1",
+		StartedAtMs: 1000000,
 	})
 	hub.BroadcastTaskCompleted(&TaskInfo{
-		ID:          "task-flutter-1",
-		BuildType:   "flutter",
-		Status:      "completed",
-		WorkerID:    "w2",
-		StartedAt:   1000001,
-		CompletedAt: 1000010,
-		DurationMs:  9000,
-		ExitCode:    0,
-		FromCache:   false,
+		ID:            "task-flutter-1",
+		BuildType:     "flutter",
+		Status:        "completed",
+		WorkerID:      "w2",
+		StartedAtMs:   1000001,
+		CompletedAtMs: 1000010,
+		DurationMs:    9000,
+		ExitCode:      0,
+		FromCache:     false,
 	})
 	hub.BroadcastStats(&Stats{TotalTasks: 10})
 
@@ -1008,6 +1162,280 @@ func TestHub_GetTasks(t *testing.T) {
 	}
 	if !hasFlutter {
 		t.Error("Expected at least one Flutter task")
+	}
+}
+
+func TestHub_GetTasks_DeduplicatesLatestState(t *testing.T) {
+	hub := NewHub()
+	hub.BroadcastTaskStarted(&TaskInfo{
+		ID:          "task-1",
+		BuildID:     "build-1",
+		BuildType:   "cpp",
+		Status:      "running",
+		StartedAtMs: 100,
+	})
+	hub.BroadcastTaskCompleted(&TaskInfo{
+		ID:            "task-1",
+		BuildID:       "build-1",
+		BuildType:     "cpp",
+		Status:        "completed",
+		StartedAtMs:   100,
+		CompletedAtMs: 125,
+		DurationMs:    25,
+	})
+
+	tasks := hub.GetTasks()
+	if len(tasks) != 1 {
+		t.Fatalf("GetTasks len = %d, want 1", len(tasks))
+	}
+	if tasks[0].ID != "task-1" {
+		t.Errorf("GetTasks ID = %q, want task-1", tasks[0].ID)
+	}
+	if tasks[0].Status != "completed" {
+		t.Errorf("GetTasks Status = %q, want completed", tasks[0].Status)
+	}
+	if tasks[0].CompletedAtMs != 125 {
+		t.Errorf("GetTasks CompletedAt = %d, want 125", tasks[0].CompletedAtMs)
+	}
+}
+
+func TestHub_GetBuilds_Grouping(t *testing.T) {
+	hub := NewHub()
+	hub.BroadcastTaskCompleted(&TaskInfo{
+		ID:            "old-completed",
+		BuildID:       "build-old",
+		BuildType:     "cpp",
+		Status:        "completed",
+		StartedAtMs:   10,
+		CompletedAtMs: 20,
+		FromCache:     true,
+	})
+	hub.BroadcastTaskStarted(&TaskInfo{
+		ID:          "new-running",
+		BuildID:     "build-new",
+		BuildType:   "cpp",
+		Status:      "running",
+		StartedAtMs: 30,
+	})
+	hub.BroadcastTaskCompleted(&TaskInfo{
+		ID:            "new-failed",
+		BuildID:       "build-new",
+		BuildType:     "cpp",
+		Status:        "failed",
+		StartedAtMs:   35,
+		CompletedAtMs: 50,
+	})
+	hub.BroadcastTaskCompleted(&TaskInfo{
+		ID:            "ungrouped",
+		BuildType:     "cpp",
+		Status:        "completed",
+		StartedAtMs:   60,
+		CompletedAtMs: 70,
+	})
+
+	builds := hub.GetBuilds()
+	if len(builds) != 2 {
+		t.Fatalf("GetBuilds len = %d, want 2", len(builds))
+	}
+	if builds[0].ID != "build-new" {
+		t.Errorf("newest build ID = %q, want build-new", builds[0].ID)
+	}
+	if builds[0].Status != "running" {
+		t.Errorf("build-new Status = %q, want running", builds[0].Status)
+	}
+	if builds[0].TotalTasks != 2 {
+		t.Errorf("build-new TotalTasks = %d, want 2", builds[0].TotalTasks)
+	}
+	if builds[0].RunningTasks != 1 {
+		t.Errorf("build-new RunningTasks = %d, want 1", builds[0].RunningTasks)
+	}
+	if builds[0].FailedTasks != 1 {
+		t.Errorf("build-new FailedTasks = %d, want 1", builds[0].FailedTasks)
+	}
+	if builds[0].CompletedTasks != 0 {
+		t.Errorf("build-new CompletedTasks = %d, want 0", builds[0].CompletedTasks)
+	}
+	if builds[0].FirstTaskAtMs != 30 {
+		t.Errorf("build-new FirstTaskAt = %d, want 30", builds[0].FirstTaskAtMs)
+	}
+	if builds[0].LastTaskAtMs != 50 {
+		t.Errorf("build-new LastTaskAt = %d, want 50", builds[0].LastTaskAtMs)
+	}
+
+	if builds[1].ID != "build-old" {
+		t.Errorf("oldest build ID = %q, want build-old", builds[1].ID)
+	}
+	if builds[1].Status != "completed" {
+		t.Errorf("build-old Status = %q, want completed", builds[1].Status)
+	}
+	if builds[1].TotalTasks != 1 {
+		t.Errorf("build-old TotalTasks = %d, want 1", builds[1].TotalTasks)
+	}
+	if builds[1].CompletedTasks != 1 {
+		t.Errorf("build-old CompletedTasks = %d, want 1", builds[1].CompletedTasks)
+	}
+	if builds[1].FromCacheCount != 1 {
+		t.Errorf("build-old FromCacheCount = %d, want 1", builds[1].FromCacheCount)
+	}
+}
+
+func TestHub_GetBuilds_SubSecondSpan(t *testing.T) {
+	// The timeline's whole premise: two tasks that start and finish
+	// within the same wall-clock second. A seconds-based derivation
+	// collapses LastTaskAtMs-FirstTaskAtMs to 0; only millisecond
+	// timestamps keep the 1400ms span. This locks the resolution in
+	// so a quiet revert of the ms plumbing fails here, not in the UI.
+	hub := NewHub()
+	hub.BroadcastTaskCompleted(&TaskInfo{
+		ID:            "first",
+		BuildID:       "build-ms",
+		BuildType:     "cpp",
+		Status:        "completed",
+		StartedAtMs:   1000,
+		CompletedAtMs: 1400,
+		DurationMs:    400,
+	})
+	hub.BroadcastTaskCompleted(&TaskInfo{
+		ID:            "second",
+		BuildID:       "build-ms",
+		BuildType:     "cpp",
+		Status:        "completed",
+		StartedAtMs:   2000,
+		CompletedAtMs: 2400,
+		DurationMs:    400,
+	})
+
+	builds := hub.GetBuilds()
+	if len(builds) != 1 {
+		t.Fatalf("GetBuilds len = %d, want 1", len(builds))
+	}
+	if got := builds[0].LastTaskAtMs - builds[0].FirstTaskAtMs; got != 1400 {
+		t.Errorf("span = %d ms, want 1400 (millisecond resolution lost?)", got)
+	}
+}
+
+func TestHub_GetBuilds_EvictsOldestBuild(t *testing.T) {
+	hub := NewHub()
+	hub.maxBuilds = 1
+	hub.BroadcastTaskStarted(&TaskInfo{ID: "old-task", BuildID: "old-build", Status: "running"})
+	hub.BroadcastTaskStarted(&TaskInfo{ID: "new-task", BuildID: "new-build", Status: "running"})
+
+	builds := hub.GetBuilds()
+	if len(builds) != 1 {
+		t.Fatalf("GetBuilds len = %d, want 1", len(builds))
+	}
+	if builds[0].ID != "new-build" {
+		t.Errorf("GetBuilds ID = %q, want new-build", builds[0].ID)
+	}
+	tasks := hub.GetTasks()
+	if len(tasks) != 1 {
+		t.Fatalf("GetTasks len = %d, want 1", len(tasks))
+	}
+	if tasks[0].ID != "new-task" {
+		t.Errorf("GetTasks ID = %q, want new-task", tasks[0].ID)
+	}
+}
+
+func TestHub_GetBuilds_TotalEvictionMarksTruncated(t *testing.T) {
+	hub := NewHub()
+	hub.maxTasksTotal = 2
+
+	hub.BroadcastTaskCompleted(&TaskInfo{ID: "a1", BuildID: "build-a", Status: "completed", StartedAtMs: 100, CompletedAtMs: 110})
+	hub.BroadcastTaskCompleted(&TaskInfo{ID: "a2", BuildID: "build-a", Status: "completed", StartedAtMs: 101, CompletedAtMs: 111})
+	hub.BroadcastTaskCompleted(&TaskInfo{ID: "b1", BuildID: "build-b", Status: "completed", StartedAtMs: 102, CompletedAtMs: 112})
+
+	// maxTasksTotal=2 evicted a1: build-a now holds a subset of its real
+	// tasks and must say so rather than report 1/1 as complete counts.
+	builds := hub.GetBuilds()
+	if len(builds) != 2 {
+		t.Fatalf("GetBuilds len = %d, want 2", len(builds))
+	}
+	byID := map[string]*BuildInfo{}
+	for _, b := range builds {
+		byID[b.ID] = b
+	}
+	if b := byID["build-a"]; b == nil {
+		t.Fatal("build-a missing from GetBuilds")
+	} else {
+		if !b.Truncated {
+			t.Error("build-a Truncated = false, want true after total-task eviction shrank it")
+		}
+		if b.TotalTasks != 1 || b.CompletedTasks != 1 {
+			t.Errorf("build-a counts = %d/%d, want retained subset 1/1", b.TotalTasks, b.CompletedTasks)
+		}
+	}
+	if b := byID["build-b"]; b == nil {
+		t.Fatal("build-b missing from GetBuilds")
+	} else if b.Truncated {
+		t.Error("build-b Truncated = true, want false (never evicted)")
+	}
+}
+
+func TestServer_HandleBuilds(t *testing.T) {
+	s := New(DefaultConfig(), &mockProvider{})
+	s.hub.BroadcastTaskStarted(&TaskInfo{
+		ID:          "task-1",
+		BuildID:     "build-1",
+		BuildType:   "cpp",
+		Status:      "running",
+		StartedAtMs: 100,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/builds", nil)
+	rec := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Status = %d, want 200", rec.Code)
+	}
+	var response struct {
+		Builds    []*BuildInfo `json:"builds"`
+		Count     int          `json:"count"`
+		Timestamp int64        `json:"timestamp"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	if response.Count != 1 {
+		t.Errorf("Count = %d, want 1", response.Count)
+	}
+	if len(response.Builds) != 1 {
+		t.Fatalf("Builds len = %d, want 1", len(response.Builds))
+	}
+	if response.Builds[0].ID != "build-1" {
+		t.Errorf("Build ID = %q, want build-1", response.Builds[0].ID)
+	}
+	if response.Timestamp == 0 {
+		t.Error("Timestamp should be set")
+	}
+}
+
+func TestServer_HandleBuilds_MethodNotAllowed(t *testing.T) {
+	s := New(DefaultConfig(), &mockProvider{})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/builds", nil)
+	rec := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("Status = %d, want 405", rec.Code)
+	}
+}
+
+func TestServer_CreateEventNotifier_ForwardsBuildID(t *testing.T) {
+	s := New(DefaultConfig(), &mockProvider{})
+	onStart, onComplete := s.CreateEventNotifier()
+	onStart("task-1", "build-1", "cpp", "running", "worker-1", 100)
+	onComplete("task-1", "build-1", "cpp", "completed", "worker-1", 100, 120, 20, 5, 15, 0, "")
+
+	tasks := s.hub.GetTasks()
+	if len(tasks) != 1 {
+		t.Fatalf("GetTasks len = %d, want 1", len(tasks))
+	}
+	if tasks[0].BuildID != "build-1" {
+		t.Errorf("BuildID = %q, want build-1", tasks[0].BuildID)
+	}
+	if tasks[0].Status != "completed" {
+		t.Errorf("Status = %q, want completed", tasks[0].Status)
 	}
 }
 
@@ -1208,5 +1636,124 @@ func TestWorkerInfo_UnityFields(t *testing.T) {
 	}
 	if len(decoded.UnityPlatforms) != 2 {
 		t.Errorf("UnityPlatforms len = %d, want 2", len(decoded.UnityPlatforms))
+	}
+}
+
+func TestServer_HandleBuildByID(t *testing.T) {
+	s := New(DefaultConfig(), &mockProvider{})
+	s.hub.BroadcastTaskCompleted(&TaskInfo{ID: "old", BuildID: "build-1", BuildType: "cpp", Status: "completed", QueueMs: 10, CompileMs: 15})
+	s.hub.BroadcastTaskCompleted(&TaskInfo{ID: "new", BuildID: "build-1", BuildType: "cpp", Status: "completed", QueueMs: 20, CompileMs: 30})
+
+	rec := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/builds/build-1", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Status = %d, want 200", rec.Code)
+	}
+	var response struct {
+		Build *BuildInfo  `json:"build"`
+		Tasks []*TaskInfo `json:"tasks"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Build == nil || response.Build.ID != "build-1" {
+		t.Fatalf("build = %#v, want build-1", response.Build)
+	}
+	if len(response.Tasks) != 2 {
+		t.Fatalf("tasks len = %d, want 2", len(response.Tasks))
+	}
+	if response.Tasks[0].ID != "new" || response.Tasks[0].QueueMs != 20 || response.Tasks[0].CompileMs != 30 {
+		t.Errorf("newest task = %#v, want propagated timing fields", response.Tasks[0])
+	}
+
+	rec = httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/builds/missing", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("missing Status = %d, want 404", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/builds/build-1", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST Status = %d, want 405", rec.Code)
+	}
+}
+
+// consoleMockProvider extends mockProvider with console retention.
+type consoleMockProvider struct {
+	mockProvider
+	logs map[string]string
+}
+
+func (m *consoleMockProvider) GetConsole(taskID string) (stdout, stderr string, truncated bool, ok bool) {
+	out, exists := m.logs[taskID]
+	return out, "", false, exists
+}
+
+func TestServer_HandleTaskConsole(t *testing.T) {
+	s := New(DefaultConfig(), &consoleMockProvider{
+		logs: map[string]string{"task-1": "gcc: compiled main.c"},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/task-1/console", nil)
+	rec := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Status = %d, want 200", rec.Code)
+	}
+	var response struct {
+		TaskID    string `json:"task_id"`
+		Stdout    string `json:"stdout"`
+		Truncated bool   `json:"truncated"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	if response.TaskID != "task-1" {
+		t.Errorf("task_id = %q, want task-1", response.TaskID)
+	}
+	if response.Stdout != "gcc: compiled main.c" {
+		t.Errorf("stdout = %q, want gcc: compiled main.c", response.Stdout)
+	}
+	if response.Truncated {
+		t.Error("truncated = true, want false")
+	}
+}
+
+func TestServer_HandleTaskConsole_NotFound(t *testing.T) {
+	s := New(DefaultConfig(), &consoleMockProvider{logs: map[string]string{}})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/unknown/console", nil)
+	rec := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("Status = %d, want 404", rec.Code)
+	}
+}
+
+func TestServer_HandleTaskConsole_MethodNotAllowed(t *testing.T) {
+	s := New(DefaultConfig(), &consoleMockProvider{logs: map[string]string{}})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/task-1/console", nil)
+	rec := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("Status = %d, want 405", rec.Code)
+	}
+}
+
+func TestServer_HandleTaskConsole_NoProvider(t *testing.T) {
+	// A plain StatsProvider without console support must yield 503, not
+	// an empty 200 that would read as "task produced no output".
+	s := New(DefaultConfig(), &mockProvider{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/task-1/console", nil)
+	rec := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("Status = %d, want 503", rec.Code)
 	}
 }

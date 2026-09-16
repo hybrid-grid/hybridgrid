@@ -142,6 +142,12 @@ func (p *statsProvider) GetWorkers() []*dashboard.WorkerInfo {
 	return result
 }
 
+// GetConsole returns retained console output for a task. It implements
+// dashboard.ConsoleProvider.
+func (p *statsProvider) GetConsole(taskID string) (stdout, stderr string, truncated bool, ok bool) {
+	return p.server.console.Get(taskID)
+}
+
 func supportedArchitectures(caps *pb.WorkerCapabilities) []string {
 	architectures := make([]string, 0, 1)
 	seen := make(map[string]struct{})

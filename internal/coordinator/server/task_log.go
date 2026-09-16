@@ -31,6 +31,7 @@ type TaskLogRecord struct {
 	Event            string    `json:"event"`
 	TaskID           string    `json:"task_id"`
 	BuildType        string    `json:"build_type"`
+	BuildID          string    `json:"build_id"`
 	Scheduler        string    `json:"scheduler"`
 	WorkerID         string    `json:"worker_id"`
 	WorkerArch       string    `json:"worker_arch"`
@@ -42,7 +43,7 @@ type TaskLogRecord struct {
 	// keeps reporting the raw host core count even under a Docker
 	// --cpus/Kubernetes limits.cpu quota — so offline analysis can
 	// verify the cgroup-detection fix actually took effect (see
-	// undersubscription-explains-tie / cgroup-fix-verified-live) instead
+	// .sisyphus/evidence/cgroup-smoke-260818/) instead
 	// of trusting it blindly: a benchmark run where every worker still
 	// logs the same WorkerCPUMillis would mean the fix regressed.
 	WorkerCPUMillis             int32  `json:"worker_cpu_millis"`

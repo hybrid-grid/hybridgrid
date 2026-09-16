@@ -53,7 +53,7 @@ Hybrid-Grid distributes compilation tasks across multiple machines on your LAN (
 - **Worker metrics**: Workers expose `/metrics` and `/health` at `:9090`
 - **Health endpoints**: Both binaries expose `/health` for Docker/K8s healthchecks
 - **Stress test fix**: Exit codes now correctly propagated through `make`/`ninja` wrappers
-- **Full changelog**: [v0.2.4...v0.3.0](https://github.com/hybrid-grid/hybridgrid/compare/v0.2.4...v0.3.0)
+- **Full changelog**: [v0.2.3...v0.3.0](https://github.com/hybrid-grid/hybridgrid/compare/v0.2.3...v0.3.0)
 
 ### Tested Configurations
 - **macOS** (ARM64/x86_64) → Coordinator + Worker ✅

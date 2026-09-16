@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Build Sessions**: `HG_BUILD_ID` groups tasks into builds end-to-end (proto `build_id`, client env), giving the dashboard per-build history and detail pages
+- **Dashboard Redesign** (Jenkins-inspired, fully offline — vendored Alpine.js and Chart.js): token-based theming, dark mode via `prefers-color-scheme`, build detail pages with per-task queue/compile timings, per-task console output view (bounded retention, `GET /api/v1/tasks/{id}/console`), duration and cache-hit charts, **Cluster Activity swimlanes** (per-worker lanes, occupied-slot sub-rows, queue/compile segments, click-through to builds), and a **Worker Throughput** chart (finished tasks per bucket per worker)
+- **REST API**: `GET /api/v1/builds/{id}`, `GET /api/v1/tasks?limit=`, task console endpoint; timestamps as explicit `*_ms` fields (sub-second builds distinguishable)
+- **Dispatch Queue Backpressure**: over-capacity compiles queue at the coordinator (bounded at 256 waiters, `--dispatch-queue-timeout`, default 30s, 0 disables) instead of failing the build with "no worker available"; the wait surfaces as real `queue_ms` in the API, dashboard, and task log
+- **`/log-level` Authentication**: the runtime log-level endpoint on coordinator and worker requires the configured auth token (open when no token is set)
+
+### Changed
+- golangci-lint pinned to v2.13.2 in CI so lint findings are reproducible across upstream releases
+- OpenTelemetry bumped to 1.41
+
+### Fixed
+- Build history marks a build truncated when the task ring evicts its oldest task (`buildTruncated`)
+- Dashboard treats a missing `exit_code` as success (zero is omitted by JSON serialization)
+- Coordinator task events report the coordinator-side queue wait (previously the worker's always-zero field)
+
+## [v0.4.0] - 2026-03-20
+
+Flutter Android distributed builds, on top of the v0.3.0 observability and transport work.
+
+### Added
+- **Flutter Builds**: distributed Flutter Android compilation via `hgbuild flutter build apk` and `hgbuild flutter build appbundle`
+- **Docker-Based Flutter Workers**: pre-built `hybridgrid/flutter-android` image bundling the Android SDK and Gradle
+- **Flutter Build Cache**: first builds always run on the worker (no cache available); identical rebuilds return cached artifacts
+
+## [v0.3.0] - 2026-03-18
+
+Observability completion and transport hardening: every planned metric instrumented, tracing and TLS surfaced as CLI flags, workers become first-class observables.
+
+### Added
+- **Complete Prometheus Metrics (12/12)**: instrumented `fallbacks_total`, `active_tasks`, `network_transfer_bytes`, `worker_latency_ms`, and `circuit_state` on coordinator and workers
+- **OpenTelemetry CLI Flags**: `--tracing-enable`, `--tracing-endpoint`, `--tracing-service-name` on coordinator and worker
+- **TLS/mTLS CLI Flags**: `--tls-cert`, `--tls-key`, `--tls-ca`, `--tls-require-client-cert` on coordinator and worker
+- **`--no-fallback` Flag**: fail fast when the coordinator is unavailable instead of silently compiling locally
+- **Worker Capabilities API**: `/api/v1/workers` returns compilers, architectures, build types, Docker availability, and version
+- **Worker Metrics Server**: workers expose `/metrics` and `/health` at `:9090`
+- **Health Endpoints**: both binaries expose `/health` for Docker/K8s healthchecks
+
+### Fixed
+- **Stress Test Exit Codes**: exit codes now correctly propagate through the `make`/`ninja` wrappers
+
 ## [v0.2.3] - 2026-03-15
 
 Foundation hardening release focused on startup wiring, request tracing, logging, and test coverage.
@@ -94,7 +135,9 @@ Production-ready Windows support and foundation stabilization.
 - **Colored CLI Output** - Visual build progress and status indicators
 - **Prometheus Metrics** - Comprehensive observability
 
-[Unreleased]: https://github.com/h3nr1-d14z/hybridgrid/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/h3nr1-d14z/hybridgrid/compare/v0.4.0...HEAD
+[v0.4.0]: https://github.com/h3nr1-d14z/hybridgrid/compare/v0.3.0...v0.4.0
+[v0.3.0]: https://github.com/h3nr1-d14z/hybridgrid/compare/v0.2.3...v0.3.0
 [v0.2.3]: https://github.com/h3nr1-d14z/hybridgrid/compare/v0.2.2...v0.2.3
 [v0.2.2]: https://github.com/h3nr1-d14z/hybridgrid/compare/v0.2.1...v0.2.2
 [v0.2.1]: https://github.com/h3nr1-d14z/hybridgrid/compare/v0.2.0...v0.2.1

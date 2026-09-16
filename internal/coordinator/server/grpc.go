@@ -26,6 +26,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 	hgtls "github.com/h3nr1-d14z/hybridgrid/internal/security/tls"
+	"github.com/h3nr1-d14z/hybridgrid/internal/security/validation"
 )
 
 const maxGRPCMessageSize = 512 * 1024 * 1024
@@ -37,6 +38,14 @@ const maxGRPCMessageSize = 512 * 1024 * 1024
 // legitimate burst never blocks on channel capacity itself — only on
 // dispatchLoop's own (sub-microsecond) processing rate.
 const dispatchQueueSize = 256
+
+// maxQueuedCompiles bounds how many Compile() calls may sit in the
+// dispatch queue (the backpressure path entered when the fast dispatch
+// budget is exhausted) before the coordinator reverts to rejecting.
+// Mirrors dispatchQueueSize: large enough for a make -j storm, small
+// enough that a wedged cluster fails fast instead of accumulating
+// unbounded waiters.
+const maxQueuedCompiles = 256
 
 // dispatchRequest is one pending "pick a worker and book it" decision.
 // Compile() submits these to s.dispatchCh instead of calling
@@ -51,8 +60,8 @@ const dispatchQueueSize = 256
 // before any of them had written their own increment — a classic
 // check-then-act race. Under `make -jN` for N large enough relative to
 // total worker capacity (empirically N ≳ 7 on a 5-worker/10-slot
-// cluster — see undersubscription-explains-tie / cgroup-fix-verified-
-// live), this let multiple in-flight decisions overbook the same
+// cluster — see PR hybrid-grid/hybridgrid#9), this let multiple
+// in-flight decisions overbook the same
 // (especially low-max_parallel) worker, which then rejected the excess
 // with ResourceExhausted; a bounded reselection-with-backoff retry
 // (maxDispatchAttempts) mitigated but did not eliminate the failures.
@@ -140,6 +149,81 @@ func (s *Server) dispatch(buildType pb.BuildType, arch pb.Architecture, clientOS
 	return res.worker, res.info, res.activeAtDispatch, res.err
 }
 
+// signalDispatchCapacity wakes every Compile() call waiting in the
+// dispatch queue: a task completed (slot freed) or a worker registered
+// (new capacity). Broadcast by close-and-replace, so a signal that
+// arrives while no waiter is listening is not lost — the next waiter
+// sees the already-closed channel immediately and retries once.
+func (s *Server) signalDispatchCapacity() {
+	s.dispatchSignalMu.Lock()
+	if s.dispatchSignal != nil {
+		close(s.dispatchSignal)
+		s.dispatchSignal = make(chan struct{})
+	}
+	s.dispatchSignalMu.Unlock()
+}
+
+// dispatchCapacitySignal returns the current broadcast channel. Grab it
+// once per wait; a channel replaced after the grab still fires on the
+// next signal.
+func (s *Server) dispatchCapacitySignal() chan struct{} {
+	s.dispatchSignalMu.Lock()
+	defer s.dispatchSignalMu.Unlock()
+	return s.dispatchSignal
+}
+
+// awaitDispatchCapacity blocks until a capacity signal fires, deadline
+// passes, or the client context is cancelled. Returns true when the
+// caller should retry worker selection — races between woken waiters
+// mean the retry can still find every slot taken, in which case the
+// caller re-enters with the same deadline. Callers must have entered
+// the queue via enterDispatchQueue (the waiter cap is checked there,
+// once per queued Compile, not per wake).
+func (s *Server) awaitDispatchCapacity(ctx context.Context, deadline time.Time) bool {
+	// The re-check tick bounds signal loss: a capacity signal that
+	// fires between the caller's last failed dispatch attempt and this
+	// wait is invisible (the waiter grabs the replacement channel), so
+	// without the tick it would sleep to the deadline despite free
+	// capacity. With it, worst case the caller re-checks capacity one
+	// tick late. It also makes the queue robust against any future
+	// capacity-freeing path that forgets to signal.
+	const recheckInterval = 250 * time.Millisecond
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return false
+	}
+	timer := time.NewTimer(min(remaining, recheckInterval))
+	defer timer.Stop()
+	select {
+	case <-s.dispatchCapacitySignal():
+		return true
+	case <-timer.C:
+		// Tick: not a timeout — the deadline may still be far away.
+		// Returning true lets the caller run a fresh dispatch budget,
+		// which re-reads actual capacity.
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// enterDispatchQueue admits one Compile() into the backpressure queue,
+// refusing when the waiter cap is reached so overload surfaces to the
+// client instead of piling up. Pair with leaveDispatchQueue.
+func (s *Server) enterDispatchQueue() bool {
+	if atomic.AddInt64(&s.queuedCompiles, 1) > maxQueuedCompiles {
+		atomic.AddInt64(&s.queuedCompiles, -1)
+		return false
+	}
+	return true
+}
+
+// leaveDispatchQueue releases a queue admission taken by
+// enterDispatchQueue.
+func (s *Server) leaveDispatchQueue() {
+	atomic.AddInt64(&s.queuedCompiles, -1)
+}
+
 // connPool caches gRPC client connections to workers by address.
 type connPool struct {
 	mu       sync.Mutex
@@ -222,6 +306,12 @@ type Config struct {
 	// TaskLogPath is the path to the JSON Lines per-task log file.
 	// Empty or "stdout" routes records to standard output.
 	TaskLogPath string
+	// DispatchQueueTimeout bounds how long a Compile() call may wait
+	// in the dispatch queue after the fast dispatch budget (~700 ms)
+	// is exhausted, before the coordinator gives up and returns the
+	// "no worker available" failure. 0 disables queueing entirely
+	// (ablation: the pre-backpressure reject-after-budget behavior).
+	DispatchQueueTimeout time.Duration
 }
 
 // DefaultConfig returns sensible defaults.
@@ -237,6 +327,8 @@ func DefaultConfig() Config {
 		// live here rather than in the factory.
 		WarmStartTasks:   100,
 		LoadPenaltyValue: 0.5,
+
+		DispatchQueueTimeout: 30 * time.Second,
 	}
 }
 
@@ -298,16 +390,24 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 
 // TaskEvent represents a task event for the dashboard.
 type TaskEvent struct {
-	ID           string
-	BuildType    string
-	Status       string
-	WorkerID     string
-	StartedAt    int64
-	CompletedAt  int64
-	DurationMs   int64
-	ExitCode     int32
-	FromCache    bool
-	ErrorMessage string
+	ID        string
+	BuildType string
+	BuildID   string
+	Status    string
+	WorkerID  string
+	// StartedAtMs and CompletedAtMs are Unix milliseconds so the
+	// dashboard can place tasks on a sub-second timeline (second
+	// granularity collapses builds where every TU lands within one
+	// second). The JSONL task log is unaffected — it carries its own
+	// TS and durations.
+	StartedAtMs   int64
+	CompletedAtMs int64
+	DurationMs    int64
+	QueueTimeMs   int64
+	CompileTimeMs int64
+	ExitCode      int32
+	FromCache     bool
+	ErrorMessage  string
 }
 
 // EventNotifier is called when task events occur.
@@ -328,9 +428,19 @@ type Server struct {
 	eventNotifier  EventNotifier
 	workerConns    *connPool
 	taskLogger     *TaskLogger
+	console        *consoleStore
 	dispatchCh     chan *dispatchRequest
 	dispatchWG     sync.WaitGroup
 	dispatchOnce   sync.Once
+
+	// dispatchSignal broadcasts "a slot may have freed" to Compile()
+	// calls waiting in the dispatch queue (backpressure path). It is
+	// closed and replaced under dispatchSignalMu; waiters select on
+	// the channel they grabbed. queuedCompiles counts current waiters
+	// against maxQueuedCompiles.
+	dispatchSignalMu sync.Mutex
+	dispatchSignal   chan struct{}
+	queuedCompiles   int64
 
 	activeTasks         int64
 	queuedTasks         int64
@@ -422,9 +532,11 @@ func New(cfg Config) *Server {
 		circuitManager: circuitMgr,
 		workerConns:    newConnPool(dialOpts),
 		taskLogger:     taskLogger,
+		console:        newConsoleStore(),
 		flutterCache:   make(map[string]*flutterCacheEntry),
 		unityCache:     make(map[string]*unityCacheEntry),
 		dispatchCh:     make(chan *dispatchRequest, dispatchQueueSize),
+		dispatchSignal: make(chan struct{}),
 	}
 	go s.dispatchLoop()
 	return s
@@ -567,6 +679,9 @@ func (s *Server) Handshake(ctx context.Context, req *pb.HandshakeRequest) (*pb.H
 		if err := s.registry.UpdateHeartbeat(workerID); err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to register worker: %v", err)
 		}
+	} else {
+		// Fresh capacity joined the cluster — wake queued waiters.
+		s.signalDispatchCapacity()
 	}
 
 	// Log C++ capabilities for debugging
@@ -595,6 +710,7 @@ func (s *Server) Handshake(ctx context.Context, req *pb.HandshakeRequest) (*pb.H
 
 // Compile handles compilation requests by forwarding to workers.
 func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.CompileResponse, error) {
+	buildID := validation.NormalizeBuildID(req.BuildId)
 	start := time.Now()
 
 	// Start tracing span for the coordinator compile flow
@@ -652,8 +768,10 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	// the pendingX entry for this TaskID.
 	//
 	// maxDispatchAttempts was 3, tuned for modest bursts. Empirically
-	// (undersubscription-explains-tie / cgroup-fix-verified-live
-	// follow-up), a 5-worker cluster with 10 total max_parallel slots
+	// (follow-up measurements in PR hybrid-grid/hybridgrid#9; the budget's
+	// measured limits are in docs/thesis/bao-cao-tien-do-260821.md §4 and
+	// stated in docs/thesis/paper-hybridgrid-en.md §3.3), a 5-worker
+	// cluster with 10 total max_parallel slots
 	// hard-fails builds under `make -j7` and above with 3 attempts: the
 	// linear backoff below (25ms, 50ms) doesn't span enough of the
 	// dispatch storm at build-start cold start, when make launches all
@@ -686,6 +804,13 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	)
 	atomic.AddInt64(&s.activeTasks, 1)
 	defer atomic.AddInt64(&s.activeTasks, -1)
+	// queued marks entry into the backpressure path; queueDeadline
+	// spans the whole queued phase (NOT reset per wake) so total wait
+	// stays bounded.
+	var (
+		queued        bool
+		queueDeadline time.Time
+	)
 	for attempt := 1; ; attempt++ {
 		worker, dispatchInfo, activeAtDispatch, err = s.dispatch(pb.BuildType_BUILD_TYPE_CPP, req.TargetArch, clientOSFilter, taskCtx)
 		if err != nil {
@@ -703,14 +828,60 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 			// couple of backoff cycles. Retried with the same budget and
 			// backoff as the ResourceExhausted branch below, so a single
 			// Compile() call never waits longer in total than before this
-			// change — see undersubscription-explains-tie /
-			// cgroup-fix-verified-live.
+			// change — see PR hybrid-grid/hybridgrid#9.
 			if attempt < maxDispatchAttempts {
 				log.Warn().
 					Str("task_id", req.TaskId).
 					Int("attempt", attempt).
 					Msg("No worker currently has capacity; retrying")
 				time.Sleep(time.Duration(attempt) * 25 * time.Millisecond)
+				continue
+			}
+			// Fast budget exhausted (~700 ms): every eligible worker
+			// has been at capacity the whole time. Instead of failing
+			// the build, queue — wait for a completion or registration
+			// signal and retry with a fresh budget, bounded by
+			// DispatchQueueTimeout and the client's own context. This
+			// is dispatch backpressure: a make -jN storm larger than
+			// cluster capacity now stretches over time instead of
+			// hard-failing the over-capacity compiles. A
+			// DispatchQueueTimeout of 0 (ablation) or a full queue
+			// keeps the pre-backpressure reject behavior.
+			if s.config.DispatchQueueTimeout > 0 && !queued {
+				if s.enterDispatchQueue() {
+					queued = true
+					defer s.leaveDispatchQueue()
+					queueDeadline = time.Now().Add(s.config.DispatchQueueTimeout)
+					log.Warn().
+						Str("task_id", req.TaskId).
+						Dur("timeout", s.config.DispatchQueueTimeout).
+						Msg("All workers at capacity; queued for dispatch")
+					// A fresh budget immediately (no await first):
+					// capacity freed during the just-exhausted budget
+					// is caught by these attempts — going straight to
+					// await-on-signal could miss a signal that already
+					// fired.
+					attempt = 0
+					continue
+				}
+			}
+			if queued {
+				if !s.awaitDispatchCapacity(ctx, queueDeadline) {
+					span.SetStatus(otelcodes.Error, "dispatch queue timeout")
+					tracing.RecordError(ctx, err)
+					log.Error().Err(err).
+						Str("task_id", req.TaskId).
+						Str("client_os", req.ClientOs).
+						Bool("cross_compile", len(req.RawSource) > 0).
+						Msg("Dispatch queue timeout exceeded; no worker capacity became available")
+					return &pb.CompileResponse{
+						Status:   pb.TaskStatus_STATUS_FAILED,
+						ExitCode: 1,
+						Stderr:   fmt.Sprintf("dispatch queue timeout (%v) exceeded: no worker capacity became available: %v", s.config.DispatchQueueTimeout, err),
+					}, nil
+				}
+				// A slot may have freed: retry with a fresh fast budget.
+				attempt = 0
 				continue
 			}
 			span.SetStatus(otelcodes.Error, "no worker available")
@@ -750,11 +921,12 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 		// sees the assignment move.
 		if s.eventNotifier != nil {
 			s.eventNotifier.NotifyTaskStarted(&TaskEvent{
-				ID:        req.TaskId,
-				BuildType: "cpp",
-				Status:    "running",
-				WorkerID:  worker.ID,
-				StartedAt: taskStartTime.Unix(),
+				ID:          req.TaskId,
+				BuildType:   "cpp",
+				BuildID:     buildID,
+				Status:      "running",
+				WorkerID:    worker.ID,
+				StartedAtMs: taskStartTime.UnixMilli(),
 			})
 		}
 
@@ -805,6 +977,8 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 		compileTime = time.Duration(resp.CompilationTimeMs) * time.Millisecond
 	}
 	s.registry.DecrementTasks(worker.ID, success, compileTime)
+	// A cpp slot just freed — wake queued Compile() waiters.
+	s.signalDispatchCapacity()
 
 	// Feedback loop for online-learning schedulers. Reward convention:
 	// higher is better. We use a normalised negative log-latency so the
@@ -860,6 +1034,7 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 			Event:                       "task_completed",
 			TaskID:                      req.TaskId,
 			BuildType:                   "cpp",
+			BuildID:                     buildID,
 			Scheduler:                   s.config.SchedulerType,
 			WorkerID:                    worker.ID,
 			WorkerArch:                  workerNativeArch,
@@ -895,15 +1070,29 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 		span.SetStatus(otelcodes.Error, "compilation failed")
 	}
 
+	// Retain console output for the dashboard (bounded); the response
+	// carries the full log because Compile is unary.
+	if resp != nil {
+		s.console.Put(req.TaskId, resp.Stdout, resp.Stderr)
+	}
 	// Notify task completed
 	if s.eventNotifier != nil {
 		event := &TaskEvent{
-			ID:          req.TaskId,
-			BuildType:   "cpp",
-			WorkerID:    worker.ID,
-			StartedAt:   taskStartTime.Unix(),
-			CompletedAt: taskCompletedTime.Unix(),
-			DurationMs:  taskCompletedTime.Sub(taskStartTime).Milliseconds(),
+			ID:            req.TaskId,
+			BuildType:     "cpp",
+			BuildID:       buildID,
+			WorkerID:      worker.ID,
+			StartedAtMs:   taskStartTime.UnixMilli(),
+			CompletedAtMs: taskCompletedTime.UnixMilli(),
+			DurationMs:    taskCompletedTime.Sub(taskStartTime).Milliseconds(),
+			// Coordinator-side queue time (Compile entry → dispatch),
+			// the same span the JSONL task log records: with dispatch
+			// backpressure the real wait happens here, before the
+			// worker is involved — the worker's own QueueTimeMs is
+			// always 0 (its admission control rejects rather than
+			// queues).
+			QueueTimeMs:   queueTime.Milliseconds(),
+			CompileTimeMs: resp.GetCompilationTimeMs(),
 		}
 		if success {
 			event.Status = "completed"
@@ -967,16 +1156,17 @@ func (s *Server) forwardCompile(ctx context.Context, worker *registry.WorkerInfo
 
 // Build handles build requests.
 func (s *Server) Build(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+	buildID := validation.NormalizeBuildID(req.BuildId)
 	if req.TaskId == "" {
 		return nil, status.Error(codes.InvalidArgument, "task_id required")
 	}
 
 	if req.GetFlutterConfig() != nil {
-		return s.handleFlutterBuild(ctx, req)
+		return s.handleFlutterBuild(ctx, req, buildID)
 	}
 
 	if req.GetUnityConfig() != nil {
-		return s.handleUnityBuild(ctx, req)
+		return s.handleUnityBuild(ctx, req, buildID)
 	}
 
 	return &pb.BuildResponse{
@@ -986,7 +1176,7 @@ func (s *Server) Build(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResp
 	}, nil
 }
 
-func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest, buildID string) (*pb.BuildResponse, error) {
 	start := time.Now()
 	m := metrics.Default()
 
@@ -1002,25 +1192,29 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest) (
 		atomic.AddInt64(&s.successTasks, 1)
 
 		if s.eventNotifier != nil {
-			taskStart := start.Unix()
+			taskStartMs := start.UnixMilli()
 			s.eventNotifier.NotifyTaskStarted(&TaskEvent{
-				ID:        req.TaskId,
-				BuildType: "flutter",
-				Status:    "running",
-				WorkerID:  "",
-				StartedAt: taskStart,
+				ID:          req.TaskId,
+				BuildType:   "flutter",
+				BuildID:     buildID,
+				Status:      "running",
+				WorkerID:    "",
+				StartedAtMs: taskStartMs,
 			})
 			s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
-				ID:           req.TaskId,
-				BuildType:    "flutter",
-				Status:       "completed",
-				WorkerID:     "",
-				StartedAt:    taskStart,
-				CompletedAt:  time.Now().Unix(),
-				DurationMs:   cached.buildTimeMs,
-				ExitCode:     0,
-				FromCache:    true,
-				ErrorMessage: "",
+				ID:            req.TaskId,
+				BuildType:     "flutter",
+				BuildID:       buildID,
+				Status:        "completed",
+				WorkerID:      "",
+				StartedAtMs:   taskStartMs,
+				CompletedAtMs: time.Now().UnixMilli(),
+				DurationMs:    cached.buildTimeMs,
+				QueueTimeMs:   0,
+				CompileTimeMs: cached.buildTimeMs,
+				ExitCode:      0,
+				FromCache:     true,
+				ErrorMessage:  "",
 			})
 		}
 
@@ -1051,25 +1245,27 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest) (
 			Msg("No worker available for flutter build")
 
 		if s.eventNotifier != nil {
-			taskStart := start.Unix()
+			taskStartMs := start.UnixMilli()
 			s.eventNotifier.NotifyTaskStarted(&TaskEvent{
-				ID:        req.TaskId,
-				BuildType: "flutter",
-				Status:    "running",
-				WorkerID:  "",
-				StartedAt: taskStart,
+				ID:          req.TaskId,
+				BuildType:   "flutter",
+				BuildID:     buildID,
+				Status:      "running",
+				WorkerID:    "",
+				StartedAtMs: taskStartMs,
 			})
 			s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
-				ID:           req.TaskId,
-				BuildType:    "flutter",
-				Status:       "failed",
-				WorkerID:     "",
-				StartedAt:    taskStart,
-				CompletedAt:  time.Now().Unix(),
-				DurationMs:   0,
-				ExitCode:     1,
-				FromCache:    false,
-				ErrorMessage: fmt.Sprintf("no worker available: %v", err),
+				ID:            req.TaskId,
+				BuildType:     "flutter",
+				BuildID:       buildID,
+				Status:        "failed",
+				WorkerID:      "",
+				StartedAtMs:   taskStartMs,
+				CompletedAtMs: time.Now().UnixMilli(),
+				DurationMs:    0,
+				ExitCode:      1,
+				FromCache:     false,
+				ErrorMessage:  fmt.Sprintf("no worker available: %v", err),
 			})
 		}
 
@@ -1111,17 +1307,19 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest) (
 
 	if s.eventNotifier != nil {
 		s.eventNotifier.NotifyTaskStarted(&TaskEvent{
-			ID:        req.TaskId,
-			BuildType: "flutter",
-			Status:    "running",
-			WorkerID:  worker.ID,
-			StartedAt: taskStartTime.Unix(),
+			ID:          req.TaskId,
+			BuildType:   "flutter",
+			BuildID:     buildID,
+			Status:      "running",
+			WorkerID:    worker.ID,
+			StartedAtMs: taskStartTime.UnixMilli(),
 		})
 	}
 
 	client := pb.NewBuildServiceClient(conn)
 	buildResp, err := client.Build(ctx, &pb.BuildRequest{
 		TaskId:         req.TaskId,
+		BuildId:        req.BuildId,
 		SourceHash:     req.SourceHash,
 		SourceArchive:  req.SourceArchive,
 		BuildType:      req.BuildType,
@@ -1133,6 +1331,9 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest) (
 	success := err == nil && buildResp != nil && buildResp.Status == pb.TaskStatus_STATUS_COMPLETED
 
 	s.registry.DecrementTasks(worker.ID, success, time.Duration(0))
+	// A slot just freed (flutter/unity) — queued cpp Compile() waiters
+	// can use it (ActiveTasks accounting is shared across build types).
+	s.signalDispatchCapacity()
 
 	taskCompletedTime := time.Now()
 
@@ -1142,15 +1343,21 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest) (
 		atomic.AddInt64(&s.failedTasks, 1)
 	}
 
+	if buildResp != nil {
+		s.console.Put(req.TaskId, buildResp.Stdout, buildResp.Stderr)
+	}
 	if s.eventNotifier != nil {
 		event := &TaskEvent{
-			ID:          req.TaskId,
-			BuildType:   "flutter",
-			WorkerID:    worker.ID,
-			StartedAt:   taskStartTime.Unix(),
-			CompletedAt: taskCompletedTime.Unix(),
-			DurationMs:  taskCompletedTime.Sub(taskStartTime).Milliseconds(),
-			FromCache:   false,
+			ID:            req.TaskId,
+			BuildType:     "flutter",
+			BuildID:       buildID,
+			WorkerID:      worker.ID,
+			StartedAtMs:   taskStartTime.UnixMilli(),
+			CompletedAtMs: taskCompletedTime.UnixMilli(),
+			DurationMs:    taskCompletedTime.Sub(taskStartTime).Milliseconds(),
+			QueueTimeMs:   buildResp.GetQueueTimeMs(),
+			CompileTimeMs: buildResp.GetBuildTimeMs(),
+			FromCache:     false,
 		}
 		if success {
 			event.Status = "completed"
@@ -1187,7 +1394,7 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest) (
 	return buildResp, nil
 }
 
-func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, buildID string) (*pb.BuildResponse, error) {
 	start := time.Now()
 	m := metrics.Default()
 
@@ -1203,25 +1410,29 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest) (*p
 		atomic.AddInt64(&s.successTasks, 1)
 
 		if s.eventNotifier != nil {
-			taskStart := start.Unix()
+			taskStartMs := start.UnixMilli()
 			s.eventNotifier.NotifyTaskStarted(&TaskEvent{
-				ID:        req.TaskId,
-				BuildType: "unity",
-				Status:    "running",
-				WorkerID:  "",
-				StartedAt: taskStart,
+				ID:          req.TaskId,
+				BuildType:   "unity",
+				BuildID:     buildID,
+				Status:      "running",
+				WorkerID:    "",
+				StartedAtMs: taskStartMs,
 			})
 			s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
-				ID:           req.TaskId,
-				BuildType:    "unity",
-				Status:       "completed",
-				WorkerID:     "",
-				StartedAt:    taskStart,
-				CompletedAt:  time.Now().Unix(),
-				DurationMs:   cached.buildTimeMs,
-				ExitCode:     0,
-				FromCache:    true,
-				ErrorMessage: "",
+				ID:            req.TaskId,
+				BuildType:     "unity",
+				BuildID:       buildID,
+				Status:        "completed",
+				WorkerID:      "",
+				StartedAtMs:   taskStartMs,
+				CompletedAtMs: time.Now().UnixMilli(),
+				DurationMs:    cached.buildTimeMs,
+				QueueTimeMs:   0,
+				CompileTimeMs: cached.buildTimeMs,
+				ExitCode:      0,
+				FromCache:     true,
+				ErrorMessage:  "",
 			})
 		}
 
@@ -1252,25 +1463,27 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest) (*p
 			Msg("No worker available for unity build")
 
 		if s.eventNotifier != nil {
-			taskStart := start.Unix()
+			taskStartMs := start.UnixMilli()
 			s.eventNotifier.NotifyTaskStarted(&TaskEvent{
-				ID:        req.TaskId,
-				BuildType: "unity",
-				Status:    "running",
-				WorkerID:  "",
-				StartedAt: taskStart,
+				ID:          req.TaskId,
+				BuildType:   "unity",
+				BuildID:     buildID,
+				Status:      "running",
+				WorkerID:    "",
+				StartedAtMs: taskStartMs,
 			})
 			s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
-				ID:           req.TaskId,
-				BuildType:    "unity",
-				Status:       "failed",
-				WorkerID:     "",
-				StartedAt:    taskStart,
-				CompletedAt:  time.Now().Unix(),
-				DurationMs:   0,
-				ExitCode:     1,
-				FromCache:    false,
-				ErrorMessage: fmt.Sprintf("no worker available: %v", err),
+				ID:            req.TaskId,
+				BuildType:     "unity",
+				BuildID:       buildID,
+				Status:        "failed",
+				WorkerID:      "",
+				StartedAtMs:   taskStartMs,
+				CompletedAtMs: time.Now().UnixMilli(),
+				DurationMs:    0,
+				ExitCode:      1,
+				FromCache:     false,
+				ErrorMessage:  fmt.Sprintf("no worker available: %v", err),
 			})
 		}
 
@@ -1312,17 +1525,19 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest) (*p
 
 	if s.eventNotifier != nil {
 		s.eventNotifier.NotifyTaskStarted(&TaskEvent{
-			ID:        req.TaskId,
-			BuildType: "unity",
-			Status:    "running",
-			WorkerID:  worker.ID,
-			StartedAt: taskStartTime.Unix(),
+			ID:          req.TaskId,
+			BuildType:   "unity",
+			BuildID:     buildID,
+			Status:      "running",
+			WorkerID:    worker.ID,
+			StartedAtMs: taskStartTime.UnixMilli(),
 		})
 	}
 
 	client := pb.NewBuildServiceClient(conn)
 	buildResp, err := client.Build(ctx, &pb.BuildRequest{
 		TaskId:         req.TaskId,
+		BuildId:        req.BuildId,
 		SourceHash:     req.SourceHash,
 		SourceArchive:  req.SourceArchive,
 		BuildType:      req.BuildType,
@@ -1334,6 +1549,9 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest) (*p
 	success := err == nil && buildResp != nil && buildResp.Status == pb.TaskStatus_STATUS_COMPLETED
 
 	s.registry.DecrementTasks(worker.ID, success, time.Duration(0))
+	// A slot just freed (flutter/unity) — queued cpp Compile() waiters
+	// can use it (ActiveTasks accounting is shared across build types).
+	s.signalDispatchCapacity()
 
 	taskCompletedTime := time.Now()
 
@@ -1343,15 +1561,20 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest) (*p
 		atomic.AddInt64(&s.failedTasks, 1)
 	}
 
+	if buildResp != nil {
+		s.console.Put(req.TaskId, buildResp.Stdout, buildResp.Stderr)
+	}
 	if s.eventNotifier != nil {
 		event := &TaskEvent{
-			ID:          req.TaskId,
-			BuildType:   "unity",
-			WorkerID:    worker.ID,
-			StartedAt:   taskStartTime.Unix(),
-			CompletedAt: taskCompletedTime.Unix(),
-			DurationMs:  taskCompletedTime.Sub(taskStartTime).Milliseconds(),
-			FromCache:   false,
+			ID:            req.TaskId,
+			BuildType:     "unity",
+			WorkerID:      worker.ID,
+			StartedAtMs:   taskStartTime.UnixMilli(),
+			CompletedAtMs: taskCompletedTime.UnixMilli(),
+			DurationMs:    taskCompletedTime.Sub(taskStartTime).Milliseconds(),
+			QueueTimeMs:   buildResp.GetQueueTimeMs(),
+			CompileTimeMs: buildResp.GetBuildTimeMs(),
+			FromCache:     false,
 		}
 		if success {
 			event.Status = "completed"

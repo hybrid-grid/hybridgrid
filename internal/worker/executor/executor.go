@@ -91,11 +91,10 @@ func NewManager(nativeArch pb.Architecture, dockerAvailable bool) *Manager {
 		}
 	}
 
-	// Try to initialize MSVC executor on Windows
-	msvc, err := NewMSVCExecutor()
-	if err == nil {
-		m.msvc = msvc
-	}
+	// Try to initialize MSVC executor on Windows. Split per platform because
+	// off Windows the constructor can only fail, so the attempt is dead code
+	// there (staticcheck SA4023).
+	m.initMSVC()
 
 	// Initialize Flutter executor
 	m.flutter = NewFlutterExecutor()

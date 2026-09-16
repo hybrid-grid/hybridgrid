@@ -57,7 +57,8 @@ func setupTestServer(t *testing.T, cfg Config) (*Server, pb.BuildServiceClient, 
 
 type mockWorkerBuildService struct {
 	pb.UnimplementedBuildServiceServer
-	buildFn func(context.Context, *pb.BuildRequest) (*pb.BuildResponse, error)
+	buildFn   func(context.Context, *pb.BuildRequest) (*pb.BuildResponse, error)
+	compileFn func(context.Context, *pb.CompileRequest) (*pb.CompileResponse, error)
 }
 
 func (m *mockWorkerBuildService) Build(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
@@ -68,6 +69,16 @@ func (m *mockWorkerBuildService) Build(ctx context.Context, req *pb.BuildRequest
 		Status:   pb.TaskStatus_STATUS_FAILED,
 		ExitCode: 1,
 		Stderr:   "mock build not configured",
+	}, nil
+}
+
+func (m *mockWorkerBuildService) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.CompileResponse, error) {
+	if m.compileFn != nil {
+		return m.compileFn(ctx, req)
+	}
+	return &pb.CompileResponse{
+		Status:     pb.TaskStatus_STATUS_COMPLETED,
+		ObjectFile: []byte("mock-object"),
 	}, nil
 }
 
@@ -371,9 +382,9 @@ func TestCompile_NoWorkersAvailable(t *testing.T) {
 }
 
 // TestCompile_RetriesWhenNoWorkerHasCapacity is a regression test for the
-// gap documented in undersubscription-explains-tie /
-// cgroup-fix-verified-live: previously, when dispatch() itself found no
-// eligible worker (every worker genuinely at MaxParallel — distinct from a
+// gap fixed in PR hybrid-grid/hybridgrid#9: previously, when dispatch()
+// itself found no eligible worker (every worker genuinely at
+// MaxParallel — distinct from a
 // selected worker's own admission control rejecting a forwarded compile
 // with ResourceExhausted), Compile() returned STATUS_FAILED immediately,
 // with zero retries. This left properly capacity-aware schedulers (P2C,
@@ -435,6 +446,178 @@ func TestCompile_TracksMetrics(t *testing.T) {
 	})
 
 	assert.Equal(t, int64(1), atomic.LoadInt64(&s.cacheMisses))
+}
+
+// --- Compile dispatch queue (backpressure) ---
+
+// TestCompile_QueuesUntilSlotFrees exercises the backpressure path end
+// to end: the only worker is at capacity, so after the fast dispatch
+// budget (~700 ms) the Compile call parks in the dispatch queue instead
+// of failing. When the slot frees (completion signal), the queued call
+// dispatches to a real (mock) worker and completes.
+func TestCompile_QueuesUntilSlotFrees(t *testing.T) {
+	addr, workerCleanup := setupTestWorker(t, nil)
+	defer workerCleanup()
+
+	// RequestTimeout must be non-zero: forwardCompile derives the
+	// forwarded RPC's deadline from it, and zero expires instantly.
+	cfg := Config{Port: 0, HeartbeatTTL: 30 * time.Second, RequestTimeout: 30 * time.Second, DispatchQueueTimeout: 5 * time.Second}
+	s, client, cleanup := setupTestServer(t, cfg)
+	defer cleanup()
+
+	// One slot, already occupied: dispatch fails every fast attempt.
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "worker-busy",
+		Address: addr,
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch: pb.Architecture_ARCH_X86_64,
+			Cpp:        &pb.CppCapability{Compilers: []string{"gcc"}},
+		},
+		MaxParallel: 1,
+		ActiveTasks: 1, // full until the test frees it
+	}))
+
+	type compileResult struct {
+		resp *pb.CompileResponse
+		err  error
+	}
+	res := make(chan compileResult, 1)
+	go func() {
+		resp, err := client.Compile(context.Background(), &pb.CompileRequest{
+			TaskId:             "task-queued-1",
+			PreprocessedSource: []byte("int main() {}"),
+			Compiler:           "gcc",
+		})
+		res <- compileResult{resp, err}
+	}()
+
+	// Well past the fast budget (~700 ms) plus the entry re-check
+	// budget (~700 ms): the call must be parked in the queue, not
+	// failed and not dispatched.
+	time.Sleep(1800 * time.Millisecond)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&s.queuedCompiles),
+		"after the fast dispatch budget the compile should be parked in the dispatch queue")
+
+	// The occupying compile finishes: slot frees, signal fires.
+	s.registry.DecrementTasks("worker-busy", true, 10*time.Millisecond)
+	s.signalDispatchCapacity()
+
+	select {
+	case r := <-res:
+		require.NoError(t, r.err)
+		assert.Equal(t, pb.TaskStatus_STATUS_COMPLETED, r.resp.Status,
+			"the queued compile should dispatch and complete once capacity frees")
+		assert.Equal(t, int64(0), atomic.LoadInt64(&s.queuedCompiles),
+			"queue admission must be released when the compile finishes")
+	case <-time.After(5 * time.Second):
+		t.Fatal("queued compile did not finish within 5s of the slot freeing")
+	}
+}
+
+// TestCompile_QueueTimeout verifies the queued phase is bounded: with
+// capacity never freeing, Compile fails with the queue-timeout message
+// after DispatchQueueTimeout (plus at most one fresh budget's backoff,
+// ~700 ms — the entry re-check budget may run past the deadline).
+func TestCompile_QueueTimeout(t *testing.T) {
+	s, client, cleanup := setupTestServer(t, Config{
+		Port:                 0,
+		HeartbeatTTL:         30 * time.Second,
+		DispatchQueueTimeout: 300 * time.Millisecond,
+	})
+	defer cleanup()
+
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "worker-full",
+		Address: "127.0.0.1:0",
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch: pb.Architecture_ARCH_X86_64,
+			Cpp:        &pb.CppCapability{Compilers: []string{"gcc"}},
+		},
+		MaxParallel: 1,
+		ActiveTasks: 1, // never freed
+	}))
+
+	start := time.Now()
+	resp, err := client.Compile(context.Background(), &pb.CompileRequest{
+		TaskId:             "task-queued-2",
+		PreprocessedSource: []byte("int main() {}"),
+		Compiler:           "gcc",
+	})
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	assert.Equal(t, pb.TaskStatus_STATUS_FAILED, resp.Status)
+	assert.Contains(t, resp.Stderr, "dispatch queue timeout")
+	assert.Less(t, elapsed, 3*time.Second,
+		"queue timeout must bound the total wait (budget ~700ms + timeout 300ms + one re-check budget), got %s", elapsed)
+	assert.Equal(t, int64(0), atomic.LoadInt64(&s.queuedCompiles))
+}
+
+// TestCompile_QueueClientCancel verifies a client that gives up while
+// queued is released promptly instead of holding queue admission until
+// the timeout.
+func TestCompile_QueueClientCancel(t *testing.T) {
+	s, client, cleanup := setupTestServer(t, Config{
+		Port:                 0,
+		HeartbeatTTL:         30 * time.Second,
+		DispatchQueueTimeout: 10 * time.Second,
+	})
+	defer cleanup()
+
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "worker-full",
+		Address: "127.0.0.1:0",
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch: pb.Architecture_ARCH_X86_64,
+			Cpp:        &pb.CppCapability{Compilers: []string{"gcc"}},
+		},
+		MaxParallel: 1,
+		ActiveTasks: 1,
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	res := make(chan error, 1)
+	go func() {
+		_, err := client.Compile(ctx, &pb.CompileRequest{
+			TaskId:             "task-queued-3",
+			PreprocessedSource: []byte("int main() {}"),
+			Compiler:           "gcc",
+		})
+		res <- err
+	}()
+
+	time.Sleep(1500 * time.Millisecond) // inside the queued phase
+	cancel()
+
+	select {
+	case <-res:
+		// Client saw cancellation (context error) — the point is that
+		// it returned at all rather than sleeping to the 10s timeout.
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancelled compile was not released within 3s")
+	}
+	// Admission released once the handler unwinds.
+	time.Sleep(100 * time.Millisecond)
+	assert.Equal(t, int64(0), atomic.LoadInt64(&s.queuedCompiles),
+		"queue admission must be released when the client cancels")
+}
+
+// TestDispatchQueueCap verifies the waiter cap: a full queue refuses
+// admission so overload surfaces to the client immediately instead of
+// accumulating unbounded waiters.
+func TestDispatchQueueCap(t *testing.T) {
+	s, _, cleanup := setupTestServer(t, Config{Port: 0, HeartbeatTTL: 30 * time.Second})
+	defer cleanup()
+
+	atomic.StoreInt64(&s.queuedCompiles, maxQueuedCompiles)
+	assert.False(t, s.enterDispatchQueue(), "full queue must refuse admission")
+	assert.Equal(t, int64(maxQueuedCompiles), atomic.LoadInt64(&s.queuedCompiles), "refused admission must not change the count")
+
+	atomic.StoreInt64(&s.queuedCompiles, 0)
+	assert.True(t, s.enterDispatchQueue())
+	assert.Equal(t, int64(1), atomic.LoadInt64(&s.queuedCompiles))
+	s.leaveDispatchQueue()
+	assert.Equal(t, int64(0), atomic.LoadInt64(&s.queuedCompiles))
 }
 
 // --- Build ---

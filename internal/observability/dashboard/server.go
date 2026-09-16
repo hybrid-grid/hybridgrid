@@ -20,6 +20,7 @@ var assetsFS embed.FS
 // Config holds dashboard server configuration.
 type Config struct {
 	Port            int
+	AuthToken       string
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
 	ShutdownTimeout time.Duration
@@ -39,6 +40,13 @@ func DefaultConfig() Config {
 type StatsProvider interface {
 	GetStats() *Stats
 	GetWorkers() []*WorkerInfo
+}
+
+// ConsoleProvider is an optional StatsProvider extension exposing
+// retained per-task console output. The coordinator's provider
+// implements it; tests can inject it to exercise the console endpoint.
+type ConsoleProvider interface {
+	GetConsole(taskID string) (stdout, stderr string, truncated bool, ok bool)
 }
 
 // Server is the HTTP dashboard server.
@@ -68,14 +76,18 @@ func New(cfg Config, provider StatsProvider) *Server {
 	// Prometheus metrics endpoint
 	mux.Handle("/metrics", promhttp.Handler())
 
-	// Log level endpoint
-	mux.Handle("/log-level", logging.NewLogLevelHandler())
+	// Log level endpoint (gated by the coordinator auth token)
+	mux.Handle("/log-level", logging.NewLogLevelHandler(cfg.AuthToken))
 
 	// API endpoints
 	mux.HandleFunc("/api/v1/stats", s.handleStats)
 	mux.HandleFunc("/api/v1/workers", s.handleWorkers)
 	mux.HandleFunc("/api/v1/events", s.handleEvents)
 	mux.HandleFunc("/api/v1/tasks", s.handleTasks)
+	mux.HandleFunc("/api/v1/builds", s.handleBuilds)
+	mux.HandleFunc("GET /api/v1/builds/{id}", s.handleBuildByID)
+	mux.HandleFunc("/api/v1/builds/{id}", s.handleBuildByID)
+	mux.HandleFunc("/api/v1/tasks/{id}/console", s.handleTaskConsole)
 
 	// WebSocket endpoint
 	mux.HandleFunc("/ws", s.handleWebSocket)
@@ -127,28 +139,32 @@ type EventNotifierFunc struct {
 	OnTaskCompleted func(task *TaskInfo)
 }
 
-// CreateEventNotifier creates event notifier callbacks for the coordinator.
-func (s *Server) CreateEventNotifier() (onStart func(id, buildType, status, workerID string, startedAt int64), onComplete func(id, buildType, status, workerID string, startedAt, completedAt, durationMs int64, exitCode int32, errorMsg string)) {
-	onStart = func(id, buildType, status, workerID string, startedAt int64) {
+// CreateEventNotifier creates event notifier callbacks for the coordinator. Timestamps are Unix milliseconds (TaskInfo.StartedAtMs).
+func (s *Server) CreateEventNotifier() (onStart func(id, buildID, buildType, status, workerID string, startedAtMs int64), onComplete func(id, buildID, buildType, status, workerID string, startedAtMs, completedAtMs, durationMs, queueMs, compileMs int64, exitCode int32, errorMsg string)) {
+	onStart = func(id, buildID, buildType, status, workerID string, startedAtMs int64) {
 		s.hub.BroadcastTaskStarted(&TaskInfo{
-			ID:        id,
-			BuildType: buildType,
-			Status:    status,
-			WorkerID:  workerID,
-			StartedAt: startedAt,
+			ID:          id,
+			BuildID:     buildID,
+			BuildType:   buildType,
+			Status:      status,
+			WorkerID:    workerID,
+			StartedAtMs: startedAtMs,
 		})
 	}
-	onComplete = func(id, buildType, status, workerID string, startedAt, completedAt, durationMs int64, exitCode int32, errorMsg string) {
+	onComplete = func(id, buildID, buildType, status, workerID string, startedAtMs, completedAtMs, durationMs, queueMs, compileMs int64, exitCode int32, errorMsg string) {
 		s.hub.BroadcastTaskCompleted(&TaskInfo{
-			ID:           id,
-			BuildType:    buildType,
-			Status:       status,
-			WorkerID:     workerID,
-			StartedAt:    startedAt,
-			CompletedAt:  completedAt,
-			DurationMs:   durationMs,
-			ExitCode:     exitCode,
-			ErrorMessage: errorMsg,
+			ID:            id,
+			BuildID:       buildID,
+			BuildType:     buildType,
+			Status:        status,
+			WorkerID:      workerID,
+			StartedAtMs:   startedAtMs,
+			CompletedAtMs: completedAtMs,
+			DurationMs:    durationMs,
+			QueueMs:       queueMs,
+			CompileMs:     compileMs,
+			ExitCode:      exitCode,
+			ErrorMessage:  errorMsg,
 		})
 	}
 	return

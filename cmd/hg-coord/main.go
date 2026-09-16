@@ -70,6 +70,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			noMdns, _ := cmd.Flags().GetBool("no-mdns")
 			schedulerType, _ := cmd.Flags().GetString("scheduler")
 			taskLogPath, _ := cmd.Flags().GetString("task-log")
+			dispatchQueueTimeout, _ := cmd.Flags().GetDuration("dispatch-queue-timeout")
 			epsilonValue, _ := cmd.Flags().GetFloat64("epsilon")
 			alphaValue, _ := cmd.Flags().GetFloat64("alpha")
 			warmStart, _ := cmd.Flags().GetInt("warm-start")
@@ -168,6 +169,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			cfg.EnableRequestID = true
 			cfg.SchedulerType = schedulerType
 			cfg.TaskLogPath = taskLogPath
+			cfg.DispatchQueueTimeout = dispatchQueueTimeout
 			cfg.EpsilonValue = epsilonValue
 			cfg.AlphaValue = alphaValue
 			cfg.WarmStartTasks = warmStart
@@ -222,6 +224,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			// Start HTTP dashboard server
 			dashCfg := dashboard.DefaultConfig()
 			dashCfg.Port = httpPort
+			dashCfg.AuthToken = token
 			dashSrv := dashboard.New(dashCfg, srv.NewStatsProvider())
 
 			// Wire up event notifications from coordinator to dashboard
@@ -282,6 +285,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 	serveCmd.Flags().Float64("alpha", 1.0, "LinUCB exploration coefficient α (in [0, 10]; ignored for other schedulers)")
 	serveCmd.Flags().Int("warm-start", 100, "Hybrid-LinUCB warm-start dispatch count (>= 0; ignored for other schedulers)")
 	serveCmd.Flags().Float64("load-penalty", 0.5, "Hybrid-LinUCB load penalty λ (in [0, 5]; ignored for other schedulers)")
+	serveCmd.Flags().Duration("dispatch-queue-timeout", 30*time.Second, "How long an over-capacity compile waits in the dispatch queue before failing (0 disables queueing)")
 	serveCmd.Flags().String("tls-cert", "", "Path to TLS certificate file (PEM format)")
 	serveCmd.Flags().String("tls-key", "", "Path to TLS private key file (PEM format)")
 	serveCmd.Flags().String("tls-ca", "", "Path to CA certificate for client verification (mTLS)")
@@ -304,18 +308,18 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 
 // eventNotifierWrapper adapts dashboard callbacks to coordinator's EventNotifier interface.
 type eventNotifierWrapper struct {
-	onStart    func(id, buildType, status, workerID string, startedAt int64)
-	onComplete func(id, buildType, status, workerID string, startedAt, completedAt, durationMs int64, exitCode int32, errorMsg string)
+	onStart    func(id, buildID, buildType, status, workerID string, startedAtMs int64)
+	onComplete func(id, buildID, buildType, status, workerID string, startedAtMs, completedAtMs, durationMs, queueMs, compileMs int64, exitCode int32, errorMsg string)
 }
 
 func (w *eventNotifierWrapper) NotifyTaskStarted(event *coordserver.TaskEvent) {
 	if w.onStart != nil {
-		w.onStart(event.ID, event.BuildType, event.Status, event.WorkerID, event.StartedAt)
+		w.onStart(event.ID, event.BuildID, event.BuildType, event.Status, event.WorkerID, event.StartedAtMs)
 	}
 }
 
 func (w *eventNotifierWrapper) NotifyTaskCompleted(event *coordserver.TaskEvent) {
 	if w.onComplete != nil {
-		w.onComplete(event.ID, event.BuildType, event.Status, event.WorkerID, event.StartedAt, event.CompletedAt, event.DurationMs, event.ExitCode, event.ErrorMessage)
+		w.onComplete(event.ID, event.BuildID, event.BuildType, event.Status, event.WorkerID, event.StartedAtMs, event.CompletedAtMs, event.DurationMs, event.QueueTimeMs, event.CompileTimeMs, event.ExitCode, event.ErrorMessage)
 	}
 }
