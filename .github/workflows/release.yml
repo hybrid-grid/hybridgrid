@@ -13,6 +13,10 @@ permissions:
   packages: write
   id-token: write
 
+env:
+  # Must satisfy go.mod (>=1.25.0); mirrors ci.yml's GO_VERSION.
+  GO_VERSION: "1.25.13"
+
 jobs:
   release:
     name: GoReleaser
@@ -26,7 +30,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
       - name: Run GoReleaser

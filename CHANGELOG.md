@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-09-17
+
 ### Added
+- **Standalone `hg-dashboard` container image**: the Docker build publishes a `hg-dashboard` image (scratch-based) alongside `hg-coord`, `hg-worker`, and `hgbuild`; the compose stacks and stress Dockerfiles build and run it
+- **Workflow YAML guard**: CI strict-parses every `.github/workflows/*.yml` with a duplicate-mapping-key-detecting YAML loader, so an invalid workflow (e.g. a duplicated matrix key) fails CI instead of silently not running
 - **Build Sessions**: `HG_BUILD_ID` groups tasks into builds end-to-end (proto `build_id`, client env), giving the dashboard per-build history and detail pages
 - **Dashboard Redesign** (Jenkins-inspired, fully offline — vendored Alpine.js and Chart.js): token-based theming, dark mode via `prefers-color-scheme`, build detail pages with per-task queue/compile timings, per-task console output view (bounded retention, `GET /api/v1/tasks/{id}/console`), duration and cache-hit charts, **Cluster Activity swimlanes** (per-worker lanes, occupied-slot sub-rows, queue/compile segments, click-through to builds), and a **Worker Throughput** chart (finished tasks per bucket per worker)
 - **REST API**: `GET /api/v1/builds/{id}`, `GET /api/v1/tasks?limit=`, task console endpoint; timestamps as explicit `*_ms` fields (sub-second builds distinguishable)
@@ -15,7 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`/log-level` Authentication**: the runtime log-level endpoint on coordinator and worker requires the configured auth token (open when no token is set)
 
 ### Changed
-- **Standalone `hg-dashboard` binary**: the web dashboard is extracted from the coordinator into a standalone binary (`cmd/hg-dashboard`) that serves the SPA, the REST API (`/api/v1/*`), and the browser WebSocket (`/ws`), backed by the new gRPC `TelemetryService`. The coordinator no longer embeds a user interface — its `:8080` HTTP server now serves ops endpoints only (`/health`, `/metrics`, `/log-level`); the live cluster dashboard is on `hg-dashboard`'s `:8081` (compose) / `:8080` (standalone default)
+- **Release pipeline Go version**: `release.yml` now uses Go 1.25 (mirrors `ci.yml`); it pinned 1.24 while `go.mod` requires >=1.25.0
+- **Standalone `hg-dashboard` binary**: the web dashboard is extracted from the coordinator into a standalone binary (`cmd/hg-dashboard`) that serves the SPA, the REST API (`/api/v1/*`), and the browser WebSocket (`/ws`), backed by the new gRPC `TelemetryService`. The coordinator no longer embeds a user interface — its `:8080` HTTP server now serves ops endpoints only (`/health`, `/metrics`, `/log-level`); the live cluster dashboard is on `hg-dashboard`'s `:8081` (its default, and what compose publishes)
 - golangci-lint pinned to v2.13.2 in CI so lint findings are reproducible across upstream releases
 - OpenTelemetry bumped to 1.41
 
@@ -136,7 +141,8 @@ Production-ready Windows support and foundation stabilization.
 - **Colored CLI Output** - Visual build progress and status indicators
 - **Prometheus Metrics** - Comprehensive observability
 
-[Unreleased]: https://github.com/h3nr1-d14z/hybridgrid/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/h3nr1-d14z/hybridgrid/compare/v0.5.0...HEAD
+[v0.5.0]: https://github.com/h3nr1-d14z/hybridgrid/compare/v0.4.0...v0.5.0
 [v0.4.0]: https://github.com/h3nr1-d14z/hybridgrid/compare/v0.3.0...v0.4.0
 [v0.3.0]: https://github.com/h3nr1-d14z/hybridgrid/compare/v0.2.3...v0.3.0
 [v0.2.3]: https://github.com/h3nr1-d14z/hybridgrid/compare/v0.2.2...v0.2.3
