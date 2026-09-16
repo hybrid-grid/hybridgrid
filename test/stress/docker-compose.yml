@@ -24,6 +24,24 @@ services:
       timeout: 3s
       retries: 3
 
+  # Dashboard - standalone web UI over TelemetryService (host :8081)
+  dashboard:
+    build:
+      context: ../..
+      dockerfile: test/stress/Dockerfile.base
+    command: hg-dashboard serve --coordinator coordinator:9000 --insecure
+    ports:
+      - "8081:8080"
+    networks:
+      - hgnet
+    depends_on:
+      - coordinator
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+
   # Workers - resource limited to simulate slower machines
   worker-1:
     build:

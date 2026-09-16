@@ -42,25 +42,26 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Coordinator (hg-coord)                     │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────────┐  │
-│  │ Registry │  │Scheduler │  │ Metrics  │  │   Dashboard    │  │
-│  │          │  │  (P2C)   │  │(Prometheus)│ │  (HTTP :8080)  │  │
+│  │ Registry │  │Scheduler │  │ Metrics  │  │  Ops HTTP/API  │  │
+│  │          │  │  (P2C)   │  │(Prometheus)│ │ (HTTP :8080)   │  │
 │  └──────────┘  └──────────┘  └──────────┘  └────────────────┘  │
 │  ┌──────────┐  ┌──────────┐                                    │
 │  │ Circuit  │  │  mDNS    │                                    │
 │  │ Breakers │  │Announcer │                                    │
 │  └──────────┘  └──────────┘                                    │
 └──────────────────────────┬──────────────────────────────────────┘
-                           │ gRPC (port 50052)
-           ┌───────────────┼───────────────┐
-           ▼               ▼               ▼
-┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│  hg-worker 1 │  │  hg-worker 2 │  │  hg-worker N │
-│   (Linux)    │  │   (macOS)    │  │  (Windows)   │
-│  ┌────────┐  │  │  ┌────────┐  │  │  ┌────────┐  │
-│  │Native  │  │  │  │Docker  │  │  │  │ MSVC   │  │
-│  │Executor│  │  │  │Executor│  │  │  │Executor│  │
-│  └────────┘  │  │  └────────┘  │  │  └────────┘  │
-└──────────────┘  └──────────────┘  └──────────────┘
+          │ gRPC TelemetryService               │ gRPC (port 9000)
+          │ (read-only, :9000)                  ▼
+          ▼                    ┌───────────────┼───────────────┐
+┌──────────────────────────────┐  ▼               ▼               ▼
+│  hg-dashboard (standalone)   │ ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│  SPA + REST /api/v1/* + WS   │ │  hg-worker 1 │  │  hg-worker 2 │  │  hg-worker N │
+│  (HTTP :8081 host port)      │ │   (Linux)    │  │   (macOS)    │  │  (Windows)   │
+└──────────────────────────────┘ │  ┌────────┐  │  │  ┌────────┐  │  │  ┌────────┐  │
+                                 │  │Native  │  │  │  │Docker  │  │  │  │ MSVC   │  │
+                                 │  │Executor│  │  │  │Executor│  │  │  │Executor│  │
+                                 │  └────────┘  │  │  └────────┘  │  │  └────────┘  │
+                                 └──────────────┘  └──────────────┘  └──────────────┘
 ```
 
 ---
@@ -113,13 +114,13 @@ go test -v ./cmd/hgbuild/...
 Central orchestrator that manages workers and distributes tasks.
 
 #### How It Works
-1. Starts gRPC server (port 9000) and HTTP server (port 8080)
+1. Starts gRPC server (port 9000, BuildService + TelemetryService) and an ops HTTP server (port 8080: /health, /metrics, /log-level)
 2. Announces service via mDNS for auto-discovery
 3. Accepts worker registrations (Handshake RPC)
 4. Receives compilation requests from clients
 5. Schedules tasks to workers using P2C algorithm
 6. Tracks worker health via heartbeats
-7. Exposes metrics and dashboard
+7. Exposes metrics and ops endpoint (the live dashboard is served by the standalone `hg-dashboard` binary, see below)
 
 #### Key Features
 - Worker registration and health tracking
@@ -147,7 +148,8 @@ go test -v ./internal/coordinator/...
 ./hg-coord serve --grpc-port 9000 --http-port 8080
 
 # Check dashboard
-curl http://localhost:8080/api/stats
+# Check dashboard API (served by hg-dashboard, default :8081 in compose)
+curl http://localhost:8081/api/v1/stats
 
 # Check metrics
 curl http://localhost:8080/metrics
@@ -451,11 +453,11 @@ go test -v ./test/chaos/...
 
 ## Dashboard & Monitoring
 
-**Location:** `internal/observability/`
+**Location:** `cmd/hg-dashboard/` (standalone binary) + `internal/observability/ui/`
 
 ### Dashboard Features
 
-Access at `http://localhost:8080`
+Access at `http://localhost:8081` (compose host port; `:8080` standalone default). Start it with `--coordinator` pointing at the coordinator's `:9000` gRPC port; pass `--insecure` when the coordinator runs without TLS (e.g. local/compose setups), and `--coordinator-token` when auth is enabled.
 
 | Panel | Description |
 |-------|-------------|
@@ -466,7 +468,7 @@ Access at `http://localhost:8080`
 
 ### Prometheus Metrics
 
-Endpoint: `http://localhost:8080/metrics`
+Endpoint: `http://localhost:8080/metrics` (coordinator ops server)
 
 | Metric | Type | Description |
 |--------|------|-------------|
@@ -480,7 +482,7 @@ Endpoint: `http://localhost:8080/metrics`
 
 ### WebSocket Events
 
-Real-time updates via WebSocket at `ws://localhost:8080/ws`:
+Real-time updates via WebSocket at `ws://localhost:8081/ws`:
 - Worker connect/disconnect
 - Task start/complete/fail
 - Stats updates (every 5s)
@@ -491,11 +493,18 @@ Real-time updates via WebSocket at `ws://localhost:8080/ws`:
 go test -v ./internal/observability/...
 
 # Test dashboard API
-curl http://localhost:8080/api/stats
-curl http://localhost:8080/api/workers
+curl http://localhost:8081/api/v1/stats
+curl http://localhost:8081/api/v1/workers
 
-# Test WebSocket (wscat required)
-wscat -c ws://localhost:8080/ws
+# Test WebSocket (wscat required; dashboard on :8081 compose host port)
+wscat -c ws://localhost:8081/ws
+
+# Dashboard health (served by hg-dashboard)
+curl http://localhost:8081/health
+
+# Coordinator ops health/metrics (separate process, :8080)
+curl http://localhost:8080/health
+curl http://localhost:8080/metrics
 ```
 
 ---

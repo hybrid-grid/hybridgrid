@@ -1,6 +1,8 @@
 # API Documentation
 
-## gRPC API
+> **Architecture split (v0.5):** the live cluster dashboard is now served by a standalone `hg-dashboard` binary. It exposes the REST API (`/api/v1/*`) and browser WebSocket (`/ws`) over HTTP, and pulls cluster state from the coordinator's gRPC `TelemetryService` (`:9000`). The coordinator itself keeps a small **ops HTTP server** (`/health`, `/metrics`, `/log-level`) on `--http-port` (default 8080). Reusable, stack-agnostic clients (including `hg-dashboard`) consume `TelemetryService` directly.
+
+## gRPC Build API
 
 ### Service Definition
 
@@ -127,19 +129,50 @@ message WorkerStatus {
 }
 ```
 
-## HTTP API
+## gRPC TelemetryService (read-only observation plane)
 
-### Dashboard
+**Location:** `proto/hybridgrid/v1/telemetry.proto`, registered on the coordinator's `:9000` gRPC server alongside `BuildService`. Read-only by design: no RPC here can alter build-plane state. Authentication mirrors the build plane: when the coordinator is configured with a token, every request must carry it as the `auth_token` field.
+
+| RPC | Request | Response | Notes |
+|-----|---------|----------|-------|
+| `GetStats` | `GetTelemetryStatsRequest{auth_token}` | `GetTelemetryStatsResponse{stats}` | Cluster-wide aggregate stats (workers, tasks, cache, uptime) |
+| `ListWorkers` | `ListTelemetryWorkersRequest{auth_token}` | `ListTelemetryWorkersResponse{workers[]}` | Registered workers as the coordinator sees them |
+| `ListTasks` | `ListTelemetryTasksRequest{auth_token, limit?}` | `ListTelemetryTasksResponse{tasks[]}` | Recent tasks, newest first |
+| `ListBuilds` | `ListTelemetryBuildsRequest{auth_token}` | `ListTelemetryBuildsResponse{builds[]}` | Logical build aggregates |
+| `GetBuild` | `GetTelemetryBuildRequest{auth_token, build_id}` | `GetTelemetryBuildResponse{build, tasks[]}` | One build with retained tasks; `NOT_FOUND` when unknown |
+| `GetConsole` | `GetTelemetryConsoleRequest{auth_token, task_id}` | `GetTelemetryConsoleResponse{console}` | Retained console output; `NOT_FOUND` when the task is unknown |
+| `StreamEvents` | `StreamTelemetryEventsRequest{auth_token}` | `stream TelemetryEvent` | Live event stream: replays recent events on connect, then pushes new ones until the client disconnects. `TelemetryEvent{type, payload_json}`; types: `stats`, `task_started`, `task_completed`, `worker_added`, `worker_removed`, `ping` |
+
+Clients (`hg-dashboard`) pass `--coordinator-token` as `auth_token` on every call. `StreamEvents` feeds the browser WebSocket fan-out: each `TelemetryEvent` is translated into a WS message `{"type","timestamp","data":<parsed payload_json>}`.
+
+## Coordinator Ops HTTP API
+
+Served by `hg-coord` on `--http-port` (default 8080). These are operator/metrics endpoints — **not** the dashboard.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | GET | Web dashboard UI |
-| `/health` | GET | Health check (returns "OK") |
-| `/metrics` | GET | Prometheus metrics |
-| `/api/stats` | GET | JSON stats for dashboard |
-| `/ws` | WebSocket | Real-time updates |
+| `/health` | GET | Liveness/readiness, returns `200 "ok"` |
+| `/metrics` | GET | Prometheus metrics (see "Prometheus Metrics" below) |
+| `/log-level` | GET/PUT | Inspect/change the runtime log level; requires the configured auth token (open when no token is set) |
 
-### GET /api/stats
+## Dashboard HTTP API (served by `hg-dashboard`)
+
+Served by the standalone `hg-dashboard` binary. By default it listens on `:8080`; in the test compose files it is published on the host as `:8081`. It serves the SPA, the REST API, and the browser WebSocket, all backed by a gRPC `TelemetryService` client to the coordinator (`--coordinator`, `:9000`).
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Web dashboard SPA |
+| `/health` | GET | Health check (returns `200 "ok"`) |
+| `/api/v1/stats` | GET | JSON stats for dashboard |
+| `/api/v1/workers` | GET | Registered workers |
+| `/api/v1/tasks?limit=N` | GET | Recent tasks |
+| `/api/v1/builds` | GET | Logical build aggregates |
+| `/api/v1/builds/{id}` | GET | One build + its retained tasks |
+| `/api/v1/tasks/{id}/console` | GET | Retained console output for a task |
+| `/api/v1/events` | GET | Retained events |
+| `/ws` | WebSocket | Real-time updates (populated from `StreamEvents`) |
+
+### GET /api/v1/stats
 
 Returns current system statistics.
 
@@ -167,7 +200,7 @@ Returns current system statistics.
 }
 ```
 
-### WebSocket /ws
+### WebSocket /ws (hg-dashboard)
 
 Receives real-time events.
 
@@ -211,10 +244,8 @@ Receives real-time events.
 // Stats update (every 5s)
 {
   "type": "stats_update",
-  "stats": { /* same as /api/stats */ },
-  "timestamp": "2026-01-17T10:30:05Z"
+  "stats": { /* same as /api/v1/stats */ },
 }
-```
 
 ## Prometheus Metrics
 

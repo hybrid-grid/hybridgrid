@@ -27,6 +27,28 @@ services:
     networks:
       - hg-e2e-net
 
+  dashboard:
+    build:
+      context: ../..
+      dockerfile: test/e2e/Dockerfile.worker
+      args:
+        VERSION: dev
+        COMMIT: local
+        BUILD_TIME: ${BUILD_TIME:-unknown}
+    command: hg-dashboard serve --coordinator coordinator:9000 --insecure
+    ports:
+      - "8081:8080"
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    networks:
+      - hg-e2e-net
+
   worker-1:
     build:
       context: ../..
