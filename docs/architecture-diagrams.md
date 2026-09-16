@@ -15,8 +15,12 @@ graph TB
         COORD[hg-coord]
         SCHED[Scheduler<br/>P2C Algorithm]
         REG[Worker Registry]
-        DASH[Dashboard<br/>:8080]
-        METRICS[Prometheus<br/>Metrics]
+        OPS[Ops HTTP Server<br/>:8080 /health /metrics /log-level]
+    end
+
+    subgraph Dashboard["Dashboard Node (standalone)"]
+        DASH[hg-dashboard<br/>SPA + REST + WS :8081]
+        TELEM[TelemetryService<br/>gRPC client :9000]
     end
 
     subgraph Workers["Worker Pool"]
@@ -29,8 +33,9 @@ graph TB
     CLI -->|"1. Submit Task<br/>gRPC"| COORD
     COORD --> SCHED
     COORD --> REG
-    COORD --> DASH
-    COORD --> METRICS
+    COORD --> OPS
+    DASH -->|"TelemetryService<br/>gRPC read-only"| COORD
+    COORD -.->|"aggregate state<br/>stats/workers/tasks/events"| TELEM
 
     SCHED -->|"2. Dispatch"| W1
     SCHED -->|"2. Dispatch"| W2
@@ -275,34 +280,36 @@ flowchart TB
         CHARTS[Real-time Charts]
     end
 
-    subgraph Backend["Coordinator"]
-        HTTP[HTTP Server :8080]
+    subgraph Backend["hg-dashboard (standalone)"]
+        HTTP[HTTP Server :8080<br/>SPA + REST /api/v1/*]
         API[REST API]
-        WSS[WebSocket Server]
-        DATA[Data Aggregator]
+        WSS[WebSocket Server /ws]
+        CLIENT[gRPC TelemetryService client]
     end
 
-    subgraph Sources["Data Sources"]
+    subgraph Coordinator["Coordinator"]
+        TELEMSVC[TelemetryService gRPC :9000]
         REG[Worker Registry]
         TASK[Task Manager]
         CACHE[Cache Stats]
-        PROM[Prometheus Metrics]
+        PROM[Prometheus Metrics<br/>Ops :8080 /metrics]
     end
 
     UI --> HTTP
     WS <-->|Real-time| WSS
     CHARTS --> WS
 
-    HTTP --> API --> DATA
-    WSS --> DATA
-    DATA --> REG
-    DATA --> TASK
-    DATA --> CACHE
-    DATA --> PROM
+    HTTP --> API --> CLIENT
+    WSS --> CLIENT
+    CLIENT -->|"gRPC read-only"| TELEMSVC
+    TELEMSVC --> REG
+    TELEMSVC --> TASK
+    TELEMSVC --> CACHE
+    TELEMSVC --> PROM
 
     style Frontend fill:#e1f5fe
     style Backend fill:#f3e5f5
-    style Sources fill:#e8f5e9
+    style Coordinator fill:#e8f5e9
 ```
 
 ## Component Interactions
@@ -319,7 +326,12 @@ graph LR
         SERVER[gRPC Server]
         SCHED[Scheduler]
         REG[Registry]
-        DASH[Dashboard]
+        OPS[Ops HTTP]
+    end
+
+    subgraph Dash["hg-dashboard (standalone)"]
+        TELEMC[TelemetryService<br/>gRPC client]
+        UI2[SPA + REST + WS]
     end
 
     subgraph Worker["hg-worker"]
@@ -332,8 +344,9 @@ graph LR
     CLIENT <-->|gRPC| SERVER
     SERVER --> SCHED
     SCHED <--> REG
-    SERVER --> DASH
-
+    SERVER --> OPS
+    SERVER -.->|"TelemetryService"| TELEMC
+    TELEMC --> UI2
     SCHED <-->|gRPC| EXEC
     EXEC --> COMP
     EXEC <--> CB

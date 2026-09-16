@@ -87,6 +87,7 @@ sudo mv hg-* hgbuild /usr/local/bin/
 ```bash
 docker pull ghcr.io/h3nr1-d14z/hybridgrid/hg-coord:latest
 docker pull ghcr.io/h3nr1-d14z/hybridgrid/hg-worker:latest
+docker pull ghcr.io/h3nr1-d14z/hybridgrid/hg-dashboard:latest
 ```
 
 ### From Source
@@ -109,7 +110,12 @@ hg-coord serve
 hg-worker serve  # Auto-discovers coordinator via mDNS
 ```
 
-**Step 3: Build Your Project**
+**Step 3: (Optional) Start the Dashboard** (standalone web UI)
+```bash
+hg-dashboard serve --coordinator=localhost:9000 --insecure
+```
+
+**Step 4: Build Your Project**
 ```bash
 hgbuild make -j8  # That's it!
 ```
@@ -123,7 +129,7 @@ docker compose up -d
 # Scale to more workers
 docker compose up -d --scale worker=4
 
-# View dashboard
+# View dashboard (standalone hg-dashboard, default :8080; compose publishes :8081)
 open http://localhost:8080
 ```
 
@@ -284,9 +290,8 @@ User: hgbuild cc -c main.c -o main.o
 │  │  │ (workers)   │  │ (selection) │  │   (fault tolerance)     │  │  │
 │  │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │  │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │  │
-│  │  │   Metrics   │  │  Dashboard  │  │    mDNS Announcer       │  │  │
-│  │  │ (Prometheus)│  │ (HTTP:8080) │  │   (auto-discovery)      │  │  │
-│  │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │  │
+│  │  │   Metrics   │  │  Ops HTTP   │  │    mDNS Announcer       │  │  │
+│  │  │ (Prometheus)│  │ (:8080 ops) │  │   (auto-discovery)      │  │  │
 │  └──────────────────────────────────────────────────────────────────┘  │
 │                              │                                          │
 │       ┌──────────────────────┼──────────────────────┐                  │
@@ -311,8 +316,9 @@ User: hgbuild cc -c main.c -o main.o
 
 | Component | Responsibility |
 |-----------|----------------|
+| **hg-coord** (Coordinator) | Worker registry, task scheduling, metrics, ops HTTP endpoint |
+| **hg-dashboard** (standalone) | Web dashboard (SPA + REST + WebSocket) over gRPC TelemetryService |
 | **hgbuild** (CLI) | User interface, argument parsing, caching, fallback |
-| **hg-coord** (Coordinator) | Worker registry, task scheduling, metrics, dashboard |
 | **hg-worker** (Worker) | Task execution, local caching, capability reporting |
 
 ### Communication Protocol
@@ -758,7 +764,7 @@ Create `~/.hybridgrid/config.yaml`:
 # Coordinator settings
 coordinator:
   grpc_port: 9000         # gRPC server port
-  http_port: 8080         # Dashboard/metrics port
+  http_port: 8080         # Ops HTTP port (/health, /metrics, /log-level); dashboard is on hg-dashboard
   heartbeat_ttl: 60s      # Worker timeout
 
 # Worker settings
@@ -847,7 +853,10 @@ hg-coord serve
 # Terminal 2: Worker
 hg-worker serve
 
-# Terminal 3: Build
+# Terminal 3: (Optional) Dashboard — then open http://localhost:8080
+hg-dashboard serve --coordinator=localhost:9000 --insecure
+
+# Terminal 4: Build
 cd your-project
 hgbuild make -j8
 ```
@@ -862,10 +871,18 @@ services:
   coordinator:
     image: ghcr.io/h3nr1-d14z/hybridgrid/hg-coord:latest
     ports:
-      - "9000:9000"   # gRPC
-      - "8080:8080"   # Dashboard
+      - "9000:9000"   # gRPC (build plane + TelemetryService)
+      - "8080:8080"   # Coordinator ops (/health, /metrics, /log-level)
     environment:
       - HG_LOG_LEVEL=info
+
+  dashboard:
+    image: ghcr.io/h3nr1-d14z/hybridgrid/hg-dashboard:latest
+    command: hg-dashboard serve --coordinator coordinator:9000 --insecure
+    ports:
+      - "8081:8080"   # Web dashboard (SPA + REST + WS)
+    depends_on:
+      - coordinator
 
   worker:
     image: ghcr.io/h3nr1-d14z/hybridgrid/hg-worker:latest
@@ -884,8 +901,8 @@ docker compose up -d
 # Scale
 docker compose up -d --scale worker=8
 
-# View dashboard
-open http://localhost:8080
+# View dashboard (on the dashboard service, host :8081)
+open http://localhost:8081
 ```
 
 ### 8.3 LAN Deployment (mDNS)
@@ -914,15 +931,20 @@ hg-coord serve \
   --http-port=8080 \
   --heartbeat-ttl=60s
 
-# 2. Start workers with explicit addresses
+# 2. Start the standalone dashboard (read-only over TelemetryService)
+hg-dashboard serve \
+  --port=8081 \
+  --coordinator=coord.internal:9000 \
+  --insecure
+
+# 3. Start workers with explicit addresses
 hg-worker serve \
   --coordinator=coord.internal:9000 \
   --advertise-address=$(hostname -I | awk '{print $1}'):50052
 
-# 3. Configure client
+# 4. Configure client
 export HG_COORDINATOR=coord.internal:9000
 hgbuild make -j8
-```
 
 ---
 
@@ -930,7 +952,7 @@ hgbuild make -j8
 
 ### 9.1 Web Dashboard
 
-Access at `http://coordinator:8080/`
+Access at `http://localhost:8081` (standalone `hg-dashboard`; `http://coordinator:8080` is the coordinator's ops HTTP, not the dashboard). Start it with `--coordinator` pointing at the coordinator's gRPC port and `--insecure` for plaintext coordinator links (local/compose without TLS).
 
 Features:
 - Real-time worker status table
@@ -942,7 +964,7 @@ Features:
 ### 9.2 Prometheus Metrics
 
 Scrape endpoints:
-- Coordinator: `http://coordinator:8080/metrics`
+- Coordinator ops server: `http://coordinator:8080/metrics`
 - Workers: `http://worker:9090/metrics`
 
 Key metrics:

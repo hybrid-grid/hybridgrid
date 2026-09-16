@@ -13,10 +13,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/h3nr1-d14z/hybridgrid/internal/config"
+	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/opshttp"
 	coordserver "github.com/h3nr1-d14z/hybridgrid/internal/coordinator/server"
 	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
 	"github.com/h3nr1-d14z/hybridgrid/internal/logging"
-	"github.com/h3nr1-d14z/hybridgrid/internal/observability/dashboard"
 	observabilitymetrics "github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 	"github.com/h3nr1-d14z/hybridgrid/internal/telemetry"
@@ -234,34 +234,23 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 				}
 			}()
 
-			// Start HTTP dashboard server
-			dashCfg := dashboard.DefaultConfig()
-			dashCfg.Port = httpPort
-			dashCfg.AuthToken = token
-			dashSrv := dashboard.New(dashCfg, srv.NewStatsProvider())
-
-			// Wire up event notifications from coordinator to both
-			// the embedded dashboard and the telemetry service.
-			dashStart, dashComplete := dashSrv.CreateEventNotifier()
+			// Wire task events from the coordinator to the telemetry
+			// service; the standalone dashboard binary consumes them
+			// over gRPC StreamEvents, so the coordinator no longer
+			// needs an in-process event fan-out.
 			teleStart, teleComplete := teleSvc.CreateEventNotifier()
 			srv.SetEventNotifier(&eventNotifierWrapper{
-				onStart: func(id, buildID, buildType, status, workerID string, startedAtMs int64) {
-					dashStart(id, buildID, buildType, status, workerID, startedAtMs)
-					teleStart(id, buildID, buildType, status, workerID, startedAtMs)
-				},
-				onComplete: func(id, buildID, buildType, status, workerID string, startedAtMs, completedAtMs, durationMs, queueMs, compileMs int64, exitCode int32, errorMsg string) {
-					dashComplete(id, buildID, buildType, status, workerID, startedAtMs, completedAtMs, durationMs, queueMs, compileMs, exitCode, errorMsg)
-					teleComplete(id, buildID, buildType, status, workerID, startedAtMs, completedAtMs, durationMs, queueMs, compileMs, exitCode, errorMsg)
-				},
+				onStart:    teleStart,
+				onComplete: teleComplete,
 			})
 
+			// Start ops HTTP server (health, metrics, log-level).
+			opsSrv := &opshttp.Server{Port: httpPort, AuthToken: token}
 			go func() {
-				if err := dashSrv.Start(); err != nil {
-					errCh <- fmt.Errorf("dashboard server: %w", err)
+				if err := opsSrv.Start(); err != nil {
+					errCh <- fmt.Errorf("ops http server: %w", err)
 				}
 			}()
-
-			log.Info().Int("port", httpPort).Msg("Dashboard server started")
 
 			// Start mDNS announcer (unless disabled)
 			var mdnsAnnouncer *mdns.CoordAnnouncer
@@ -290,7 +279,9 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 				if mdnsAnnouncer != nil {
 					mdnsAnnouncer.Stop()
 				}
-				dashSrv.Stop()
+				if err := opsSrv.Stop(); err != nil {
+					log.Warn().Err(err).Msg("Ops HTTP server shutdown error")
+				}
 				srv.Stop()
 				return nil
 			case err := <-errCh:
@@ -300,8 +291,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 	}
 
 	serveCmd.Flags().Int("grpc-port", 9000, "gRPC server port")
-	serveCmd.Flags().Int("http-port", 8080, "HTTP/Dashboard port")
-	serveCmd.Flags().String("token", "", "Authentication token")
+	serveCmd.Flags().Int("http-port", 8080, "HTTP ops port (health, metrics, log-level)")
 	serveCmd.Flags().Bool("no-mdns", false, "Disable mDNS advertisement")
 	serveCmd.Flags().String("scheduler", "leastloaded", "Scheduler type: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, heft, icecc-fastest")
 	serveCmd.Flags().String("task-log", "", "Path to per-task JSON Lines log file (default: stdout)")
@@ -330,7 +320,10 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 	}
 }
 
-// eventNotifierWrapper adapts dashboard callbacks to coordinator's EventNotifier interface.
+// eventNotifierWrapper adapts the telemetry service's positional-arg
+// callbacks to the coordinator's EventNotifier (struct) interface.
+// Fan-out to a browser lives out-of-process now, via gRPC
+// StreamEvents, so this wrapper carries a single consumer.
 type eventNotifierWrapper struct {
 	onStart    func(id, buildID, buildType, status, workerID string, startedAtMs int64)
 	onComplete func(id, buildID, buildType, status, workerID string, startedAtMs, completedAtMs, durationMs, queueMs, compileMs int64, exitCode int32, errorMsg string)

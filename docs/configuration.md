@@ -25,7 +25,9 @@ coordinator:
   # gRPC server port for worker connections
   grpc_port: 9000
 
-  # HTTP server port for dashboard and metrics
+  # HTTP server port for ops endpoints (/health, /metrics, /log-level).
+  # NOTE: the web dashboard is no longer served here — it runs as the
+  # standalone hg-dashboard binary (see "Dashboard" below).
   http_port: 8080
 
   # Time before marking inactive workers as dead
@@ -185,8 +187,36 @@ metrics:
   enabled: true
 
   # Metrics endpoint path
-  path: /metrics
 ```
+
+## Dashboard (hg-dashboard)
+
+The web dashboard is a standalone binary that serves the SPA, the REST
+API (`/api/v1/*`), and the browser WebSocket (`/ws`). It is read-only
+over the coordinator's gRPC `TelemetryService` and makes no build-plane
+calls.
+
+```bash
+# Run standalone (default :8080)
+hg-dashboard serve --coordinator=localhost:9000
+
+# Plain-text coordinator link (no TLS on coordinator gRPC)
+hg-dashboard serve --coordinator=localhost:9000 --insecure
+
+# Publish on a different host port; pass an auth token
+hg-dashboard serve --port=8081 --coordinator=coord:9000 \
+  --coordinator-token="$HG_TOKEN" --insecure
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--port` | `8080` | HTTP port the dashboard listens on (compose publishes it as host `:8081`) |
+| `--coordinator` | `localhost:9000` | Coordinator gRPC address (TelemetryService) |
+| `--coordinator-token` | `""` | Auth token forwarded as `auth_token` on every TelemetryService call; required when the coordinator enforces auth |
+| `--insecure` | `false` | Use a plaintext coordinator gRPC link (no TLS); mirror this with the coordinator's TLS config. Without it, `hg-dashboard` expects coordinator TLS like `hgbuild` does |
+
+> When the coordinator runs without TLS (e.g. local/compose setups), pass `--insecure`.
+> In compose, open the dashboard at `http://localhost:8081`.
 
 ## CLI Flags
 
@@ -206,6 +236,13 @@ hg-worker serve \
   --http-port=9090 \
   --coordinator=localhost:9000 \
   --max-tasks=4
+
+# hg-dashboard (standalone web UI)
+hg-dashboard serve \
+  --port=8081 \
+  --coordinator=localhost:9000 \
+  --coordinator-token="${HG_TOKEN:-}" \
+  --insecure
 
 # CLI
 hgbuild build \

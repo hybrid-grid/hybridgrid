@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`/log-level` Authentication**: the runtime log-level endpoint on coordinator and worker requires the configured auth token (open when no token is set)
 
 ### Changed
+- **Standalone `hg-dashboard` binary**: the web dashboard is extracted from the coordinator into a standalone binary (`cmd/hg-dashboard`) that serves the SPA, the REST API (`/api/v1/*`), and the browser WebSocket (`/ws`), backed by the new gRPC `TelemetryService`. The coordinator no longer embeds a user interface — its `:8080` HTTP server now serves ops endpoints only (`/health`, `/metrics`, `/log-level`); the live cluster dashboard is on `hg-dashboard`'s `:8081` (compose) / `:8080` (standalone default)
 - golangci-lint pinned to v2.13.2 in CI so lint findings are reproducible across upstream releases
 - OpenTelemetry bumped to 1.41
 
