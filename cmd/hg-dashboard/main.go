@@ -136,7 +136,7 @@ Quick start:
 		},
 	}
 
-	serveCmd.Flags().IntVar(&port, "port", 8080, "HTTP port for the dashboard server")
+	serveCmd.Flags().IntVar(&port, "port", 8081, "HTTP port for the dashboard server (coordinator ops keeps 8080)")
 	serveCmd.Flags().StringVar(&coordinator, "coordinator", "localhost:9000", "coordinator gRPC TelemetryService address")
 	serveCmd.Flags().StringVar(&coordinatorTok, "coordinator-token", "", "auth token forwarded to the coordinator as auth_token")
 	serveCmd.Flags().BoolVar(&insecureDial, "insecure", false, "connect to the coordinator with plaintext gRPC (no TLS)")
