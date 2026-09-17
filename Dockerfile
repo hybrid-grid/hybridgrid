@@ -1,6 +1,21 @@
 # syntax=docker/dockerfile:1.4
 
 # =============================================================================
+# Stage 0: UI Builder - Builds the dashboard's React frontend
+# =============================================================================
+FROM node:20-alpine AS ui-builder
+
+WORKDIR /app/internal/observability/ui/web
+
+# Copy package manifests first for better layer caching
+COPY internal/observability/ui/web/package.json internal/observability/ui/web/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --no-fund --no-audit
+
+COPY internal/observability/ui/web/ ./
+RUN npm run build
+
+# =============================================================================
 # Stage 1: Builder - Compiles all Go binaries
 # =============================================================================
 FROM golang:1.25-alpine AS builder
@@ -23,6 +38,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 # Copy source code
 COPY . .
+
+# Pull in the pre-built dashboard frontend so hg-dashboard's go:embed
+# directive (internal/observability/ui/server.go) has web/dist to embed
+COPY --from=ui-builder /app/internal/observability/ui/web/dist ./internal/observability/ui/web/dist
 
 # Build version info from git
 ARG VERSION=dev
