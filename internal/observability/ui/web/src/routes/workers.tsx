@@ -95,7 +95,7 @@ function WorkerCard({ worker }: { worker: WorkerInfo }) {
 
       {(worker.compilers?.length ?? 0) > 0 && (
         <div className="flex flex-wrap gap-1 border-t border-(--color-hairline) px-4 py-2.5">
-          {worker.compilers.map((compiler) => (
+          {(worker.compilers ?? []).map((compiler) => (
             <span
               key={compiler}
               className="rounded-(--radius-xs) bg-(--color-surface-inset) px-1.5 py-0.5 font-mono text-[10px] text-(--color-ink-muted)"
