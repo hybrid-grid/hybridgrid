@@ -1,0 +1,183 @@
+@import "tailwindcss";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+@import "@fontsource/jetbrains-mono/600.css";
+
+/*
+ * Hybrid-Grid control-room theme.
+ *
+ * Domain: a compile-farm operations console, not a SaaS product. The
+ * palette borrows from rack telemetry (LED status colors), oscilloscope
+ * traces (the phosphor-green signal color), and the codebase's own
+ * vocabulary (circuit breaker CLOSED/HALF_OPEN/OPEN). Dark-only: this
+ * surface is read by an engineer debugging a stuck build at 2am, not
+ * browsed in daylight.
+ */
+@theme {
+  --font-sans:
+    ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Canvas: near-black with a cool blue cast, like a rack monitor. */
+  --color-canvas: oklch(0.16 0.012 255);
+  --color-canvas-raised: oklch(0.19 0.013 255);
+  --color-canvas-overlay: oklch(0.23 0.014 255);
+  --color-surface: oklch(0.205 0.013 255);
+  --color-surface-inset: oklch(0.13 0.011 255);
+
+  --color-hairline: oklch(1 0 0 / 8%);
+  --color-hairline-strong: oklch(1 0 0 / 14%);
+  --color-focus-ring: oklch(0.82 0.16 165);
+
+  /* Ink: cool off-white, never pure white (reads as clinical). */
+  --color-ink: oklch(0.94 0.006 255);
+  --color-ink-secondary: oklch(0.78 0.012 255);
+  --color-ink-muted: oklch(0.6 0.012 255);
+  --color-ink-faint: oklch(0.44 0.012 255);
+
+  /*
+   * Signal: phosphor green, the oscilloscope/heartbeat-trace color and
+   * the interface's one interactive accent (nav, links, primary
+   * actions, focus). Everything else is structure.
+   */
+  --color-signal: oklch(0.82 0.16 165);
+  --color-signal-strong: oklch(0.88 0.18 165);
+  --color-signal-dim: oklch(0.82 0.16 165 / 14%);
+
+  /* Circuit-breaker semantics: the codebase's own three states. */
+  --color-circuit-closed: oklch(0.82 0.16 165);
+  --color-circuit-half-open: oklch(0.8 0.16 85);
+  --color-circuit-open: oklch(0.7 0.19 25);
+
+  /* Task/build status. */
+  --color-status-success: oklch(0.82 0.16 165);
+  --color-status-running: oklch(0.75 0.13 230);
+  --color-status-queued: oklch(0.7 0.02 255);
+  --color-status-failed: oklch(0.7 0.19 25);
+  --color-status-timeout: oklch(0.8 0.16 85);
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  --spacing-panel: 16px;
+  --spacing-panel-sm: 12px;
+
+  --animate-heartbeat: heartbeat 2.4s ease-in-out infinite;
+  --animate-pulse-ring: pulse-ring 1.6s cubic-bezier(0.23, 1, 0.32, 1) infinite;
+
+  @keyframes heartbeat {
+    0%,
+    100% {
+      opacity: 0.55;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes pulse-ring {
+    0% {
+      transform: scale(0.9);
+      opacity: 0.6;
+    }
+    100% {
+      transform: scale(1.8);
+      opacity: 0;
+    }
+  }
+}
+
+/*
+ * Light mode: the same control-room system, re-lit for daytime use
+ * (reviewing a build over someone's shoulder, a shared office
+ * monitor). Same hues throughout — only lightness/chroma shift — so
+ * the "one signal color" language still reads as the same product.
+ */
+:root[data-theme='light'] {
+  --color-canvas: oklch(0.98 0.004 255);
+  --color-canvas-raised: oklch(0.955 0.006 255);
+  --color-canvas-overlay: oklch(1 0 0);
+  --color-surface: oklch(1 0 0);
+  --color-surface-inset: oklch(0.94 0.007 255);
+
+  --color-hairline: oklch(0 0 0 / 8%);
+  --color-hairline-strong: oklch(0 0 0 / 15%);
+  --color-focus-ring: oklch(0.5 0.14 165);
+
+  --color-ink: oklch(0.2 0.012 255);
+  --color-ink-secondary: oklch(0.34 0.014 255);
+  --color-ink-muted: oklch(0.5 0.012 255);
+  --color-ink-faint: oklch(0.62 0.012 255);
+
+  --color-signal: oklch(0.5 0.14 165);
+  --color-signal-strong: oklch(0.42 0.15 165);
+  --color-signal-dim: oklch(0.5 0.14 165 / 12%);
+
+  --color-circuit-closed: oklch(0.5 0.14 165);
+  --color-circuit-half-open: oklch(0.62 0.15 85);
+  --color-circuit-open: oklch(0.55 0.19 25);
+
+  --color-status-success: oklch(0.5 0.14 165);
+  --color-status-running: oklch(0.5 0.13 230);
+  --color-status-queued: oklch(0.55 0.02 255);
+  --color-status-failed: oklch(0.55 0.19 25);
+  --color-status-timeout: oklch(0.62 0.15 85);
+
+  color-scheme: light;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-hairline);
+  }
+
+  html {
+    color-scheme: dark;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  ::selection {
+    background-color: var(--color-signal-dim);
+    color: var(--color-signal-strong);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--color-hairline-strong);
+    border-radius: 999px;
+    border: 2px solid var(--color-canvas);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  .font-tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+}

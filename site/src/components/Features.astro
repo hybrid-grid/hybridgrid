@@ -1,0 +1,44 @@
+---
+const features = [
+  {
+    title: 'P2C scheduling',
+    body: 'The coordinator samples two candidate workers and picks the less loaded one — no global state to track on every decision.',
+  },
+  {
+    title: 'Circuit breaker per worker',
+    body: 'A flaky worker trips CLOSED → OPEN and stops receiving tasks instead of hanging every build that hits it. HALF_OPEN probes recovery automatically.',
+  },
+  {
+    title: 'Content-addressable cache',
+    body: 'xxhash-keyed local cache skips redundant compiles entirely — identical inputs never leave the machine, let alone hit the network.',
+  },
+  {
+    title: 'Local fallback',
+    body: "Coordinator unreachable? hgbuild compiles locally instead of failing the build outright. Disable with --no-fallback when you'd rather fail loud.",
+  },
+  {
+    title: 'Live dashboard',
+    body: 'A separate React app watches the fleet over gRPC — worker heartbeats, build history, per-task console output, all real-time over a WebSocket.',
+  },
+  {
+    title: 'TLS / mTLS',
+    body: 'Certificate-based auth end to end between hgbuild, the coordinator, and every worker, plus a shared-token option for simpler setups.',
+  },
+];
+---
+
+<section class="border-y border-hairline bg-canvas-raised/40 px-5 py-20">
+  <div class="mx-auto max-w-6xl">
+    <span class="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-faint">Under the hood</span>
+    <h2 class="mt-2 text-[28px] font-bold tracking-[-0.01em] text-ink">Not just distcc with a coordinator bolted on</h2>
+
+    <div class="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {features.map((feature) => (
+        <div class="rounded-lg border border-hairline bg-surface p-5">
+          <h3 class="text-[14px] font-semibold text-ink">{feature.title}</h3>
+          <p class="mt-2 text-[13px] leading-relaxed text-ink-muted">{feature.body}</p>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
