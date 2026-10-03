@@ -23,7 +23,7 @@ echo "" >> "$RESULTS_FILE"
 # Check workers are connected
 check_workers() {
     log "Checking connected workers..."
-    curl -s http://localhost:8080/workers | head -20
+    curl -s http://localhost:8081/api/v1/workers | head -20
     echo ""
 }
 

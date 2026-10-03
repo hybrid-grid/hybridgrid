@@ -275,7 +275,7 @@ level=error msg="worker unreachable" worker=worker-3 error="connection refused"
    docker version
 
    # Service status
-   curl http://localhost:8080/api/stats
+   curl http://localhost:8080/api/v1/stats
    curl http://localhost:8080/metrics | grep hybridgrid
 
    # Logs (last 100 lines)

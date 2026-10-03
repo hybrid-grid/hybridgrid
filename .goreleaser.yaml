@@ -50,6 +50,25 @@ builds:
       - -X main.commit={{.ShortCommit}}
       - -X main.buildTime={{.Date}}
 
+  # hg-dashboard: standalone dashboard service
+  - id: hg-dashboard
+    main: ./cmd/hg-dashboard
+    binary: hg-dashboard
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.buildTime={{.Date}}
+
   # hgbuild: CLI tool
   - id: hgbuild
     main: ./cmd/hgbuild

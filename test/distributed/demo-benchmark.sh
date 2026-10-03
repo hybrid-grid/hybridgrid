@@ -34,14 +34,13 @@ mkdir -p "$RESULTS_DIR"
 check_prereqs() {
     log "Checking prerequisites..."
 
-    if ! curl -s http://localhost:8080/api/v1/workers > /dev/null 2>&1; then
-        error "Coordinator not running at localhost:8080"
+    if ! curl -s http://localhost:8081/api/v1/workers > /dev/null 2>&1; then
+        error "Dashboard API not running at localhost:8081 (start hg-dashboard)"
         exit 1
     fi
-    success "Coordinator: OK"
 
     local api_response
-    api_response=$(curl -s http://localhost:8080/api/v1/workers 2>/dev/null)
+    api_response=$(curl -s http://localhost:8081/api/v1/workers 2>/dev/null)
     local worker_count
     worker_count=$(echo "$api_response" | python3 -c "
 import sys, json
@@ -224,7 +223,7 @@ main() {
     esac
 
     success "Results saved to: $RESULTS_DIR/results.csv"
-    success "Dashboard: http://localhost:8080"
+    success "Dashboard: http://localhost:8081"
 }
 
 main "$@"

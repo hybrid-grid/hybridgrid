@@ -28,7 +28,7 @@ jobs:
 
     strategy:
       matrix:
-        target: [hg-coord, hg-worker, hgbuild, all-in-one]
+        target: [hg-coord, hg-worker, hgbuild, hg-dashboard, all-in-one]
 
     steps:
       - name: Checkout

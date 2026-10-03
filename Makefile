@@ -1,4 +1,4 @@
-.PHONY: all build clean test lint proto-gen install changelog
+.PHONY: all build clean test lint proto-gen install changelog run-coord run-worker run-dashboard
 
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "v0.0.0-dev")
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
@@ -11,6 +11,7 @@ build:
 	go build $(LDFLAGS) -o bin/hgbuild ./cmd/hgbuild
 	go build $(LDFLAGS) -o bin/hg-coord ./cmd/hg-coord
 	go build $(LDFLAGS) -o bin/hg-worker ./cmd/hg-worker
+	go build $(LDFLAGS) -o bin/hg-dashboard ./cmd/hg-dashboard
 
 proto-gen:
 	@echo "Generating protobuf code..."
@@ -18,7 +19,8 @@ proto-gen:
 	protoc --go_out=gen/go --go_opt=module=github.com/h3nr1-d14z/hybridgrid/gen/go \
 		--go-grpc_out=gen/go --go-grpc_opt=module=github.com/h3nr1-d14z/hybridgrid/gen/go \
 		-I proto \
-		proto/hybridgrid/v1/build.proto
+	proto/hybridgrid/v1/build.proto \
+	proto/hybridgrid/v1/telemetry.proto
 
 proto-install:
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
@@ -45,12 +47,16 @@ install: build
 	sudo cp bin/hgbuild /usr/local/bin/
 	sudo cp bin/hg-coord /usr/local/bin/
 	sudo cp bin/hg-worker /usr/local/bin/
+	sudo cp bin/hg-dashboard /usr/local/bin/
 
 run-coord:
 	go run ./cmd/hg-coord serve
 
 run-worker:
 	go run ./cmd/hg-worker serve
+
+run-dashboard:
+	go run ./cmd/hg-dashboard serve
 
 changelog:
 	@echo "Changelog management - CHANGELOG.md exists at project root"

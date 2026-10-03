@@ -234,10 +234,10 @@ Access the web dashboard at `http://localhost:8080` (coordinator machine).
 
 ```bash
 # Get stats
-curl http://localhost:8080/api/stats
+curl http://localhost:8081/api/v1/stats
 
 # Get workers
-curl http://localhost:8080/api/workers
+curl http://localhost:8081/api/v1/workers
 
 # Prometheus metrics
 curl http://localhost:8080/metrics
@@ -261,7 +261,7 @@ HG_COORDINATOR=192.168.1.100:9000 hgbuild cc -c main.c -o main.o
 
 ```bash
 # Check coordinator is running
-curl http://coordinator-ip:8080/api/stats
+curl http://coordinator-ip:8080/api/v1/stats
 
 # Start worker with explicit coordinator
 hg-worker serve --coordinator coordinator-ip:9000

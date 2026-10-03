@@ -15,9 +15,9 @@ import (
 	"golang.org/x/sys/windows/svc/eventlog"
 	"golang.org/x/sys/windows/svc/mgr"
 
+	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/opshttp"
 	coordserver "github.com/h3nr1-d14z/hybridgrid/internal/coordinator/server"
 	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
-	"github.com/h3nr1-d14z/hybridgrid/internal/observability/dashboard"
 )
 
 const (
@@ -68,15 +68,11 @@ func (s *coordService) Execute(args []string, r <-chan svc.ChangeRequest, change
 		}
 	}()
 
-	// Start HTTP dashboard server
-	dashCfg := dashboard.DefaultConfig()
-	dashCfg.Port = s.httpPort
-	dashCfg.AuthToken = s.token
-	dashSrv := dashboard.New(dashCfg, srv.NewStatsProvider())
-
+	// Start ops HTTP server (health, metrics, log-level)
+	opsSrv := &opshttp.Server{Port: s.httpPort, AuthToken: s.token}
 	go func() {
-		if err := dashSrv.Start(); err != nil {
-			errCh <- fmt.Errorf("dashboard server: %w", err)
+		if err := opsSrv.Start(); err != nil {
+			errCh <- fmt.Errorf("ops http server: %w", err)
 		}
 	}()
 
@@ -125,7 +121,7 @@ loop:
 	if mdnsAnnouncer != nil {
 		mdnsAnnouncer.Stop()
 	}
-	dashSrv.Stop()
+	opsSrv.Stop()
 	srv.Stop()
 
 	return false, 0
