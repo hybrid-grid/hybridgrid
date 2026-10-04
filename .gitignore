@@ -60,6 +60,12 @@ test/e2e/certs/
 # Distributed demo generated binaries
 test/distributed/binaries/
 
+# Dashboard frontend (React/Vite) — built via `npm run build` before
+# `go build` embeds internal/observability/ui/web/dist
+internal/observability/ui/web/node_modules/
+internal/observability/ui/web/dist/
+internal/observability/ui/web/shot.mjs
+
 #Ignore vscode AI rules
 .github/instructions/codacy.instructions.md
 
