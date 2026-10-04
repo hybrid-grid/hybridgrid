@@ -218,6 +218,24 @@ hg-dashboard serve --port=8081 --coordinator=coord:9000 \
 > When the coordinator runs without TLS (e.g. local/compose setups), pass `--insecure`.
 > In compose, open the dashboard at `http://localhost:8081`.
 
+### Standalone frontend container
+
+The React SPA can also run as an independent static container. It reverse-proxies its same-origin `/api/*` and `/ws` requests to an `hg-dashboard` HTTP backend selected when the container starts:
+
+```bash
+docker build --target hg-dashboard-web -t hybridgrid-dashboard-web .
+
+docker run --rm -p 3000:8080 \
+  -e API_BACKEND_URL=http://host.docker.internal:8081 \
+  hybridgrid-dashboard-web
+```
+
+| Environment variable | Default | Description |
+|----------------------|---------|-------------|
+| `API_BACKEND_URL` | `http://hg-dashboard:8081` | HTTP(S) origin of `hg-dashboard`, without a path. It must be reachable from inside the frontend container. |
+
+Do not point `API_BACKEND_URL` at coordinator gRPC (`:9000`): the frontend needs the REST and WebSocket endpoints served by `hg-dashboard`. When that backend runs directly on a Linux host, add `--add-host=host.docker.internal:host-gateway` to the `docker run` command.
+
 ## CLI Flags
 
 All configuration can be overridden via command-line flags:

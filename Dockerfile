@@ -154,7 +154,24 @@ ENTRYPOINT ["/usr/local/bin/hg-dashboard"]
 CMD ["serve"]
 
 # =============================================================================
-# Stage 6: All-in-one image (for development/testing)
+# Stage 6: hg-dashboard-web - Standalone frontend image
+# =============================================================================
+FROM nginxinc/nginx-unprivileged:1.27-alpine AS hg-dashboard-web
+
+ENV API_BACKEND_URL=http://hg-dashboard:8081 \
+    NGINX_ENVSUBST_FILTER=^API_BACKEND_URL$
+
+COPY --from=ui-builder /app/internal/observability/ui/web/dist /usr/share/nginx/html
+COPY --chmod=755 internal/observability/ui/web/docker/10-validate-backend.sh /docker-entrypoint.d/10-validate-backend.sh
+COPY internal/observability/ui/web/docker/default.conf.template /etc/nginx/templates/default.conf.template
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1
+
+# =============================================================================
+# Stage 7: All-in-one image (for development/testing)
 # =============================================================================
 FROM alpine:3.19 AS all-in-one
 
