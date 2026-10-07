@@ -52,7 +52,7 @@ HYBRID = "hybrid-linucb"
 # silently dropped from every pairwise test while still appearing in the
 # per-scheduler summary, which is the kind of gap that produces a table
 # nobody can reconcile.
-BASELINE_ORDER = ["leastloaded", "p2c", "linucb", "heft", "epsilon-greedy",
+BASELINE_ORDER = ["leastloaded", "sed", "p2c", "linucb", "heft", "epsilon-greedy",
                   "icecc-fastest", "simple"]
 ALPHA_LEVEL = 0.05
 BOOT_N = 10000

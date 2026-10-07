@@ -12,11 +12,11 @@ cd "$SCRIPT_DIR"
 
 # SCHEDULER env var selects which scheduler to benchmark.
 # Valid: leastloaded (default), simple, p2c, epsilon-greedy, linucb,
-# hybrid-linucb, heft.
+# hybrid-linucb, heft, icecc-fastest, sed.
 SCHEDULER="${SCHEDULER:-leastloaded}"
 case "$SCHEDULER" in
-    leastloaded|simple|p2c|epsilon-greedy|linucb|hybrid-linucb|heft) ;;
-    *) echo "ERROR: invalid SCHEDULER='$SCHEDULER'; must be one of: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, heft" >&2; exit 1 ;;
+    leastloaded|simple|p2c|epsilon-greedy|linucb|hybrid-linucb|heft|icecc-fastest|sed) ;;
+    *) echo "ERROR: invalid SCHEDULER='$SCHEDULER'; must be one of: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, heft, icecc-fastest, sed" >&2; exit 1 ;;
 esac
 
 # Optional tuning parameters propagated to coordinator.

@@ -40,7 +40,7 @@ except ImportError:
     HAVE_MPL = False
 
 HYBRID = "hybrid-linucb"
-BASELINES = ["leastloaded", "p2c", "linucb"]
+BASELINES = ["leastloaded", "sed", "p2c", "linucb"]
 ALPHA_LEVEL = 0.05
 WARMUP_TASKS = 150
 ROLLING_WINDOW = 20
