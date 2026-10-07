@@ -3,6 +3,7 @@ package scheduler
 import (
 	"math"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -197,6 +198,18 @@ func NewLinUCBScheduler(cfg LinUCBConfig) *LinUCBScheduler {
 		pendingX:       make(map[string]*mat.VecDense),
 		pendingStep:    make(map[string]int64),
 	}
+}
+
+// Params reports the effective scheduler parameters used for task logs.
+func (s *LinUCBScheduler) Params() string {
+	params := "alpha=" + strconv.FormatFloat(s.alpha, 'g', -1, 64) +
+		" warm_start=" + strconv.FormatInt(s.warmStartTasks, 10) +
+		" load_penalty=" + strconv.FormatFloat(s.loadPenalty, 'g', -1, 64)
+	if s.discount > 0 {
+		params += " discount=" + strconv.FormatFloat(s.discount, 'g', -1, 64) +
+			" discount_mode=" + string(s.discountMode)
+	}
+	return params
 }
 
 // Select implements the base Scheduler interface; it delegates to the

@@ -54,7 +54,7 @@ $COMPOSE build
 for sched in $SCHEDULERS; do
     SCHEDULER="$sched"
     case "$SCHEDULER" in
-        leastloaded|simple|p2c|epsilon-greedy|linucb|hybrid-linucb|heft|icecc-fastest|sed) ;;
+        leastloaded|simple|p2c|epsilon-greedy|linucb|hybrid-linucb|hybrid-linucb-d|heft|icecc-fastest|sed) ;;
         *) echo "ERROR: invalid scheduler '$SCHEDULER'" >&2; exit 1 ;;
     esac
     # SCHED_ARGS is baked into the compose file, so recompute and

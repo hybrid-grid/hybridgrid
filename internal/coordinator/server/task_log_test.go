@@ -227,3 +227,63 @@ func TestTaskLogger_ConcurrentWrites(t *testing.T) {
 		}
 	}
 }
+
+func TestTaskLogRecord_SchedulerParamsJSON(t *testing.T) {
+	rec := sampleRecord()
+	oldJSON, err := json.Marshal(rec)
+	require.NoError(t, err)
+	assert.NotContains(t, string(oldJSON), "scheduler_params")
+	assert.Contains(t, string(oldJSON), `"scheduler":"p2c"`)
+	assert.Contains(t, string(oldJSON), `"worker_id":"worker-3"`)
+
+	rec.SchedulerParams = "alpha=0.5 warm_start=100 load_penalty=0.5 discount=0.95 discount_mode=global"
+	withParams, err := json.Marshal(rec)
+	require.NoError(t, err)
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal(withParams, &fields))
+	assert.Equal(t, rec.SchedulerParams, fields["scheduler_params"])
+
+	rec.SchedulerParams = ""
+	again, err := json.Marshal(rec)
+	require.NoError(t, err)
+	assert.Equal(t, string(oldJSON), string(again), "empty optional field must preserve existing records")
+}
+
+func TestCompile_DiscountedSchedulerParamsInTaskLog(t *testing.T) {
+	s, _, cleanup := setupTestServer(t, Config{
+		Port:              0,
+		HeartbeatTTL:      60 * time.Second,
+		RequestTimeout:    1 * time.Second,
+		SchedulerType:     "hybrid-linucb-d",
+		DiscountValue:     0.95,
+		DiscountModeValue: "global",
+	})
+	defer cleanup()
+
+	logger, buf := loggerWithBuffer()
+	s.taskLogger = logger
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "worker-params",
+		Address: "127.0.0.1:19998",
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch: pb.Architecture_ARCH_X86_64,
+			Cpp:        &pb.CppCapability{Compilers: []string{"gcc"}},
+		},
+		MaxParallel: 1,
+	}))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err := s.Compile(ctx, &pb.CompileRequest{
+		TaskId:             "params-task",
+		PreprocessedSource: []byte("int main() { return 0; }"),
+		Compiler:           "gcc",
+		TargetArch:         pb.Architecture_ARCH_X86_64,
+	})
+	require.NoError(t, err)
+
+	var rec TaskLogRecord
+	require.NoError(t, json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &rec))
+	assert.Equal(t, "hybrid-linucb-d", rec.Scheduler)
+	assert.Equal(t, "alpha=0.5 warm_start=0 load_penalty=0 discount=0.95 discount_mode=global", rec.SchedulerParams)
+}

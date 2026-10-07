@@ -33,6 +33,7 @@ type TaskLogRecord struct {
 	BuildType        string    `json:"build_type"`
 	BuildID          string    `json:"build_id"`
 	Scheduler        string    `json:"scheduler"`
+	SchedulerParams  string    `json:"scheduler_params,omitempty"`
 	WorkerID         string    `json:"worker_id"`
 	WorkerArch       string    `json:"worker_arch"`
 	WorkerNativeArch string    `json:"worker_native_arch"`

@@ -288,7 +288,7 @@ type Config struct {
 	EnableRequestID bool
 	// SchedulerType selects the scheduler implementation.
 	// Valid: "leastloaded" (default), "sed", "simple", "p2c",
-	// "epsilon-greedy", "linucb", "hybrid-linucb", "heft", "icecc-fastest".
+	// "epsilon-greedy", "linucb", "hybrid-linucb", "hybrid-linucb-d", "heft", "icecc-fastest".
 	SchedulerType string
 	// EpsilonValue is the exploration rate for epsilon-greedy. Ignored
 	// for other schedulers. Default 0.1 (Sutton & Barto §2.3 baseline).
@@ -304,6 +304,10 @@ type Config struct {
 	// LoadPenaltyValue is the hybrid-linucb λ in p = mean + bonus −
 	// λ·loadRatio. 0 disables the penalty. Ignored by other schedulers.
 	LoadPenaltyValue float64
+	// DiscountValue is the HG-LinUCB-D discount gamma. Zero uses 0.98 in the factory.
+	DiscountValue float64
+	// DiscountModeValue selects the global or per-arm discount clock.
+	DiscountModeValue string
 	// TaskLogPath is the path to the JSON Lines per-task log file.
 	// Empty or "stdout" routes records to standard output.
 	TaskLogPath string
@@ -328,6 +332,9 @@ func DefaultConfig() Config {
 		// live here rather than in the factory.
 		WarmStartTasks:   100,
 		LoadPenaltyValue: 0.5,
+
+		DiscountValue:     0.98,
+		DiscountModeValue: "global",
 
 		DispatchQueueTimeout: 30 * time.Second,
 	}
@@ -370,6 +377,24 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 			Alpha:          cfg.AlphaValue,
 			WarmStartTasks: cfg.WarmStartTasks,
 			LoadPenalty:    cfg.LoadPenaltyValue,
+		})
+	case "hybrid-linucb-d":
+		discount := cfg.DiscountValue
+		if discount == 0 {
+			discount = 0.98
+		}
+		mode := cfg.DiscountModeValue
+		if mode == "" {
+			mode = string(scheduler.DiscountModeGlobal)
+		}
+		return scheduler.NewLinUCBScheduler(scheduler.LinUCBConfig{
+			Registry:       reg,
+			CircuitChecker: cm,
+			Alpha:          cfg.AlphaValue,
+			WarmStartTasks: cfg.WarmStartTasks,
+			LoadPenalty:    cfg.LoadPenaltyValue,
+			Discount:       discount,
+			DiscountMode:   scheduler.DiscountMode(mode),
 		})
 	case "heft":
 		return scheduler.NewHEFTScheduler(scheduler.HEFTConfig{
@@ -440,6 +465,8 @@ type Server struct {
 	dispatchWG     sync.WaitGroup
 	dispatchOnce   sync.Once
 
+	schedulerParams string
+
 	// dispatchSignal broadcasts "a slot may have freed" to Compile()
 	// calls waiting in the dispatch queue (backpressure path). It is
 	// closed and replaced under dispatchSignalMu; waiters select on
@@ -490,6 +517,10 @@ func New(cfg Config) *Server {
 	reg := registry.NewInMemoryRegistry(cfg.HeartbeatTTL)
 	circuitMgr := resilience.NewCircuitManager(resilience.DefaultCircuitConfig())
 	sched := newScheduler(cfg, reg, circuitMgr)
+	schedulerParams := ""
+	if withParams, ok := sched.(interface{ Params() string }); ok {
+		schedulerParams = withParams.Params()
+	}
 	log.Info().Str("scheduler", cfg.SchedulerType).Msg("Scheduler initialized")
 
 	taskLogger, err := NewTaskLogger(cfg.TaskLogPath)
@@ -544,6 +575,8 @@ func New(cfg Config) *Server {
 		unityCache:     make(map[string]*unityCacheEntry),
 		dispatchCh:     make(chan *dispatchRequest, dispatchQueueSize),
 		dispatchSignal: make(chan struct{}),
+
+		schedulerParams: schedulerParams,
 	}
 	go s.dispatchLoop()
 	return s
@@ -1053,6 +1086,7 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 			BuildType:                   "cpp",
 			BuildID:                     buildID,
 			Scheduler:                   s.config.SchedulerType,
+			SchedulerParams:             s.schedulerParams,
 			WorkerID:                    worker.ID,
 			WorkerArch:                  workerNativeArch,
 			WorkerNativeArch:            workerNativeArch,

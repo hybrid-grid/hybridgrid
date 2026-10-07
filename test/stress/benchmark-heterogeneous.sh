@@ -12,11 +12,11 @@ cd "$SCRIPT_DIR"
 
 # SCHEDULER env var selects which scheduler to benchmark.
 # Valid: leastloaded (default), simple, p2c, epsilon-greedy, linucb,
-# hybrid-linucb, heft, icecc-fastest, sed.
+# hybrid-linucb, hybrid-linucb-d, heft, icecc-fastest, sed.
 SCHEDULER="${SCHEDULER:-leastloaded}"
 case "$SCHEDULER" in
-    leastloaded|simple|p2c|epsilon-greedy|linucb|hybrid-linucb|heft|icecc-fastest|sed) ;;
-    *) echo "ERROR: invalid SCHEDULER='$SCHEDULER'; must be one of: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, heft, icecc-fastest, sed" >&2; exit 1 ;;
+    leastloaded|simple|p2c|epsilon-greedy|linucb|hybrid-linucb|hybrid-linucb-d|heft|icecc-fastest|sed) ;;
+    *) echo "ERROR: invalid SCHEDULER='$SCHEDULER'; must be one of: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, hybrid-linucb-d, heft, icecc-fastest, sed" >&2; exit 1 ;;
 esac
 
 # Optional tuning parameters propagated to coordinator.
@@ -31,11 +31,13 @@ compute_sched_args() {
     EPSILON="${EPSILON:-0.1}"
     WARM_START="${WARM_START:-100}"
     LOAD_PENALTY="${LOAD_PENALTY:-0.5}"
-    SCHED_ARGS="--scheduler=${SCHEDULER} --alpha=${ALPHA} --epsilon=${EPSILON} --warm-start=${WARM_START} --load-penalty=${LOAD_PENALTY} --task-log=/tmp/tasks.jsonl"
+    DISCOUNT="${DISCOUNT:-0.98}"
+    DISCOUNT_MODE="${DISCOUNT_MODE:-global}"
+    SCHED_ARGS="--scheduler=${SCHEDULER} --alpha=${ALPHA} --epsilon=${EPSILON} --warm-start=${WARM_START} --load-penalty=${LOAD_PENALTY} --discount=${DISCOUNT} --discount-mode=${DISCOUNT_MODE} --task-log=/tmp/tasks.jsonl"
 }
 compute_sched_args
 
-echo "[benchmark] scheduler: $SCHEDULER  alpha: $ALPHA  epsilon: $EPSILON  warm-start: $WARM_START  load-penalty: $LOAD_PENALTY"
+echo "[benchmark] scheduler: $SCHEDULER  alpha: $ALPHA  epsilon: $EPSILON  warm-start: $WARM_START  load-penalty: $LOAD_PENALTY  discount: $DISCOUNT  discount-mode: $DISCOUNT_MODE"
 
 # Colors
 RED='\033[0;31m'
