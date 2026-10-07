@@ -376,6 +376,11 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 			Registry:       reg,
 			CircuitChecker: cm,
 		})
+	case "sed":
+		return scheduler.NewSEDScheduler(scheduler.SEDConfig{
+			Registry:       reg,
+			CircuitChecker: cm,
+		})
 	case "icecc-fastest":
 		return scheduler.NewIceccFastestScheduler(scheduler.IceccConfig{
 			Registry:       reg,

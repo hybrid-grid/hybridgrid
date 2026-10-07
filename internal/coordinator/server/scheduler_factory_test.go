@@ -25,6 +25,7 @@ func TestNewScheduler_KnownTypes(t *testing.T) {
 		"linucb":         (*scheduler.LinUCBScheduler)(nil),
 		"hybrid-linucb":  (*scheduler.LinUCBScheduler)(nil),
 		"heft":           (*scheduler.HEFTScheduler)(nil),
+		"sed":            (*scheduler.SEDScheduler)(nil),
 	}
 
 	for typ, want := range cases {

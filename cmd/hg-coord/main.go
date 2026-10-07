@@ -78,9 +78,9 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			loadPenalty, _ := cmd.Flags().GetFloat64("load-penalty")
 
 			// Validate scheduler choice (fail fast rather than silent fallback).
-			validSchedulers := map[string]bool{"leastloaded": true, "simple": true, "p2c": true, "epsilon-greedy": true, "linucb": true, "hybrid-linucb": true, "heft": true, "icecc-fastest": true}
+			validSchedulers := map[string]bool{"leastloaded": true, "simple": true, "p2c": true, "epsilon-greedy": true, "linucb": true, "hybrid-linucb": true, "heft": true, "icecc-fastest": true, "sed": true}
 			if !validSchedulers[schedulerType] {
-				return fmt.Errorf("invalid --scheduler %q; must be one of: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, heft, icecc-fastest", schedulerType)
+				return fmt.Errorf("invalid --scheduler %q; must be one of: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, heft, icecc-fastest, sed", schedulerType)
 			}
 			if epsilonValue < 0 || epsilonValue > 1 {
 				return fmt.Errorf("invalid --epsilon %v; must be in [0, 1]", epsilonValue)
@@ -293,7 +293,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 	serveCmd.Flags().Int("grpc-port", 9000, "gRPC server port")
 	serveCmd.Flags().Int("http-port", 8080, "HTTP ops port (health, metrics, log-level)")
 	serveCmd.Flags().Bool("no-mdns", false, "Disable mDNS advertisement")
-	serveCmd.Flags().String("scheduler", "leastloaded", "Scheduler type: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, heft, icecc-fastest")
+	serveCmd.Flags().String("scheduler", "leastloaded", "Scheduler type: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, heft, icecc-fastest, sed")
 	serveCmd.Flags().String("task-log", "", "Path to per-task JSON Lines log file (default: stdout)")
 	serveCmd.Flags().Float64("epsilon", 0.1, "Exploration rate for epsilon-greedy scheduler (in [0, 1]; ignored otherwise)")
 	serveCmd.Flags().Float64("alpha", 1.0, "LinUCB exploration coefficient α (in [0, 10]; ignored for other schedulers)")
