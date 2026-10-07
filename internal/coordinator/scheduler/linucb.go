@@ -14,6 +14,15 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/registry"
 )
 
+// DiscountMode chooses whether old evidence ages with dispatch decisions
+// or only when that worker receives another outcome.
+type DiscountMode string
+
+const (
+	DiscountModeGlobal DiscountMode = "global"
+	DiscountModeArm    DiscountMode = "arm"
+)
+
 // LinUCBScheduler implements the disjoint linear contextual bandit
 // algorithm of Li, Chu, Langford & Schapire (2010), "A Contextual-Bandit
 // Approach to Personalized News Article Recommendation," WWW '10
@@ -76,7 +85,9 @@ type LinUCBScheduler struct {
 	// cannot trust its learned load weight during early training, and
 	// delayed rewards would otherwise let the scheduler pile tasks onto
 	// one fast worker before any feedback arrives. 0 disables it.
-	loadPenalty float64
+	loadPenalty  float64
+	discount     float64
+	discountMode DiscountMode
 	// totalDispatches counts every SelectWithDispatchInfo call,
 	// including single-candidate fast-path dispatches — it measures
 	// dispatch volume, not learning events. Accessed atomically; never
@@ -93,18 +104,22 @@ type LinUCBScheduler struct {
 	// already been mutated by the time the outcome arrives. Keyed by
 	// TaskContext.TaskID; entries are deleted on consumption.
 	pendingX map[string]*mat.VecDense
+	// Global discounting ages feedback from its dispatch decision, even
+	// when completion is delayed. Both caches are consumed under s.mu.
+	pendingStep map[string]int64
 }
 
 // linUCBArm holds the per-worker bandit state. We keep both A and its
 // inverse so we can reconstruct from disk in the future and sanity-check
 // the Sherman-Morrison update against a fresh inversion in tests.
 type linUCBArm struct {
-	A     *mat.Dense // d×d
-	Ainv  *mat.Dense // d×d cached inverse
-	b     *mat.VecDense
-	theta *mat.VecDense // A^{-1} b, recomputed lazily after updates
-	dirty bool          // theta needs recomputing
-	count int64
+	A        *mat.Dense // d×d
+	Ainv     *mat.Dense // d×d cached inverse
+	b        *mat.VecDense
+	theta    *mat.VecDense // A^{-1} b, recomputed lazily after updates
+	dirty    bool          // theta needs recomputing
+	count    int64
+	lastStep int64
 }
 
 // LinUCBConfig holds construction parameters.
@@ -122,7 +137,9 @@ type LinUCBConfig struct {
 	WarmStartTasks int
 	// LoadPenalty is the Hybrid-LinUCB λ coefficient. Zero (the
 	// default) keeps pure-LinUCB behavior.
-	LoadPenalty float64
+	LoadPenalty  float64
+	Discount     float64
+	DiscountMode DiscountMode
 }
 
 // NewLinUCBScheduler constructs the scheduler. The feature dimension
@@ -154,6 +171,18 @@ func NewLinUCBScheduler(cfg LinUCBConfig) *LinUCBScheduler {
 	if loadPenalty < 0 {
 		loadPenalty = 0
 	}
+	discount := cfg.Discount
+	if !(discount > 0 && discount < 1) {
+		discount = 0
+	}
+	mode := cfg.DiscountMode
+	switch mode {
+	case DiscountModeArm, DiscountModeGlobal:
+		// Both supported modes retain their requested clock.
+	default:
+		// Empty and unknown library values use the global clock.
+		mode = DiscountModeGlobal
+	}
 	return &LinUCBScheduler{
 		registry:       cfg.Registry,
 		circuitChecker: cfg.CircuitChecker,
@@ -162,8 +191,11 @@ func NewLinUCBScheduler(cfg LinUCBConfig) *LinUCBScheduler {
 		dim:            featureDim(),
 		warmStartTasks: int64(warmStart),
 		loadPenalty:    loadPenalty,
+		discount:       discount,
+		discountMode:   mode,
 		arms:           make(map[string]*linUCBArm),
 		pendingX:       make(map[string]*mat.VecDense),
+		pendingStep:    make(map[string]int64),
 	}
 }
 
@@ -195,7 +227,7 @@ func (s *LinUCBScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb
 		return candidates[0], DispatchInfo{QValueAtDispatch: 0, WasExploration: false}, nil
 	}
 	if s.warmStartTasks > 0 && n <= s.warmStartTasks {
-		return s.selectWarmStart(candidates, arch, ctx)
+		return s.selectWarmStart(candidates, arch, ctx, n)
 	}
 
 	// Single pass: track argmax over (mean−λ·lr+bonus) for selection and
@@ -230,6 +262,9 @@ func (s *LinUCBScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb
 	if ctx.TaskID != "" && bestX != nil {
 		s.mu.Lock()
 		s.pendingX[ctx.TaskID] = bestX
+		if s.discount > 0 && s.discountMode != DiscountModeArm {
+			s.pendingStep[ctx.TaskID] = n
+		}
 		s.mu.Unlock()
 	}
 
@@ -252,7 +287,7 @@ func (s *LinUCBScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb
 // Lock ordering: s.score locks s.mu internally, so it must complete
 // before the pendingX store takes s.mu — never call it with the lock
 // held.
-func (s *LinUCBScheduler) selectWarmStart(candidates []*registry.WorkerInfo, arch pb.Architecture, ctx TaskContext) (*registry.WorkerInfo, DispatchInfo, error) {
+func (s *LinUCBScheduler) selectWarmStart(candidates []*registry.WorkerInfo, arch pb.Architecture, ctx TaskContext, n int64) (*registry.WorkerInfo, DispatchInfo, error) {
 	chosen := candidates[0]
 	for _, w := range candidates[1:] {
 		if w.ActiveTasks < chosen.ActiveTasks {
@@ -267,6 +302,9 @@ func (s *LinUCBScheduler) selectWarmStart(candidates []*registry.WorkerInfo, arc
 	if ctx.TaskID != "" {
 		s.mu.Lock()
 		s.pendingX[ctx.TaskID] = x
+		if s.discount > 0 && s.discountMode != DiscountModeArm {
+			s.pendingStep[ctx.TaskID] = n
+		}
 		s.mu.Unlock()
 	}
 
@@ -279,11 +317,23 @@ func (s *LinUCBScheduler) score(workerID string, x *mat.VecDense) (mean, bonus f
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	arm := s.armForLocked(workerID)
+	if s.discount > 0 && s.discountMode != DiscountModeArm {
+		now := atomic.LoadInt64(&s.totalDispatches)
+		if now < arm.lastStep {
+			now = arm.lastStep
+		}
+		// A failed catch-up leaves the arm untouched; score its last valid
+		// inverse and theta instead of discarding a usable estimate.
+		s.catchUpLocked(arm, now)
+	}
 	if arm.dirty {
 		arm.theta = mulMatVec(arm.Ainv, arm.b)
 		arm.dirty = false
 	}
 	mean = mat.Dot(arm.theta, x)
+	// The advisor keeps alpha*sqrt(x^T Ainv x) after discounting. This
+	// bonus is heuristic: Russac et al. use a second gamma-squared matrix
+	// and a time-dependent width, so their regret bound does not apply.
 	// x^T A^{-1} x — symmetric quadratic form
 	tmp := mulMatVec(arm.Ainv, x)
 	q := mat.Dot(x, tmp)
@@ -314,7 +364,7 @@ func (s *LinUCBScheduler) RecordOutcome(workerID string, reward float64, _ bool,
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	x, ok := s.pendingX[ctx.TaskID]
+	x, step, hasStep, ok := s.consumePending(ctx.TaskID)
 	if !ok {
 		// No cached x — either the caller did not set TaskID or the
 		// dispatch happened before this scheduler was constructed.
@@ -322,8 +372,67 @@ func (s *LinUCBScheduler) RecordOutcome(workerID string, reward float64, _ bool,
 		// post-completion feature vector.
 		return
 	}
-	delete(s.pendingX, ctx.TaskID)
 
+	if s.discount > 0 {
+		arm, exists := s.arms[workerID]
+		if !exists {
+			// Keep a first observation local until its candidate passes
+			// validation; failed updates must not create an empty arm.
+			A := mat.NewDense(s.dim, s.dim, nil)
+			Ainv := mat.NewDense(s.dim, s.dim, nil)
+			for i := 0; i < s.dim; i++ {
+				A.Set(i, i, 1)
+				Ainv.Set(i, i, 1)
+			}
+			arm = &linUCBArm{A: A, Ainv: Ainv, b: mat.NewVecDense(s.dim, nil), theta: mat.NewVecDense(s.dim, nil)}
+			if s.discountMode != DiscountModeArm {
+				arm.lastStep = atomic.LoadInt64(&s.totalDispatches)
+			}
+		}
+		var A, Ainv *mat.Dense
+		var b *mat.VecDense
+		if s.discountMode == DiscountModeArm {
+			// This recurrence discounts only the arm's own observations:
+			// A_n = I + sum gamma^(n-i) x_i x_i^T, and similarly for b.
+			A, b = discountDecay(arm.A, arm.b, s.discount, 1)
+			A, b, Ainv, ok = discountUpdate(A, b, x, reward, 1)
+		} else {
+			// I is the fixed point of the decision-clock recurrence, so k
+			// missed decisions collapse to I + gamma^k(A-I). A late reward
+			// carries its dispatch-time weight into the same clock state.
+			now := atomic.LoadInt64(&s.totalDispatches)
+			if now < arm.lastStep {
+				now = arm.lastStep
+			}
+			A, b = discountDecay(arm.A, arm.b, s.discount, now-arm.lastStep)
+			if now > arm.lastStep {
+				if _, valid := discountInverse(A, b); !valid {
+					return
+				}
+			}
+			if !hasStep {
+				step = now
+			}
+			lag := now - step
+			if lag < 0 {
+				lag = 0
+			}
+			A, b, Ainv, ok = discountUpdate(A, b, x, reward, math.Pow(s.discount, float64(lag)))
+			if ok {
+				arm.lastStep = now
+			}
+		}
+		if ok {
+			// Every arm state change is committed together under s.mu.
+			arm.A, arm.b, arm.Ainv = A, b, Ainv
+			arm.count++
+			arm.dirty = true
+			if !exists {
+				s.arms[workerID] = arm
+			}
+		}
+		return
+	}
 	arm := s.armForLocked(workerID)
 
 	// b ← b + r x  (Algorithm 1 line 13)
@@ -364,6 +473,136 @@ func (s *LinUCBScheduler) RecordOutcome(workerID string, reward float64, _ bool,
 	arm.dirty = true
 }
 
+// consumePending is called with s.mu held. A known TaskID consumes its
+// feature and dispatch step together, including when the update later fails.
+func (s *LinUCBScheduler) consumePending(taskID string) (*mat.VecDense, int64, bool, bool) {
+	x, ok := s.pendingX[taskID]
+	if !ok {
+		return nil, 0, false, false
+	}
+	step, hasStep := s.pendingStep[taskID]
+	delete(s.pendingX, taskID)
+	delete(s.pendingStep, taskID)
+	return x, step, hasStep, true
+}
+
+// catchUpLocked ages an arm exactly to now, leaving it intact if the
+// candidate loses positive definiteness or contains a non-finite value.
+// Arms are read and changed only while s.mu is held.
+func (s *LinUCBScheduler) catchUpLocked(arm *linUCBArm, now int64) bool {
+	if now <= arm.lastStep {
+		return true
+	}
+	A, b := discountDecay(arm.A, arm.b, s.discount, now-arm.lastStep)
+	Ainv, ok := discountInverse(A, b)
+	if !ok {
+		return false
+	}
+	arm.A, arm.b, arm.Ainv = A, b, Ainv
+	arm.lastStep = now
+	arm.dirty = true
+	return true
+}
+
+// discountDecay is the closed form of k steps of the advisor's ridge
+// recurrence; each arm can therefore age lazily without losing decisions.
+func discountDecay(A *mat.Dense, b *mat.VecDense, gamma float64, k int64) (*mat.Dense, *mat.VecDense) {
+	d, _ := A.Dims()
+	g := math.Pow(gamma, float64(k))
+	Anew := mat.NewDense(d, d, nil)
+	bnew := mat.NewVecDense(d, nil)
+	for i := 0; i < d; i++ {
+		bnew.SetVec(i, g*b.AtVec(i))
+		for j := 0; j < d; j++ {
+			identity := 0.0
+			if i == j {
+				identity = 1
+			}
+			Anew.Set(i, j, identity+g*(A.At(i, j)-identity))
+		}
+	}
+	return Anew, bnew
+}
+
+// discountUpdate builds a candidate before exposing any state. The
+// discounted A needs a fresh SPD inverse; Sherman-Morrison cannot account
+// for the intervening decay and ridge restoration.
+func discountUpdate(A *mat.Dense, b, x *mat.VecDense, reward, weight float64) (Anew *mat.Dense, bnew *mat.VecDense, Ainv *mat.Dense, ok bool) {
+	d, cols := A.Dims()
+	if d != cols || b.Len() != d || x.Len() != d || !finite(reward) || !finite(weight) {
+		return nil, nil, nil, false
+	}
+	Anew = mat.NewDense(d, d, nil)
+	bnew = mat.NewVecDense(d, nil)
+	for i := 0; i < d; i++ {
+		xi := x.AtVec(i)
+		if !finite(xi) {
+			return nil, nil, nil, false
+		}
+		bnew.SetVec(i, b.AtVec(i)+weight*reward*xi)
+		for j := 0; j < d; j++ {
+			Anew.Set(i, j, A.At(i, j)+weight*xi*x.AtVec(j))
+		}
+	}
+	Ainv, ok = discountInverse(Anew, bnew)
+	if !ok {
+		return nil, nil, nil, false
+	}
+	// Keep the diagnostic A exactly symmetric, matching the matrix that
+	// Cholesky inverted after rounding the two triangles together.
+	for i := 0; i < d; i++ {
+		for j := 0; j < i; j++ {
+			v := (Anew.At(i, j) + Anew.At(j, i)) / 2
+			Anew.Set(i, j, v)
+			Anew.Set(j, i, v)
+		}
+	}
+	return Anew, bnew, Ainv, true
+}
+
+func discountInverse(A *mat.Dense, b *mat.VecDense) (*mat.Dense, bool) {
+	d, cols := A.Dims()
+	if d != cols || b.Len() != d {
+		return nil, false
+	}
+	sym := mat.NewSymDense(d, nil)
+	for i := 0; i < d; i++ {
+		if !finite(b.AtVec(i)) {
+			return nil, false
+		}
+		for j := 0; j <= i; j++ {
+			a, other := A.At(i, j), A.At(j, i)
+			if !finite(a) || !finite(other) {
+				return nil, false
+			}
+			v := (a + other) / 2
+			if !finite(v) {
+				return nil, false
+			}
+			sym.SetSym(i, j, v)
+		}
+	}
+	var chol mat.Cholesky
+	if !chol.Factorize(sym) {
+		return nil, false
+	}
+	inv := mat.NewSymDense(d, nil)
+	if err := chol.InverseTo(inv); err != nil {
+		return nil, false
+	}
+	out := mat.DenseCopyOf(inv)
+	for i := 0; i < d; i++ {
+		for j := 0; j < d; j++ {
+			if !finite(out.At(i, j)) {
+				return nil, false
+			}
+		}
+	}
+	return out, true
+}
+
+func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
+
 // armForLocked returns (creating if needed) the bandit state for a
 // worker. Caller must hold s.mu.
 func (s *LinUCBScheduler) armForLocked(workerID string) *linUCBArm {
@@ -383,6 +622,9 @@ func (s *LinUCBScheduler) armForLocked(workerID string) *linUCBArm {
 		b:     mat.NewVecDense(d, nil),
 		theta: mat.NewVecDense(d, nil),
 		dirty: false,
+	}
+	if s.discount > 0 && s.discountMode != DiscountModeArm {
+		arm.lastStep = atomic.LoadInt64(&s.totalDispatches)
 	}
 	s.arms[workerID] = arm
 	return arm
