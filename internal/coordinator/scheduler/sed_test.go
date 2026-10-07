@@ -287,17 +287,18 @@ func TestSEDScheduler_TieBreak(t *testing.T) {
 	})
 
 	t.Run("identical workers resolve by lexicographic ID", func(t *testing.T) {
-		reg := newTestRegistry()
-		defer reg.Stop()
-		// The registry iterates a map, so candidate order is random; the
-		// result must not depend on it.
-		for _, id := range []string{"w3", "w1", "w5", "w2", "w4"} {
-			addSEDWorker(t, reg, id, 1000, 2)
-		}
-		s := NewSEDScheduler(SEDConfig{Registry: reg})
+		// The registry iterates a map, so candidate order is random per
+		// registry; the result must not depend on it. Fresh registries
+		// give fresh map layouts.
 		for i := 0; i < 100; i++ {
-			if got := selectSED(t, s); got != "w1" {
-				t.Fatalf("iteration %d: got %s, want w1", i, got)
+			reg := newTestRegistry()
+			for _, id := range []string{"w3", "w1", "w5", "w2", "w4"} {
+				addSEDWorker(t, reg, id, 1000, 2)
+			}
+			got := selectSED(t, NewSEDScheduler(SEDConfig{Registry: reg}))
+			reg.Stop()
+			if got != "w1" {
+				t.Fatalf("trial %d: got %s, want w1", i, got)
 			}
 		}
 	})
@@ -415,6 +416,14 @@ func TestSEDScheduler_Less(t *testing.T) {
 		{"differs below float64 resolution", 999999998, 1000000000, 999999999, 1000000001, true},
 		{"signed int64 product wraps, reversed", 1<<31 - 1, 1<<32 - 1, 1<<31 - 1, 1 << 32, false},
 		{"differs below float64 resolution, reversed", 999999999, 1000000001, 999999998, 1000000000, false},
+		// Exact pair from the other implementation: cross-products differ by 1 but
+		// both float64 quotients round to the same value.
+		{"float64-equal pair, first is larger", 2147483642, 2147483647000, 1882806283, 1882806287507, false},
+		{"float64-equal pair, first is smaller", 1882806283, 1882806287507, 2147483642, 2147483647000, true},
+		// (a+1)*c up to ~4.6e21 for the largest legal int32 count and capacity.
+		{"max count and capacity, larger score", math.MaxInt32 - 1, math.MaxInt32*1000 - 1, 0, math.MaxInt32 * 1000, false},
+		{"max count and capacity, smaller score", 0, math.MaxInt32 * 1000, math.MaxInt32 - 1, math.MaxInt32*1000 - 1, true},
+		{"max count and capacity, tie", math.MaxInt32 - 1, math.MaxInt32 * 1000, math.MaxInt32 - 1, math.MaxInt32 * 1000, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -520,5 +529,150 @@ func TestSEDScheduler_ReadsRegisteredCapacityEachSelect(t *testing.T) {
 	addSEDWorker(t, reg, "fast", 100, 3)
 	if got := selectSED(t, s); got != "slow" {
 		t.Errorf("after quota drop to 100: got %s, want slow", got)
+	}
+}
+
+// Each fallback capacity is bracketed by workers one milli-core either side,
+// so Select itself must use exactly 1000 (nothing reported) and
+// CpuCores*1000 (no cgroup quota).
+func TestSEDScheduler_CapacityFallbackBracketed(t *testing.T) {
+	tests := []struct {
+		name  string
+		cores int32
+		other int32 // CpuMillis of the competing worker
+		want  string
+	}{
+		{"no report beats 999", 0, 999, "probe"},
+		{"no report loses to 1001", 0, 1001, "other"},
+		{"2 cores beats 1999", 2, 1999, "probe"},
+		{"2 cores loses to 2001", 2, 2001, "other"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := newTestRegistry()
+			defer reg.Stop()
+			addSEDWorkerCaps(t, reg, "probe", tt.cores, 0, 1)
+			addSEDWorkerCaps(t, reg, "other", 0, tt.other, 1)
+			s := NewSEDScheduler(SEDConfig{Registry: reg})
+			if got := selectSED(t, s); got != tt.want {
+				t.Errorf("got %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+// When every circuit is open the filter relaxes, but only for circuits:
+// unhealthy and full workers stay excluded.
+func TestSEDScheduler_RelaxationKeepsHealthAndCapacityFilters(t *testing.T) {
+	reg := newTestRegistry()
+	defer reg.Stop()
+	addSEDWorker(t, reg, "best-unhealthy", 8000, 4)
+	addSEDWorker(t, reg, "best-full", 8000, 1)
+	addSEDWorker(t, reg, "fast", 1100, 3)
+	addSEDWorker(t, reg, "slow", 500, 1)
+	if err := reg.UpdateState("best-unhealthy", registry.WorkerStateUnhealthy); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.IncrementTasks("best-full"); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewSEDScheduler(SEDConfig{
+		Registry: reg,
+		CircuitChecker: &mockCircuitChecker{openWorkers: map[string]bool{
+			"best-unhealthy": true, "best-full": true, "fast": true, "slow": true,
+		}},
+	})
+	if got := selectSED(t, s); got != "fast" {
+		t.Errorf("got %s, want fast (best healthy worker with room)", got)
+	}
+}
+
+// Add accepts any ActiveTasks, so a negative count must behave like zero
+// instead of wrapping to a huge unsigned load and being ranked last.
+func TestSEDScheduler_NegativeActiveTasksTreatedAsZero(t *testing.T) {
+	reg := newTestRegistry()
+	defer reg.Stop()
+	for _, id := range []string{"a-negative", "z-zero"} {
+		if err := reg.Add(&registry.WorkerInfo{
+			ID:          id,
+			Address:     id,
+			MaxParallel: 2,
+			ActiveTasks: map[string]int32{"a-negative": -3, "z-zero": 0}[id],
+			Capabilities: &pb.WorkerCapabilities{
+				NativeArch: pb.Architecture_ARCH_X86_64,
+				CpuMillis:  1000,
+				Cpp:        &pb.CppCapability{Compilers: []string{"gcc"}},
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := NewSEDScheduler(SEDConfig{Registry: reg})
+	// Both score as load 1 at equal capacity, so the raw-ActiveTasks level
+	// decides and a-negative wins. A negative count wrapped to unsigned would
+	// rank a-negative last and pick z-zero.
+	for i := 0; i < 20; i++ {
+		if got := selectSED(t, s); got != "a-negative" {
+			t.Fatalf("iteration %d: got %s, want a-negative", i, got)
+		}
+	}
+}
+
+// Tie-break order is score, larger capacity, fewer ActiveTasks, smaller ID.
+// The ActiveTasks level is reachable only through a negative count (clamped
+// to zero when scoring), so it is pinned here with one.
+func TestSEDScheduler_TieBreakPrefersFewerActiveTasksBeforeID(t *testing.T) {
+	reg := newTestRegistry()
+	defer reg.Stop()
+	for id, active := range map[string]int32{"a-zero": 0, "z-negative": -2} {
+		if err := reg.Add(&registry.WorkerInfo{
+			ID:          id,
+			Address:     id,
+			MaxParallel: 2,
+			ActiveTasks: active,
+			Capabilities: &pb.WorkerCapabilities{
+				NativeArch: pb.Architecture_ARCH_X86_64,
+				CpuMillis:  1000,
+				Cpp:        &pb.CppCapability{Compilers: []string{"gcc"}},
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := NewSEDScheduler(SEDConfig{Registry: reg})
+	if got := selectSED(t, s); got != "z-negative" {
+		t.Errorf("got %s, want z-negative (fewer raw ActiveTasks beats smaller ID)", got)
+	}
+}
+
+// A negative count must score as zero, not as a negative load: the 500-milli
+// worker with ActiveTasks=-3 scores 1/500 (not -2/500), so the idle 1000-milli
+// worker must win.
+func TestSEDScheduler_NegativeActiveTasksScoreAsZeroNotNegative(t *testing.T) {
+	reg := newTestRegistry()
+	defer reg.Stop()
+	for _, w := range []struct {
+		id     string
+		millis int32
+		active int32
+	}{{"weak-negative", 500, -3}, {"strong-idle", 1000, 0}} {
+		if err := reg.Add(&registry.WorkerInfo{
+			ID:          w.id,
+			Address:     w.id,
+			MaxParallel: 2,
+			ActiveTasks: w.active,
+			Capabilities: &pb.WorkerCapabilities{
+				NativeArch: pb.Architecture_ARCH_X86_64,
+				CpuMillis:  w.millis,
+				Cpp:        &pb.CppCapability{Compilers: []string{"gcc"}},
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := NewSEDScheduler(SEDConfig{Registry: reg})
+	if got := selectSED(t, s); got != "strong-idle" {
+		t.Errorf("got %s, want strong-idle", got)
 	}
 }

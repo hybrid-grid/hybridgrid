@@ -25,6 +25,7 @@ func TestNewScheduler_KnownTypes(t *testing.T) {
 		"linucb":         (*scheduler.LinUCBScheduler)(nil),
 		"hybrid-linucb":  (*scheduler.LinUCBScheduler)(nil),
 		"heft":           (*scheduler.HEFTScheduler)(nil),
+		"icecc-fastest":  (*scheduler.IceccFastestScheduler)(nil),
 		"sed":            (*scheduler.SEDScheduler)(nil),
 	}
 

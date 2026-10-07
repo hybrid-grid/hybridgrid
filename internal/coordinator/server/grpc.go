@@ -287,8 +287,8 @@ type Config struct {
 	Tracing         tracing.Config
 	EnableRequestID bool
 	// SchedulerType selects the scheduler implementation.
-	// Valid: "leastloaded" (default), "simple", "p2c", "epsilon-greedy",
-	// "linucb", "hybrid-linucb", "heft".
+	// Valid: "leastloaded" (default), "sed", "simple", "p2c",
+	// "epsilon-greedy", "linucb", "hybrid-linucb", "heft", "icecc-fastest".
 	SchedulerType string
 	// EpsilonValue is the exploration rate for epsilon-greedy. Ignored
 	// for other schedulers. Default 0.1 (Sutton & Barto §2.3 baseline).

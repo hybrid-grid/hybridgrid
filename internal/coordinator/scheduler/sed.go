@@ -14,7 +14,8 @@ const defaultSEDCapacityMillis = 1000
 
 // SEDScheduler implements Shortest Expected Delay: it picks the worker with
 // the smallest (ActiveTasks+1)/capacity, where capacity is the worker's CPU
-// quota in milli-cores. Compared with LeastLoaded it knows that a worker with
+// quota in milli-cores (cores*1000 when no quota is reported, one core when
+// nothing is) and a negative ActiveTasks counts as zero. Compared with LeastLoaded it knows that a worker with
 // twice the capacity drains its queue twice as fast, but it still never
 // learns from observed outcomes — it is the strongest non-learning heuristic
 // that uses the same capability information as the bandit.
@@ -50,9 +51,11 @@ func NewSEDScheduler(cfg SEDConfig) *SEDScheduler {
 // in makespan come from the choice rule alone.
 //
 // Ties are broken deterministically (the registry iterates a map, so
-// candidate order is random): larger capacity first, then the
-// lexicographically smaller worker ID. A further tie-break on ActiveTasks
-// would be dead code: equal score and equal capacity imply equal ActiveTasks.
+// candidate order is random): larger capacity first, then fewer active tasks,
+// then the lexicographically smaller worker ID. The ActiveTasks level can
+// only decide when a count is negative (clamped to zero for scoring, so two
+// workers can tie while their raw counts differ); for valid non-negative
+// counts equal score and equal capacity already imply equal ActiveTasks.
 func (s *SEDScheduler) Select(buildType pb.BuildType, arch pb.Architecture, clientOS string) (*registry.WorkerInfo, error) {
 	cands, err := eligibleCandidates(s.registry, s.circuitChecker, buildType, arch, clientOS)
 	if err != nil {
@@ -73,7 +76,7 @@ func (s *SEDScheduler) Select(buildType pb.BuildType, arch pb.Architecture, clie
 // sedBetter reports whether worker a (capacity ac) should be preferred over
 // worker b (capacity bc).
 func sedBetter(a *registry.WorkerInfo, ac int64, b *registry.WorkerInfo, bc int64) bool {
-	aa, ba := int64(a.ActiveTasks), int64(b.ActiveTasks)
+	aa, ba := sedActive(a), sedActive(b)
 	if sedLess(aa, ac, ba, bc) {
 		return true
 	}
@@ -83,8 +86,16 @@ func sedBetter(a *registry.WorkerInfo, ac int64, b *registry.WorkerInfo, bc int6
 	if ac != bc {
 		return ac > bc
 	}
+	if a.ActiveTasks != b.ActiveTasks {
+		return a.ActiveTasks < b.ActiveTasks
+	}
 	return a.ID < b.ID
 }
+
+// sedActive returns the worker's active task count. The registry never
+// produces a negative count itself but Add accepts one, so it is clamped to
+// zero rather than wrapping when converted to unsigned in sedLess.
+func sedActive(w *registry.WorkerInfo) int64 { return max(int64(w.ActiveTasks), 0) }
 
 // sedCapacity returns the worker's CPU capacity in milli-cores: the cgroup
 // quota when detected, otherwise cores*1000 (via effectiveCPUMillis), and
