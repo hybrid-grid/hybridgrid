@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"sync/atomic"
 	"testing"
@@ -28,10 +29,11 @@ import (
 //	UPDATE_GOLDEN=1 go test -run TestLinUCBTrace_Golden ./internal/coordinator/scheduler/
 //
 // Comparison policy: selections, exploration flags and counts are compared
-// exactly; floating-point state with a relative tolerance, because gonum
-// kernels may differ in the last bits across CPUs. Bit-exact equality between
-// two scheduler configurations is checked at run time on one machine instead
-// (see sameTrace).
+// exactly. Floating-point state is compared BIT-EXACTLY on amd64 (the golden
+// was verified to match bit for bit on Windows/Go 1.26 and Linux/Go 1.25) and
+// to a relative 1e-12 elsewhere, because other architectures may fuse
+// multiply-adds. Bit-exact equality between two scheduler configurations is
+// also checked at run time on one machine (see sameTrace).
 
 const (
 	traceSteps      = 400
@@ -231,9 +233,12 @@ func sameTrace(a, b traceResult) bool {
 	return reflect.DeepEqual(a, b)
 }
 
-// closeTo reports whether a and b agree to a relative tolerance (absolute
-// near zero).
+// closeTo reports whether a and b agree: exactly on amd64, otherwise to a
+// relative tolerance (absolute near zero).
 func closeTo(a, b float64) bool {
+	if runtime.GOARCH == "amd64" {
+		return a == b
+	}
 	return math.Abs(a-b) <= traceTolerance*math.Max(1, math.Max(math.Abs(a), math.Abs(b)))
 }
 
