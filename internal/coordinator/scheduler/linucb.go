@@ -86,9 +86,12 @@ type LinUCBScheduler struct {
 	// cannot trust its learned load weight during early training, and
 	// delayed rewards would otherwise let the scheduler pile tasks onto
 	// one fast worker before any feedback arrives. 0 disables it.
-	loadPenalty  float64
-	discount     float64
-	discountMode DiscountMode
+	loadPenalty float64
+	discount    float64
+	// discountRequested is the gamma that was asked for, kept only so Params can
+	// say so even when it is not effective (1, or outside (0,1]).
+	discountRequested float64
+	discountMode      DiscountMode
 	// totalDispatches counts every SelectWithDispatchInfo call,
 	// including single-candidate fast-path dispatches — it measures
 	// dispatch volume, not learning events. Accessed atomically; never
@@ -185,18 +188,19 @@ func NewLinUCBScheduler(cfg LinUCBConfig) *LinUCBScheduler {
 		mode = DiscountModeGlobal
 	}
 	return &LinUCBScheduler{
-		registry:       cfg.Registry,
-		circuitChecker: cfg.CircuitChecker,
-		latencyTracker: lt,
-		alpha:          alpha,
-		dim:            featureDim(),
-		warmStartTasks: int64(warmStart),
-		loadPenalty:    loadPenalty,
-		discount:       discount,
-		discountMode:   mode,
-		arms:           make(map[string]*linUCBArm),
-		pendingX:       make(map[string]*mat.VecDense),
-		pendingStep:    make(map[string]int64),
+		registry:          cfg.Registry,
+		circuitChecker:    cfg.CircuitChecker,
+		latencyTracker:    lt,
+		alpha:             alpha,
+		dim:               featureDim(),
+		warmStartTasks:    int64(warmStart),
+		loadPenalty:       loadPenalty,
+		discount:          discount,
+		discountRequested: cfg.Discount,
+		discountMode:      mode,
+		arms:              make(map[string]*linUCBArm),
+		pendingX:          make(map[string]*mat.VecDense),
+		pendingStep:       make(map[string]int64),
 	}
 }
 
@@ -205,9 +209,15 @@ func (s *LinUCBScheduler) Params() string {
 	params := "alpha=" + strconv.FormatFloat(s.alpha, 'g', -1, 64) +
 		" warm_start=" + strconv.FormatInt(s.warmStartTasks, 10) +
 		" load_penalty=" + strconv.FormatFloat(s.loadPenalty, 'g', -1, 64)
-	if s.discount > 0 {
-		params += " discount=" + strconv.FormatFloat(s.discount, 'g', -1, 64) +
+	// Zero means "not requested" (hybrid-linucb). A requested gamma that is not
+	// effective (1, negative, above 1, NaN) is still logged, flagged as off, so
+	// the raw log says what the run asked for.
+	if s.discountRequested != 0 {
+		params += " discount=" + strconv.FormatFloat(s.discountRequested, 'g', -1, 64) +
 			" discount_mode=" + string(s.discountMode)
+		if s.discount == 0 {
+			params += " discount_effective=off"
+		}
 	}
 	return params
 }

@@ -33,11 +33,17 @@ compute_sched_args() {
     LOAD_PENALTY="${LOAD_PENALTY:-0.5}"
     DISCOUNT="${DISCOUNT:-0.98}"
     DISCOUNT_MODE="${DISCOUNT_MODE:-global}"
-    SCHED_ARGS="--scheduler=${SCHEDULER} --alpha=${ALPHA} --epsilon=${EPSILON} --warm-start=${WARM_START} --load-penalty=${LOAD_PENALTY} --discount=${DISCOUNT} --discount-mode=${DISCOUNT_MODE} --task-log=/tmp/tasks.jsonl"
+    # Only hybrid-linucb-d takes the discount flags, so the command lines of every
+    # other scheduler stay exactly as they were.
+    DISCOUNT_ARGS=""
+    if [ "$SCHEDULER" = "hybrid-linucb-d" ]; then
+        DISCOUNT_ARGS=" --discount=${DISCOUNT} --discount-mode=${DISCOUNT_MODE}"
+    fi
+    SCHED_ARGS="--scheduler=${SCHEDULER} --alpha=${ALPHA} --epsilon=${EPSILON} --warm-start=${WARM_START} --load-penalty=${LOAD_PENALTY}${DISCOUNT_ARGS} --task-log=/tmp/tasks.jsonl"
 }
 compute_sched_args
 
-echo "[benchmark] scheduler: $SCHEDULER  alpha: $ALPHA  epsilon: $EPSILON  warm-start: $WARM_START  load-penalty: $LOAD_PENALTY  discount: $DISCOUNT  discount-mode: $DISCOUNT_MODE"
+echo "[benchmark] scheduler: $SCHEDULER  alpha: $ALPHA  epsilon: $EPSILON  warm-start: $WARM_START  load-penalty: $LOAD_PENALTY$([ "$SCHEDULER" = "hybrid-linucb-d" ] && echo "  discount: $DISCOUNT  discount-mode: $DISCOUNT_MODE")"
 
 # Colors
 RED='\033[0;31m'
