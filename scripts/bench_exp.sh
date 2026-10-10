@@ -529,6 +529,7 @@ run_cell() {
     counts=$(python3 - "$tasks_path" <<'PY'
 import json,sys
 ok=bad=0
+post=0
 first_on=None
 completed=[]
 for line in open(sys.argv[1]):
