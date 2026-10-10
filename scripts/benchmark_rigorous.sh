@@ -35,7 +35,7 @@
 #
 # Env: REPS, SCHEDULERS, OUT_DIR, ALPHA, COOLDOWN, SEED_BASE, JOBS.
 
-set -e
+set -eo pipefail
 
 REPS="${REPS:-10}"
 # ROUND_START lets a killed run resume: ROUND_START=6 appends rounds 6..REPS
@@ -82,8 +82,8 @@ wait_registration() {
         n=$($COMPOSE logs coordinator 2>&1 | grep -c "Worker registered" || true)
         [ "$n" -ge "$need" ] && break
         if [ "$waited" -ge "$timeout" ]; then
-            warn "only $n/$need workers registered after ${timeout}s — proceeding"
-            break
+            warn "only $n/$need workers registered after ${timeout}s — aborting cell"
+            return 1
         fi
         sleep 2; waited=$((waited + 2))
     done
@@ -122,7 +122,7 @@ run_cell() {
 
     start_workers 5
     local registered
-    registered=$(wait_registration 5 90)
+    registered=$(wait_registration 5 90) || return 1
     log "cell [$sched r$round p$pos] workers registered: $registered"
 
     # Cooldown so every build starts from a comparable thermal state.
@@ -136,13 +136,17 @@ run_cell() {
     local tag="${sched}-r${round}"
     local t0 t1 elapsed
     t0=$(now)
+    local -a pipe_status
+    set +e
     $COMPOSE exec -T builder bash -c "cd /workspace/cpython && hgbuild make -j${JOBS} 2>&1" \
         2>&1 | tee "/tmp/build_rig_${tag}.log" >/dev/null
+    pipe_status=("${PIPESTATUS[@]}")
+    set -e
     t1=$(now)
     elapsed=$(python3 -c "print(f'{$t1 - $t0:.2f}')")
 
     # A failed build must never contribute a sample.
-    if grep -qE '^make(\[[0-9]+\])?: \*\*\*' "/tmp/build_rig_${tag}.log"; then
+    if [ "${pipe_status[0]}" -ne 0 ] || [ "${pipe_status[1]}" -ne 0 ] || grep -qE '^make(\[[0-9]+\])?: \*\*\*' "/tmp/build_rig_${tag}.log"; then
         echo "ERROR: build failed for $sched round $round (see /tmp/build_rig_${tag}.log)" >&2
         exit 1
     fi

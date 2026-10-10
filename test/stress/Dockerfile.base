@@ -28,6 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     bc \
     procps \
+    stress-ng \
     libssl-dev \
     zlib1g-dev \
     libffi-dev \
