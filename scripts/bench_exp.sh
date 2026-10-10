@@ -477,7 +477,8 @@ run_cell() {
         ready_all=0
         local gate_deadline=$((SECONDS + 60))
         while (( SECONDS < gate_deadline )); do
-            ready_entries=$(compose exec -T builder ls -1 /gate 2>/dev/null) || ready_entries=
+            # sh -c keeps Git Bash from rewriting /gate into a Windows path.
+            ready_entries=$(compose exec -T builder sh -c 'ls -1 /gate' 2>/dev/null) || ready_entries=
             ready_all=1
             for (( client=1; client<=CLIENTS; client++ )); do
                 if ! grep -Fxq "ready-c${client}-${token}" <<< "$ready_entries"; then ready_all=0; break; fi
@@ -490,7 +491,7 @@ run_cell() {
             [[ $DRIFT == none ]] || { inject_drift & injector_pid=$!; }
         fi
         stats_before=$(wc -l < "$stats_file")
-        compose exec -T builder touch "/gate/go-${token}" || { FAIL_REASON="gate release failed for build $build_idx"; return 1; }
+        compose exec -T builder sh -c 'touch "/gate/go-$1"' _ "$token" || { FAIL_REASON="gate release failed for build $build_idx"; return 1; }
         sample_stats & stats_pid=$!
         for pid in "${pids[@]}"; do wait "$pid" || true; done
         # Stop the drift injector as soon as the last build ends, so it cannot
