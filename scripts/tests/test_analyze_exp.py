@@ -15,6 +15,9 @@ MODULE_PATH = Path(__file__).resolve().parents[1] / "analyze_exp.py"
 SPEC = importlib.util.spec_from_file_location("analyze_exp", MODULE_PATH)
 analyze = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(analyze)
+CHECK_SPEC = importlib.util.spec_from_file_location("exp_checks", MODULE_PATH.with_name("exp_checks.py"))
+checks = importlib.util.module_from_spec(CHECK_SPEC)
+CHECK_SPEC.loader.exec_module(checks)
 
 
 def task(address="w1", sequence=1, candidates=None, ts=None):
@@ -169,6 +172,49 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(values["target_after_recovery_tasks"], 1)
         self.assertEqual(values["drift_phase_2_off_share"], 1)
 
+    def test_onoff_aggregates_and_build_boundary_flag(self):
+        tasks = [task("target" if i in (102, 103, 107) else "other", i)
+                 for i in range(101, 109)]
+        events = [
+            {"kind": "drift_on", "dispatch_count": 101, "target": "target"},
+            {"kind": "drift_note", "detail": "build_start b=2", "dispatch_count": 102},
+            {"kind": "drift_off", "dispatch_count": 103},
+            {"kind": "drift_on", "dispatch_count": 105},
+            {"kind": "drift_off", "dispatch_count": 107},
+            {"kind": "drift_off", "detail": "cell_end", "dispatch_count": 108},
+        ]
+        values = analyze.drift_metrics(tasks, events, "target", 2, 0.5)
+        self.assertEqual(values["drift_on_phases_n"], 4)
+        self.assertEqual(values["drift_on_phases_target_n"], 3)
+        self.assertEqual(values["drift_on_phases_share"], 0.75)
+        self.assertEqual(values["drift_off_phases_n"], 3)
+        self.assertEqual(values["drift_off_phases_target_n"], 0)
+        self.assertEqual(values["drift_off_phases_share"], 0)
+        self.assertEqual(values["drift_build_boundary_phases"], "1_on")
+        self.assertTrue(math.isnan(values["target_after_recovery_share"]))
+        self.assertEqual(values["drift_phase_2_off_share"], 0)
+        without_note = analyze.drift_metrics(tasks, [e for e in events if e["kind"] != "drift_note"],
+                                             "target", 2, 0.5)
+        self.assertEqual(values["drift_on_phases_share"], without_note["drift_on_phases_share"])
+
+    def test_permanent_has_no_onoff_aggregate(self):
+        values = analyze.drift_metrics([task("target", 102)],
+                                       [{"kind": "drift_on", "dispatch_count": 101},
+                                        {"kind": "drift_off", "dispatch_count": 102,
+                                         "detail": "cell_end"}], "target", 2, 0.5)
+        self.assertTrue(math.isnan(values["drift_on_phases_share"]))
+        self.assertTrue(math.isnan(values["target_after_recovery_tasks"]))
+
+    def test_hgtime_span_rule(self):
+        records = [{"event": "task_completed", "build_id": "arm-r1-b1-c1",
+                    "received_ts": "2026-01-01T00:00:01Z", "ts": "2026-01-01T00:00:11Z"}]
+        row = {"build_idx": "1", "client": "1", "elapsed_s": "9.5"}
+        self.assertEqual(checks.check_task_spans(records, [row], "arm", "1"), [])
+        for elapsed in ("9.499", "30.001"):
+            row["elapsed_s"] = elapsed
+            self.assertIn("task_span_s=10.000", checks.check_task_spans(
+                records, [row], "arm", "1")[0])
+
 
 class InputTests(unittest.TestCase):
     def make_directory(self, root):
@@ -282,6 +328,44 @@ class InputTests(unittest.TestCase):
             self.assertNotIn("client_1_elapsed_s", cells)
             self.assertNotIn("build_1_client_1_elapsed_s", cells)
 
+    def test_missing_client_or_build_invalidates_block(self):
+        cases = [
+            ([(1, 1), (1, 2), (2, 1)], "missing client"),
+            ([(1, 1), (1, 2), (1, 2), (2, 1), (2, 2)], "duplicate client"),
+            ([(1, 1), (1, 2), (3, 1), (3, 2)], "wrong build index"),
+            ([(1, 1), (1, 3), (2, 1), (2, 3)], "wrong client index"),
+        ]
+        for entries, label in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "meta.json").write_text(json.dumps({"ARMS": "leastloaded",
+                    "REPS": 1, "CLIENTS": 2, "SESSION_BUILDS": 2}), encoding="utf-8")
+                with (root / "results.csv").open("w", newline="", encoding="utf-8") as handle:
+                    writer = csv.writer(handle)
+                    writer.writerow(["arm", "round", "build_idx", "client", "elapsed_s",
+                                     "cell_makespan_s"])
+                    for build_idx, client in entries:
+                        writer.writerow(["leastloaded", 1, build_idx, client, 10, 10])
+                cells, dropped, _ = analyze.load_cells(root)
+                self.assertTrue(cells.empty)
+                self.assertIn("client/build result", dropped[0])
+
+    def test_complete_data_sets_expected_shape_without_meta(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "results.csv").write_text(
+                "arm,round,build_idx,client,elapsed_s,cell_makespan_s\n"
+                "leastloaded,1,1,1,10,10\nleastloaded,1,1,2,10,10\n"
+                "leastloaded,1,2,1,10,10\nleastloaded,1,2,2,10,10\n"
+                "leastloaded,2,1,1,10,10\nleastloaded,2,1,2,10,10\n"
+                "leastloaded,2,2,1,10,10\n", encoding="utf-8")
+            for rnd in (1, 2):
+                (root / f"tasks_leastloaded_round{rnd}.jsonl").write_text(
+                    json.dumps(task()) + "\n", encoding="utf-8")
+            cells, dropped, _ = analyze.load_cells(root)
+            self.assertEqual(len(cells), 1)
+            self.assertIn("round 2", dropped[0])
+
     def test_short_drift_window_is_flagged_and_kept(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -305,6 +389,17 @@ class InputTests(unittest.TestCase):
                                   notes, 20, 0.5, "fixed", 0.2)
             self.assertIn("reference=fixed share 0.2, threshold=0.2",
                           summary.read_text(encoding="utf-8"))
+
+    def test_build_boundary_phase_appears_in_summary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cells = analyze.pd.DataFrame([{"round": 1, "arm": "leastloaded",
+                "drift_build_boundary_phases": "1_on", "drift_window_flag": "",
+                "last_finisher_address": "target", "last_finisher_cpu_millis": 1100}])
+            summary = root / "summary.md"
+            analyze.write_summary(summary, cells, analyze.pd.DataFrame(), [], [],
+                                  20, 0.5, "pre_all", None)
+            self.assertIn("| 1 | leastloaded | 1_on |", summary.read_text(encoding="utf-8"))
 
     def test_label_parsing(self):
         parsed = analyze.parse_arm("hybrid-linucb-d-arm-g098-l100")

@@ -30,6 +30,8 @@ METRICS = (
     "drift_post_early_share", "drift_post_late_share",
     "excess_target_share_pre", "excess_target_share_post", "time_to_adapt_rank",
     "target_after_recovery_share", "target_after_recovery_tasks",
+    "drift_on_phases_share", "drift_on_phases_n", "drift_on_phases_target_n",
+    "drift_off_phases_share", "drift_off_phases_n", "drift_off_phases_target_n",
 )
 
 
@@ -215,7 +217,12 @@ def drift_metrics(tasks, events, target, window, factor, tta_ref="pre_all",
               "time_to_adapt": "NA", "time_to_adapt_rank": math.nan,
               "time_to_adapt_censored": False,
               "target_after_recovery_share": math.nan,
-              "target_after_recovery_tasks": math.nan}
+              "target_after_recovery_tasks": math.nan,
+              "drift_on_phases_share": math.nan, "drift_on_phases_n": math.nan,
+              "drift_on_phases_target_n": math.nan,
+              "drift_off_phases_share": math.nan, "drift_off_phases_n": math.nan,
+              "drift_off_phases_target_n": math.nan,
+              "drift_build_boundary_phases": ""}
     on = next((e for e in events if e.get("kind") == "drift_on"), None)
     if on is None or _number(on.get("dispatch_count")) is None or not tasks or any(
             _number(t.get("dispatch_seq")) is None for t in tasks):
@@ -248,11 +255,30 @@ def drift_metrics(tasks, events, target, window, factor, tta_ref="pre_all",
               and not (e.get("kind") == "drift_off" and
                        str(e.get("detail", "")).startswith("cell_end"))]
     phases.sort(key=lambda e: (int(e["dispatch_count"]), str(e.get("ts", ""))))
+    boundaries = {int(e["dispatch_count"]) + 1 for e in events
+                  if e.get("kind") == "drift_note" and
+                  re.fullmatch(r"build_start b=\d+", str(e.get("detail", ""))) and
+                  _number(e.get("dispatch_count")) is not None}
+    phase_groups = {"on": [], "off": []}
+    boundary_phases = []
     for index, event in enumerate(phases):
         start = int(event["dispatch_count"]) + 1
         end = int(phases[index + 1]["dispatch_count"]) + 1 if index + 1 < len(phases) else math.inf
         phase_tasks = [t for t in ordered if start <= int(t["dispatch_seq"]) < end]
-        result[f"drift_phase_{index + 1}_{event['kind'][6:]}_share"] = _share(phase_tasks, target)
+        kind = event["kind"][6:]
+        result[f"drift_phase_{index + 1}_{kind}_share"] = _share(phase_tasks, target)
+        phase_groups[kind].extend(phase_tasks)
+        if any(start < boundary < end or boundary == start for boundary in boundaries):
+            boundary_phases.append(f"{index + 1}_{kind}")
+    result["drift_build_boundary_phases"] = ", ".join(boundary_phases)
+    if any(event["kind"] == "drift_off" for event in phases):
+        for kind in ("on", "off"):
+            group = phase_groups[kind]
+            result[f"drift_{kind}_phases_share"] = _share(group, target)
+            result[f"drift_{kind}_phases_n"] = len(group)
+            if all(t.get("worker_address") for t in group):
+                result[f"drift_{kind}_phases_target_n"] = sum(
+                    t["worker_address"] == target for t in group)
     off = phases[1] if (len(phases) == 2 and phases[0]["kind"] == "drift_on"
                         and phases[1]["kind"] == "drift_off") else None
     if off:
@@ -327,9 +353,22 @@ def load_cells(out_dir, window=20, factor=0.5, tta_ref="pre_all", tta_fixed=None
     if "client" in results and not expected_clients:
         expected_clients = int(results["client"].nunique())
     if "build_idx" in results and not expected_builds:
-        expected_builds = int(pd.to_numeric(results["build_idx"], errors="coerce").max())
+        observed_max = pd.to_numeric(results["build_idx"], errors="coerce").max()
+        expected_builds = int(observed_max) if _number(observed_max) and observed_max > 0 else 1
     expected_clients = expected_clients or 1
     expected_builds = expected_builds or 1
+    if "client" in results:
+        client_values = {str(x) for x in results["client"].dropna().unique()}
+        numeric_clients = pd.to_numeric(results["client"], errors="coerce")
+        if numeric_clients.notna().all() and np.isfinite(numeric_clients).all():
+            expected_client_keys = {str(i) for i in range(1, expected_clients + 1)}
+        elif client_values.issubset({"builder", "builder2"}):
+            expected_client_keys = {"builder" if i == 1 else "builder2"
+                                    for i in range(1, expected_clients + 1)}
+        else:
+            expected_client_keys = set(sorted(client_values)[:expected_clients])
+    else:
+        expected_client_keys = {"1"}
     target = meta.get("DRIFT_TARGET", DEFAULT_TARGET)
     if target and ":" not in str(target):
         target = f"{target}:50051"
@@ -356,12 +395,23 @@ def load_cells(out_dir, window=20, factor=0.5, tta_ref="pre_all", tta_fixed=None
             elif "cell_makespan_s" in rows and (rows["cell_makespan_s"].map(_number).isna().any() or
                                                  (rows["cell_makespan_s"].astype(float) <= 0).any()):
                 reason = "invalid cell_makespan_s"
-            elif "build_idx" in rows:
-                idx = pd.to_numeric(rows["build_idx"], errors="coerce")
-                clients = rows["client"] if "client" in rows else pd.Series([1] * len(rows), index=rows.index)
+            elif "build_idx" in rows or "client" in rows or expected_builds > 1 or expected_clients > 1:
+                idx = (pd.to_numeric(rows["build_idx"], errors="coerce")
+                       if "build_idx" in rows else pd.Series([1] * len(rows), index=rows.index))
+                clients = (rows["client"].map(lambda x: str(x) if pd.notna(x) else "")
+                           if "client" in rows else pd.Series(["1"] * len(rows), index=rows.index))
+                if ("client" in rows and pd.to_numeric(rows["client"], errors="coerce").notna().all()
+                        and np.isfinite(pd.to_numeric(rows["client"], errors="coerce")).all()):
+                    clients = pd.to_numeric(rows["client"]).map(lambda x: str(int(x)) if x == int(x) else str(x))
                 keys = list(zip(idx, clients))
-                if idx.isna().any() or len(keys) != len(set(keys)) or len(rows) != expected_clients * expected_builds or set(idx) != set(range(1, expected_builds + 1)):
-                    reason = "missing or duplicate client/build result"
+                expected_keys = {(idx_value, client) for idx_value in range(1, expected_builds + 1)
+                                 for client in expected_client_keys}
+                if (idx.isna().any() or not np.isfinite(idx).all() or
+                        any(x != int(x) for x in idx.dropna()) or
+                        len(keys) != len(set(keys)) or set(keys) != expected_keys):
+                    reason = (f"missing, extra, or duplicate client/build result "
+                              f"(expected builds 1..{expected_builds}, clients "
+                              f"{','.join(sorted(expected_client_keys))})")
             elif len(rows) != 1:
                 reason = "duplicate result"
             path = out_dir / f"tasks_{arm}_round{rnd}.jsonl"
@@ -474,6 +524,10 @@ def write_summary(path, cells, pairs, drops, notes, window, factor, tta_ref,
              f"Time-to-adapt: W={window}, reference={reference}, threshold={threshold}; " +
              ("" if tta_ref == "fixed" else "reference share < 0.05 is NA. ") +
              "Censored values display as > n and enter paired tests as n_post + 1.",
+             "target_after_recovery_* is defined only for exactly one drift_on and one "
+             "non-cleanup drift_off (transient); NA for onoff and permanent by design.",
+             "On/off aggregate shares pool decisions inside each phase after first drift_on; "
+             "cell_end cleanup is excluded. Counts are decision and target-decision totals.",
              "Holm family: every treatment x baseline pair for one metric in this directory; "
              "gamma/lambda sweep arms enlarge the family.", ""]
     if drops:
@@ -489,6 +543,15 @@ def write_summary(path, cells, pairs, drops, notes, window, factor, tta_ref,
             for _, row in flagged.sort_values(["round", "arm"]).iterrows():
                 lines.append(f"| {int(row['round'])} | {row['arm']} | {int(row['drift_pre_n'])} | "
                              f"{int(row['drift_post_n'])} | {row['drift_window_flag']} |")
+            lines.append("")
+    if not cells.empty and "drift_build_boundary_phases" in cells:
+        flagged = cells[cells["drift_build_boundary_phases"] != ""]
+        if not flagged.empty:
+            lines += ["## Phases crossing build boundaries", "",
+                      "| Round | Arm | Phases |", "|---:|---|---|"]
+            for _, row in flagged.sort_values(["round", "arm"]).iterrows():
+                lines.append(f"| {int(row['round'])} | {row['arm']} | "
+                             f"{row['drift_build_boundary_phases']} |")
             lines.append("")
     metrics = [c for c in cells if c in METRICS or c.startswith(("build_", "client_", "drift_phase_"))]
     for metric in metrics:

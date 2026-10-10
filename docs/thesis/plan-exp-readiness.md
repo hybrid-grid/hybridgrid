@@ -279,3 +279,13 @@ their containers behind a shared volume barrier, using the container clocks
 for per-client elapsed time and cell makespan. The runner fails and retries a
 drift cell if the first onset is more than 40 dispatches late or fewer than
 100 completed tasks follow it.
+
+v3 -> v4 (lead fix round 3): session drift duration and on/off timers pause
+between builds while cleanup and gate setup run; build_start notes record each
+gate release. HGTIME records container hostnames and cells fail when client
+clocks imply a duration inconsistent with their own task receipt-to-completion
+span, or when concurrent clients report one hostname. Drift phases ignore
+notes as transitions, flag build boundaries, and add pooled on/off decision
+shares and counts. Recovery metrics apply only to a single on/off transient
+cycle. Analysis now rejects cells with missing, extra, or duplicated
+build/client results before retaining complete blocks.

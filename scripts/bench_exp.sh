@@ -285,21 +285,35 @@ inject_drift() {
     case $DRIFT in
         permanent) while [[ ! -e $cell_marker ]]; do sleep 0.2; done ;;
         transient)
-            sleep "$DRIFT_DURATION"
-            [[ -e $cell_marker ]] || stop_stress_phase "$(dispatch_count || printf '0')" || printf 'stop_stress failed\n' > "$cell_marker.error"
+            if wait_build_seconds "$DRIFT_DURATION"; then
+                stop_stress_phase "$(dispatch_count || printf '0')" || printf 'stop_stress failed\n' > "$cell_marker.error"
+            fi
             ;;
         onoff)
             while [[ ! -e $cell_marker ]]; do
-                sleep "$DRIFT_ON"
-                [[ -e $cell_marker ]] && break
+                wait_build_seconds "$DRIFT_ON" || break
                 stop_stress_phase "$(dispatch_count || printf '0')" || { printf 'stop_stress failed\n' > "$cell_marker.error"; return 1; }
-                sleep "$DRIFT_OFF"
-                [[ -e $cell_marker ]] && break
+                wait_build_seconds "$DRIFT_OFF" || break
                 count=$(dispatch_count || printf '0')
                 start_stress "$count" || { printf 'start_stress failed\n' > "$cell_marker.error"; return 1; }
             done
             ;;
     esac
+}
+
+wait_build_seconds() {
+    local ticks=0 goal=$(( $1 * 5 ))
+    while (( ticks < goal )); do
+        [[ ! -e $cell_marker ]] || return 1
+        if [[ -e $cell_marker.gap ]]; then sleep 0.2; continue; fi
+        sleep 0.2
+        [[ -e $cell_marker.gap ]] || ticks=$((ticks + 1))
+    done
+    while [[ -e $cell_marker.gap ]]; do
+        [[ ! -e $cell_marker ]] || return 1
+        sleep 0.2
+    done
+    [[ ! -e $cell_marker ]]
 }
 
 sample_stats() {
@@ -440,7 +454,7 @@ run_cell() {
     printf 'ts,kind,target,dispatch_count,detail\n' > "$events_file"
     printf 'ts,build_idx,service,cpu_percent,mem_usage\n' > "$stats_file"
     cell_marker="$OUT_DIR/.cell_${arm}_${round}.done"
-    rm -f "$cell_marker" "$cell_marker.error"
+    rm -f "$cell_marker" "$cell_marker.error" "$cell_marker.gap"
     for (( build_idx=1; build_idx<=SESSION_BUILDS; build_idx++ )); do
         clean_builders || { FAIL_REASON='make clean or cache clear failed'; return 1; }
         token="${arm}-r${round}-b${build_idx}-a${attempt}"
@@ -466,7 +480,7 @@ run_cell() {
                     hgbuild make -j"$1"
                     result=$?
                     end=$(date +%s.%N)
-                    printf "HGTIME %s %s %s\n" "$start" "$end" "$result"
+                    printf "HGTIME %s %s %s %s\n" "$start" "$end" "$result" "$(hostname)"
                     exit "$result"
                 ' _ "$JOBS" "$token" "$client" > "$log" 2>&1
                 status=$?
@@ -492,8 +506,16 @@ run_cell() {
         fi
         stats_before=$(wc -l < "$stats_file")
         compose exec -T builder sh -c 'touch "/gate/go-$1"' _ "$token" || { FAIL_REASON="gate release failed for build $build_idx"; return 1; }
+        rm -f "$cell_marker.gap"
+        if [[ $DRIFT != none ]]; then
+            count=$(dispatch_count) || { FAIL_REASON="dispatch count failed after gate release for build $build_idx"; return 1; }
+            post_event drift_note "$count" "build_start b=$build_idx" || { FAIL_REASON="build_start event failed for build $build_idx"; return 1; }
+        fi
         sample_stats & stats_pid=$!
         for pid in "${pids[@]}"; do wait "$pid" || true; done
+        # The next build's cleanup, gate wait, and result processing are outside
+        # build time; leave stress-ng in its current state until gate release.
+        if (( build_idx < SESSION_BUILDS )); then touch "$cell_marker.gap"; fi
         # Stop the drift injector as soon as the last build ends, so it cannot
         # start another on-phase while the cell is being torn down.
         if (( build_idx == SESSION_BUILDS )); then touch "$cell_marker"; fi
@@ -503,21 +525,26 @@ run_cell() {
         min_start=; max_end=
         local build_rows="$OUT_DIR/.build_results.csv"
         : > "$build_rows"
+        local -a hostnames=()
         for (( client=1; client<=CLIENTS; client++ )); do
             log="$OUT_DIR/build_${arm}_round${round}_b${build_idx}_c${client}.log"
             [[ -f $log.status ]] || { FAIL_REASON="client $client missing exit status"; return 1; }
             status=$(cat "$log.status")
             [[ $status == 0 ]] || { FAIL_REASON="client $client build exit $status (see $log)"; return 1; }
-            read -r time_tag start end build_status <<< "$(tail -n 1 "$log")"
-            [[ $time_tag == HGTIME && $build_status == 0 && $start =~ ^[0-9]+([.][0-9]+)?$ && $end =~ ^[0-9]+([.][0-9]+)?$ ]] || {
+            read -r time_tag start end build_status hostname extra <<< "$(tail -n 1 "$log")"
+            [[ $time_tag == HGTIME && $build_status == 0 && -n $hostname && -z ${extra:-} && $start =~ ^[0-9]+([.][0-9]+)?$ && $end =~ ^[0-9]+([.][0-9]+)?$ ]] || {
                 FAIL_REASON="client $client missing or failed HGTIME for build $build_idx (see $log)"; return 1;
             }
+            hostnames+=("$hostname")
             elapsed=$(python3 -c 'import sys; s,e=map(float,sys.argv[1:]); assert e>=s; print(f"{e-s:.3f}")' "$start" "$end") || { FAIL_REASON="invalid HGTIME for client $client"; return 1; }
             if [[ -z $min_start ]]; then min_start=$start; max_end=$end; else
                 read -r min_start max_end <<< "$(python3 -c 'import sys; a,b,c,d=map(float,sys.argv[1:]); print(min(a,c),max(b,d))' "$min_start" "$max_end" "$start" "$end")"
             fi
             printf '%s,%s,%s,%s,%s,%s,PLACEHOLDER\n' "$arm" "$round" "$pos" "$build_idx" "$client" "$elapsed" >> "$build_rows"
         done
+        if (( CLIENTS == 2 )) && [[ ${hostnames[0]} == "${hostnames[1]}" ]]; then
+            FAIL_REASON="build $build_idx clients share HGTIME hostname ${hostnames[0]}"; return 1
+        fi
         makespan=$(python3 -c 'import sys; print(f"{float(sys.argv[2])-float(sys.argv[1]):.3f}")' "$min_start" "$max_end")
         python3 -c 'import sys; p=sys.argv[1]; s=open(p).read().replace("PLACEHOLDER",sys.argv[2]); open(p,"w").write(s)' "$build_rows" "$makespan"
         cat "$build_rows" >> "$tmp_results"
@@ -526,6 +553,9 @@ run_cell() {
     [[ ! -f $cell_marker.error ]] || { FAIL_REASON=$(cat "$cell_marker.error"); return 1; }
     tasks_path="$OUT_DIR/tasks_${arm}_round${round}.jsonl"
     compose cp coordinator:/tmp/tasks.jsonl "$tasks_path" || { FAIL_REASON='task log copy failed'; return 1; }
+    span_reason=$(python3 "$ROOT/scripts/exp_checks.py" "$tasks_path" "$tmp_results" "$arm" "$round") || {
+        FAIL_REASON="HGTIME span check: $span_reason"; return 1;
+    }
     counts=$(python3 - "$tasks_path" <<'PY'
 import json,sys
 ok=bad=0
