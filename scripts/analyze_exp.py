@@ -25,7 +25,10 @@ BOOT_N = 10000
 METRICS = (
     "makespan_s", "skip_idle_all", "skip_idle_given_idle", "strongest_idle",
     "free_slot_skip_all", "free_slot_skip_given_free", "strongest_free_slot",
-    "drift_pre_share", "drift_post_share", "time_to_adapt_rank",
+    "drift_pre_share", "drift_pre_all_share", "drift_post_share",
+    "drift_pre_n", "drift_pre_all_n", "drift_post_n",
+    "drift_post_early_share", "drift_post_late_share",
+    "excess_target_share_pre", "excess_target_share_post", "time_to_adapt_rank",
     "target_after_recovery_share", "target_after_recovery_tasks",
 )
 
@@ -139,17 +142,19 @@ def candidate_metrics(tasks):
         chosen = next((c for c in candidates if c["address"] == address), None)
         if chosen is None:
             return na
-        idle = [c for c in candidates if c["active"] == 0]
-        free = [c for c in candidates if c["active"] < c["max_parallel"]]
+        chosen_healthy = chosen.get("healthy") is not False
+        healthy = [c for c in candidates if c.get("healthy") is not False]
+        idle = [c for c in healthy if c["active"] == 0]
+        free = [c for c in healthy if c["active"] < c["max_parallel"]]
         if idle:
             idle_n += 1
             skipped_idle += chosen["active"] > 0
-            strongest_idle += (chosen["active"] == 0 and chosen["cpu_millis"] ==
+            strongest_idle += (chosen_healthy and chosen["active"] == 0 and chosen["cpu_millis"] ==
                                max(c["cpu_millis"] for c in idle))
         if free:
             free_n += 1
-            skipped_free += chosen["active"] >= chosen["max_parallel"]
-            strongest_free += (chosen["active"] < chosen["max_parallel"] and
+            skipped_free += not chosen_healthy or chosen["active"] >= chosen["max_parallel"]
+            strongest_free += (chosen_healthy and chosen["active"] < chosen["max_parallel"] and
                                chosen["cpu_millis"] == max(c["cpu_millis"] for c in free))
     count = len(tasks)
     return {"skip_idle_all": skipped_idle / count,
@@ -160,23 +165,53 @@ def candidate_metrics(tasks):
             "strongest_free_slot": strongest_free / free_n if free_n else math.nan}
 
 
-def time_to_adapt(post, target, pre_share, window=20, factor=0.5):
+def time_to_adapt(post, target, reference_share, window=20, factor=0.5,
+                  fixed=False):
     """Return display value, numeric rank, and censor flag.
 
     The first complete W-decision window is evaluated at decision W.
     """
-    if not math.isfinite(pre_share) or pre_share < 0.05 or not post or any(
+    if not math.isfinite(reference_share) or (not fixed and reference_share < 0.05) or not post or any(
             not task.get("worker_address") for task in post):
         return "NA", math.nan, False
     hits = [int(task["worker_address"] == target) for task in post]
+    threshold = reference_share if fixed else factor * reference_share
     for count in range(window, len(hits) + 1):
-        if sum(hits[count - window:count]) / window <= factor * pre_share:
+        if sum(hits[count - window:count]) / window <= threshold:
             return str(count), float(count), False
     return f"> {len(post)}", float(len(post) + 1), True
 
 
-def drift_metrics(tasks, events, target, window, factor):
-    result = {"drift_pre_share": math.nan, "drift_post_share": math.nan,
+def _excess_share(tasks, target):
+    if not tasks:
+        return math.nan
+    excess = []
+    for task in tasks:
+        candidates = task.get("candidates")
+        if not task.get("worker_address") or not isinstance(candidates, list) or not candidates:
+            return math.nan
+        if any(not isinstance(c, dict) or not c.get("address") or
+               _number(c.get("active")) is None or
+               _number(c.get("max_parallel")) is None or
+               _number(c.get("cpu_millis")) is None for c in candidates):
+            return math.nan
+        free = [c for c in candidates if c.get("healthy") is not False and
+                c["active"] < c["max_parallel"]]
+        total = sum(c["cpu_millis"] for c in free)
+        expected = next((c["cpu_millis"] / total for c in free
+                         if c["address"] == target and total > 0), 0.0)
+        excess.append(int(task["worker_address"] == target) - expected)
+    return sum(excess) / len(excess)
+
+
+def drift_metrics(tasks, events, target, window, factor, tta_ref="pre_all",
+                  tta_fixed=None):
+    result = {"drift_pre_share": math.nan, "drift_pre_all_share": math.nan,
+              "drift_post_share": math.nan, "drift_pre_n": 0,
+              "drift_pre_all_n": 0, "drift_post_n": 0,
+              "drift_post_early_share": math.nan, "drift_post_late_share": math.nan,
+              "excess_target_share_pre": math.nan,
+              "excess_target_share_post": math.nan,
               "time_to_adapt": "NA", "time_to_adapt_rank": math.nan,
               "time_to_adapt_censored": False,
               "target_after_recovery_share": math.nan,
@@ -190,15 +225,28 @@ def drift_metrics(tasks, events, target, window, factor):
     target = on.get("target") or target
     ordered = sorted(tasks, key=lambda t: int(t["dispatch_seq"]))
     pre = [t for t in ordered if 101 <= int(t["dispatch_seq"]) < onset]
+    pre_all = [t for t in ordered if 1 <= int(t["dispatch_seq"]) < onset]
     post = [t for t in ordered if int(t["dispatch_seq"]) >= onset]
     result["drift_pre_share"] = _share(pre, target)
+    result["drift_pre_all_share"] = _share(pre_all, target)
     result["drift_post_share"] = _share(post, target)
+    result.update(drift_pre_n=len(pre), drift_pre_all_n=len(pre_all),
+                  drift_post_n=len(post),
+                  drift_post_early_share=_share(post[:50], target),
+                  drift_post_late_share=_share(post[50:], target),
+                  excess_target_share_pre=_excess_share(pre, target),
+                  excess_target_share_post=_excess_share(post, target))
+    reference = (tta_fixed if tta_ref == "fixed" else
+                 result["drift_pre_share"] if tta_ref == "pre" else
+                 result["drift_pre_all_share"])
     display, rank, censored = time_to_adapt(
-        post, target, result["drift_pre_share"], window, factor)
+        post, target, reference, window, factor, fixed=tta_ref == "fixed")
     result.update(time_to_adapt=display, time_to_adapt_rank=rank,
                   time_to_adapt_censored=censored)
     phases = [e for e in events if e.get("kind") in ("drift_on", "drift_off")
-              and _number(e.get("dispatch_count")) is not None]
+              and _number(e.get("dispatch_count")) is not None
+              and not (e.get("kind") == "drift_off" and
+                       str(e.get("detail", "")).startswith("cell_end"))]
     phases.sort(key=lambda e: (int(e["dispatch_count"]), str(e.get("ts", ""))))
     for index, event in enumerate(phases):
         start = int(event["dispatch_count"]) + 1
@@ -244,7 +292,7 @@ def _meta_arms(meta):
     return []
 
 
-def load_cells(out_dir, window=20, factor=0.5):
+def load_cells(out_dir, window=20, factor=0.5, tta_ref="pre_all", tta_fixed=None):
     """Return complete cells, drops, and notes. One valid cell per arm/round."""
     meta_path = out_dir / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
@@ -272,6 +320,8 @@ def load_cells(out_dir, window=20, factor=0.5):
         rounds = sorted(set(rounds) | {rnd for _, rnd in log_keys})
         if rounds and min(rounds) >= 1:
             rounds = list(range(min(rounds), max(rounds) + 1))
+    multi_clients = "client" in results and results["client"].nunique() > 1
+    multi_builds = "build_idx" in results and results["build_idx"].nunique() > 1
     expected_clients = int(meta.get("CLIENTS", meta.get("clients", 0)) or 0)
     expected_builds = int(meta.get("SESSION_BUILDS", meta.get("session_builds", 0)) or 0)
     if "client" in results and not expected_clients:
@@ -343,18 +393,26 @@ def load_cells(out_dir, window=20, factor=0.5):
                                   if expected_builds > 1 and "cell_makespan_s" in rows else
                                   float(rows["cell_makespan_s"].max())
                                   if "cell_makespan_s" in rows else float(rows["elapsed_s"].max()))
-            if "build_idx" in rows:
+            if "build_idx" in rows and (multi_builds or multi_clients):
                 for idx, group in rows.groupby("build_idx"):
-                    row[f"build_{int(idx)}_makespan_s"] = (float(group["cell_makespan_s"].max())
-                                                             if "cell_makespan_s" in group else float(group["elapsed_s"].max()))
-                    if "client" in group:
+                    if multi_builds:
+                        row[f"build_{int(idx)}_makespan_s"] = (float(group["cell_makespan_s"].max())
+                                                                 if "cell_makespan_s" in group else float(group["elapsed_s"].max()))
+                    if multi_builds and multi_clients:
                         for _, client_row in group.iterrows():
                             row[f"build_{int(idx)}_client_{client_row['client']}_elapsed_s"] = float(client_row["elapsed_s"])
-                if "client" in rows:
+                if multi_clients:
                     for client, group in rows.groupby("client"):
                         row[f"client_{client}_elapsed_s"] = float(group["elapsed_s"].sum())
             row.update(candidate_metrics(tasks))
-            row.update(drift_metrics(tasks, events, target, window, factor))
+            row.update(drift_metrics(tasks, events, target, window, factor, tta_ref, tta_fixed))
+            flags = []
+            if any(e.get("kind") == "drift_on" for e in events):
+                if row["drift_pre_n"] < 15:
+                    flags.append("pre<15")
+                if row["drift_post_n"] < 100:
+                    flags.append("post<100")
+            row["drift_window_flag"] = ", ".join(flags)
             finishers = [t for t in tasks if t.get("ts")]
             last = max(finishers, key=lambda t: pd.Timestamp(t["ts"])) if finishers else {}
             row["last_finisher_address"] = last.get("worker_address") or "NA"
@@ -406,9 +464,15 @@ def _fmt(value):
     return "NA" if pd.isna(value) else f"{value:.4g}"
 
 
-def write_summary(path, cells, pairs, drops, notes, window, factor):
+def write_summary(path, cells, pairs, drops, notes, window, factor, tta_ref,
+                  tta_fixed):
+    reference = (f"fixed share {tta_fixed:g}" if tta_ref == "fixed" else
+                 f"{tta_ref} share")
+    threshold = (f"{tta_fixed:g}" if tta_ref == "fixed" else
+                 f"{factor:g} x {reference}")
     lines = ["# Experiment analysis", "", f"Complete blocks: {cells['round'].nunique() if not cells.empty else 0}.",
-             f"Time-to-adapt: W={window}, threshold={factor:g} x pre-share; pre-share < 0.05 is NA. "
+             f"Time-to-adapt: W={window}, reference={reference}, threshold={threshold}; " +
+             ("" if tta_ref == "fixed" else "reference share < 0.05 is NA. ") +
              "Censored values display as > n and enter paired tests as n_post + 1.",
              "Holm family: every treatment x baseline pair for one metric in this directory; "
              "gamma/lambda sweep arms enlarge the family.", ""]
@@ -416,6 +480,16 @@ def write_summary(path, cells, pairs, drops, notes, window, factor):
         lines += ["## Dropped blocks", ""] + [f"- {x}" for x in drops] + [""]
     if notes:
         lines += ["## Availability notes", ""] + [f"- {x}" for x in notes] + [""]
+    if not cells.empty and "drift_window_flag" in cells:
+        flagged = cells[cells["drift_window_flag"] != ""]
+        if not flagged.empty:
+            lines += ["## Flagged drift cells", "",
+                      "| Round | Arm | pre n | post n | Reason |",
+                      "|---:|---|---:|---:|---|"]
+            for _, row in flagged.sort_values(["round", "arm"]).iterrows():
+                lines.append(f"| {int(row['round'])} | {row['arm']} | {int(row['drift_pre_n'])} | "
+                             f"{int(row['drift_post_n'])} | {row['drift_window_flag']} |")
+            lines.append("")
     metrics = [c for c in cells if c in METRICS or c.startswith(("build_", "client_", "drift_phase_"))]
     for metric in metrics:
         lines += [f"## {metric}", "", "| Arm | Median | n |", "|---|---:|---:|"]
@@ -424,7 +498,7 @@ def write_summary(path, cells, pairs, drops, notes, window, factor):
             lines.append(f"| {arm} | {_fmt(values.median()) if not values.empty else 'NA'} | {len(values)} |")
         lines += ["", "| Treatment | Baseline | n | Median diff [95% CI] | p_raw | p_holm | r_rb | n_zero |",
                   "|---|---|---:|---:|---:|---:|---:|---:|"]
-        subset = pairs[pairs["metric"] == metric] if not pairs.empty else []
+        subset = pairs[pairs["metric"] == metric] if not pairs.empty else pd.DataFrame()
         for _, pair in subset.iterrows():
             delta = f"{_fmt(pair['median_diff'])} [{_fmt(pair['ci_lo'])}, {_fmt(pair['ci_hi'])}]"
             lines.append(f"| {pair['treatment']} | {pair['baseline']} | {int(pair['n'])} | {delta} | "
@@ -448,11 +522,18 @@ def main(argv=None):
     parser.add_argument("--baselines", nargs="+", help="baseline arm labels")
     parser.add_argument("--window", type=int, default=20)
     parser.add_argument("--factor", type=float, default=0.5)
+    parser.add_argument("--tta-ref", choices=("pre", "pre_all", "fixed"), default="pre_all")
+    parser.add_argument("--tta-fixed", type=float)
     parser.add_argument("--strict", action="store_true")
     args = parser.parse_args(argv)
     if args.window < 1 or not 0 <= args.factor <= 1:
         parser.error("--window must be positive and --factor between 0 and 1")
-    cells, dropped, notes = load_cells(args.out_dir, args.window, args.factor)
+    if args.tta_ref == "fixed" and (args.tta_fixed is None or not 0 <= args.tta_fixed <= 1):
+        parser.error("--tta-fixed must be in [0, 1] when --tta-ref=fixed")
+    if args.tta_ref != "fixed" and args.tta_fixed is not None:
+        parser.error("--tta-fixed requires --tta-ref=fixed")
+    cells, dropped, notes = load_cells(args.out_dir, args.window, args.factor,
+                                       args.tta_ref, args.tta_fixed)
     for reason in dropped:
         print("DROPPED:", reason)
     for note in notes:
@@ -462,7 +543,8 @@ def main(argv=None):
     output.mkdir(parents=True, exist_ok=True)
     cells.to_csv(output / "cells.csv", index=False, na_rep="NA")
     pairs.to_csv(output / "pairs.csv", index=False, na_rep="NA")
-    write_summary(output / "summary.md", cells, pairs, dropped, notes, args.window, args.factor)
+    write_summary(output / "summary.md", cells, pairs, dropped, notes, args.window,
+                  args.factor, args.tta_ref, args.tta_fixed)
     print(f"Wrote {output} ({cells['round'].nunique() if not cells.empty else 0} complete blocks)")
     return 2 if args.strict and dropped else 0
 

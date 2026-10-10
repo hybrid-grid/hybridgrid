@@ -267,3 +267,15 @@ EventSink/DispatchCounter interfaces for opshttp (major 2); BUILDER_CPUS and
 docker stats gate (major 3); Holm family per metric per scenario (major 4);
 zero-difference rule (major 5); time-to-adapt floor and censoring rank
 (major 6); arm-matrix dry run with time estimate (major 7).
+
+v2 -> v3 (lead fix round 2): healthy candidates alone count as idle or
+free; single-build and single-client cells omit redundant component metrics.
+Drift analysis retains the advisor's pre/post shares and adds all-pre counts,
+configurable time-to-adapt reference, candidate-capacity-adjusted excess
+shares, early/late post shares, and explicit treatment of cell-end cleanup
+as distinct from recovery. Short drift windows are flagged in the summary
+without dropping the cell. Concurrent builders now time `hgbuild make` inside
+their containers behind a shared volume barrier, using the container clocks
+for per-client elapsed time and cell makespan. The runner fails and retries a
+drift cell if the first onset is more than 40 dispatches late or fewer than
+100 completed tasks follow it.

@@ -162,6 +162,7 @@ EOF
     volumes:
       - $cache:/root/.hybridgrid/cache
       - $source:/workspace
+      - gate:/gate
     deploy:
       resources:
         limits:
@@ -169,7 +170,7 @@ EOF
           memory: 1G
 EOF
         done
-        printf 'networks:\n  hgnet:\n    driver: bridge\nvolumes:\n  task-logs:\n  build-cache:\n  cpython-src:\n'
+        printf 'networks:\n  hgnet:\n    driver: bridge\nvolumes:\n  task-logs:\n  build-cache:\n  cpython-src:\n  gate:\n'
         if (( CLIENTS == 2 )); then printf '  build-cache2:\n  cpython-src2:\n'; fi
     } > "$COMPOSE_FILE"
 }
@@ -415,7 +416,8 @@ PY
 FAIL_REASON=
 run_cell() {
     local arm=$1 round=$2 pos=$3 record=$4 flags=$5 attempt=$6
-    local i service status end elapsed makespan t0 tasks_path counts successes failures drift_ons stats_before stats_after
+    local i service status start end elapsed makespan tasks_path counts successes failures first_on post_completed stats_before stats_after
+    local token ready_entries ready_all client log id pid time_tag build_status min_start max_end
     FAIL_REASON=; stop_background
     compose down >/dev/null 2>&1 || true
     generate_compose "$flags"
@@ -441,47 +443,83 @@ run_cell() {
     rm -f "$cell_marker" "$cell_marker.error"
     for (( build_idx=1; build_idx<=SESSION_BUILDS; build_idx++ )); do
         clean_builders || { FAIL_REASON='make clean or cache clear failed'; return 1; }
-        # Each client waits on the same gate, so both exec processes are launched first.
-        gate="$OUT_DIR/.gate_${arm}_${round}_${build_idx}"
-        rm -f "$gate"
+        token="${arm}-r${round}-b${build_idx}-a${attempt}"
+        compose exec -T builder sh -c 'rm -f /gate/*' || { FAIL_REASON="gate clear failed for build $build_idx"; return 1; }
         declare -a pids=()
         for (( client=1; client<=CLIENTS; client++ )); do
             service=builder; (( client == 1 )) || service=builder2
             id="${arm}-r${round}-b${build_idx}-c${client}"
             log="$OUT_DIR/build_${arm}_round${round}_b${build_idx}_c${client}.log"
             (
-                while [[ ! -e $gate ]]; do sleep 0.01; done
                 set +e
-                compose exec -T "$service" env "HG_BUILD_ID=$id" bash -c 'cd /workspace/cpython && exec hgbuild make -j"$1"' _ "$JOBS" > "$log" 2>&1
+                compose exec -T "$service" env "HG_BUILD_ID=$id" bash -c '
+                    token=$2; client=$3
+                    touch "/gate/ready-c${client}-${token}" || exit 1
+                    deadline=$((SECONDS + 120))
+                    while (( SECONDS < deadline )); do
+                        [[ ! -e /gate/go-${token} ]] || break
+                        sleep 0.01
+                    done
+                    [[ -e /gate/go-${token} ]] || { printf "gate timeout\n" >&2; exit 1; }
+                    cd /workspace/cpython || exit 1
+                    start=$(date +%s.%N)
+                    hgbuild make -j"$1"
+                    result=$?
+                    end=$(date +%s.%N)
+                    printf "HGTIME %s %s %s\n" "$start" "$end" "$result"
+                    exit "$result"
+                ' _ "$JOBS" "$token" "$client" > "$log" 2>&1
                 status=$?
-                now > "$log.end"
                 printf '%s\n' "$status" > "$log.status"
             ) &
             pids+=("$!")
         done
+        ready_all=0
+        local gate_deadline=$((SECONDS + 60))
+        while (( SECONDS < gate_deadline )); do
+            ready_entries=$(compose exec -T builder ls -1 /gate 2>/dev/null) || ready_entries=
+            ready_all=1
+            for (( client=1; client<=CLIENTS; client++ )); do
+                if ! grep -Fxq "ready-c${client}-${token}" <<< "$ready_entries"; then ready_all=0; break; fi
+            done
+            (( ready_all == 0 )) || break
+            sleep 0.01
+        done
+        (( ready_all == 1 )) || { FAIL_REASON="gate readiness timeout for build $build_idx: expected $CLIENTS clients"; return 1; }
         if (( build_idx == 1 )); then
             [[ $DRIFT == none ]] || { inject_drift & injector_pid=$!; }
         fi
         stats_before=$(wc -l < "$stats_file")
-        t0=$(now)
-        touch "$gate"
+        compose exec -T builder touch "/gate/go-${token}" || { FAIL_REASON="gate release failed for build $build_idx"; return 1; }
         sample_stats & stats_pid=$!
         for pid in "${pids[@]}"; do wait "$pid" || true; done
+        # Stop the drift injector as soon as the last build ends, so it cannot
+        # start another on-phase while the cell is being torn down.
+        if (( build_idx == SESSION_BUILDS )); then touch "$cell_marker"; fi
         if [[ -n $stats_pid ]]; then kill "$stats_pid" 2>/dev/null || true; wait "$stats_pid" 2>/dev/null || true; stats_pid=; fi
         stats_after=$(wc -l < "$stats_file")
         (( stats_after > stats_before )) || { FAIL_REASON="no docker stats sample for build $build_idx"; return 1; }
-        makespan=0
+        min_start=; max_end=
+        local build_rows="$OUT_DIR/.build_results.csv"
+        : > "$build_rows"
         for (( client=1; client<=CLIENTS; client++ )); do
             log="$OUT_DIR/build_${arm}_round${round}_b${build_idx}_c${client}.log"
             [[ -f $log.status ]] || { FAIL_REASON="client $client missing exit status"; return 1; }
             status=$(cat "$log.status")
             [[ $status == 0 ]] || { FAIL_REASON="client $client build exit $status (see $log)"; return 1; }
-            end=$(cat "$log.end")
-            elapsed=$(python3 -c 'import sys; print(f"{float(sys.argv[1])-float(sys.argv[2]):.3f}")' "$end" "$t0")
-            makespan=$(python3 -c 'import sys; print(max(float(sys.argv[1]),float(sys.argv[2])))' "$makespan" "$elapsed")
-            printf '%s,%s,%s,%s,%s,%s,PLACEHOLDER\n' "$arm" "$round" "$pos" "$build_idx" "$client" "$elapsed" >> "$tmp_results"
+            read -r time_tag start end build_status <<< "$(tail -n 1 "$log")"
+            [[ $time_tag == HGTIME && $build_status == 0 && $start =~ ^[0-9]+([.][0-9]+)?$ && $end =~ ^[0-9]+([.][0-9]+)?$ ]] || {
+                FAIL_REASON="client $client missing or failed HGTIME for build $build_idx (see $log)"; return 1;
+            }
+            elapsed=$(python3 -c 'import sys; s,e=map(float,sys.argv[1:]); assert e>=s; print(f"{e-s:.3f}")' "$start" "$end") || { FAIL_REASON="invalid HGTIME for client $client"; return 1; }
+            if [[ -z $min_start ]]; then min_start=$start; max_end=$end; else
+                read -r min_start max_end <<< "$(python3 -c 'import sys; a,b,c,d=map(float,sys.argv[1:]); print(min(a,c),max(b,d))' "$min_start" "$max_end" "$start" "$end")"
+            fi
+            printf '%s,%s,%s,%s,%s,%s,PLACEHOLDER\n' "$arm" "$round" "$pos" "$build_idx" "$client" "$elapsed" >> "$build_rows"
         done
-        python3 -c 'import sys; p=sys.argv[1]; s=open(p).read().replace("PLACEHOLDER",sys.argv[2]); open(p,"w").write(s)' "$tmp_results" "$makespan"
+        makespan=$(python3 -c 'import sys; print(f"{float(sys.argv[2])-float(sys.argv[1]):.3f}")' "$min_start" "$max_end")
+        python3 -c 'import sys; p=sys.argv[1]; s=open(p).read().replace("PLACEHOLDER",sys.argv[2]); open(p,"w").write(s)' "$build_rows" "$makespan"
+        cat "$build_rows" >> "$tmp_results"
     done
     stop_background
     [[ ! -f $cell_marker.error ]] || { FAIL_REASON=$(cat "$cell_marker.error"); return 1; }
@@ -489,25 +527,34 @@ run_cell() {
     compose cp coordinator:/tmp/tasks.jsonl "$tasks_path" || { FAIL_REASON='task log copy failed'; return 1; }
     counts=$(python3 - "$tasks_path" <<'PY'
 import json,sys
-ok=bad=drift=0
+ok=bad=0
+first_on=None
+completed=[]
 for line in open(sys.argv[1]):
     row=json.loads(line)
     if row.get('event') == 'task_completed':
         if row.get('success') is True: ok+=1
         else: bad+=1
-    elif row.get('event') == 'injected_event' and row.get('kind') == 'drift_on' and int(row.get('dispatch_count',0)) >= 101:
-        drift+=1
-print(ok,bad,drift)
+        completed.append(int(row.get('dispatch_seq',0)))
+    elif row.get('event') == 'injected_event' and row.get('kind') == 'drift_on' and first_on is None:
+        first_on=int(row.get('dispatch_count',0))
+if first_on is not None:
+    post=sum(seq > first_on for seq in completed)
+print(ok,bad,first_on if first_on is not None else -1,post)
 PY
 ) || { FAIL_REASON='task log parse failed'; return 1; }
-    read -r successes failures drift_ons <<< "$counts"
+    read -r successes failures first_on post_completed <<< "$counts"
     if [[ $record == 0 ]]; then
         MIN_TASKS=${MIN_TASKS:-$successes}
         (( successes > 0 && failures == 0 )) || { FAIL_REASON="warm-up tasks: $successes successful, $failures failed"; return 1; }
     else
         (( successes >= MIN_TASKS )) || { FAIL_REASON="only $successes successful tasks; need $MIN_TASKS"; return 1; }
         (( failures == 0 )) || { FAIL_REASON="$failures failed tasks"; return 1; }
-        if [[ $DRIFT != none ]]; then (( drift_ons >= 1 )) || { FAIL_REASON='missing valid drift_on event'; return 1; }; fi
+        if [[ $DRIFT != none ]]; then
+            (( first_on >= 101 )) || { FAIL_REASON="missing valid drift_on event (first dispatch_count=$first_on)"; return 1; }
+            (( first_on <= DRIFT_AT + 40 )) || { FAIL_REASON="drift_on too late: dispatch_count=$first_on exceeds $((DRIFT_AT + 40))"; return 1; }
+            (( post_completed >= 100 )) || { FAIL_REASON="only $post_completed completed tasks after drift_on; need 100"; return 1; }
+        fi
         cat "$tmp_results" >> "$OUT_DIR/results.csv"
     fi
     return 0

@@ -43,6 +43,17 @@ assert_output 'round 2:'
 assert_output 'docker-compose-exp.yml'
 [[ ! -e $DOCKER_CALL_LOG ]] || { printf 'DRY_RUN called docker\n' >&2; exit 1; }
 
+CLIENTS=2 DRY_RUN=1 REPS=1 OUT_DIR="$TMP/out" ARMS=leastloaded bash "$RUNNER" > "$TMP/stdout" 2> "$TMP/stderr"
+[[ $(grep -Fc -- '- gate:/gate' "$ROOT/test/stress/docker-compose-exp.yml") == 2 ]] || {
+    printf 'both builders must mount the shared gate volume\n' >&2
+    exit 1
+}
+grep -Fq '  gate:' "$ROOT/test/stress/docker-compose-exp.yml" || {
+    printf 'shared gate volume missing\n' >&2
+    exit 1
+}
+[[ ! -e $DOCKER_CALL_LOG ]] || { printf 'DRY_RUN called docker\n' >&2; exit 1; }
+
 run_invalid 'hybrid-linucb-g095' 'require hybrid-linucb-d'
 run_invalid 'hybrid-linucb-arm' 'require hybrid-linucb-d'
 run_invalid 'leastloaded-l025' '-l requires'

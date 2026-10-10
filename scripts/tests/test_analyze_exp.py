@@ -68,6 +68,25 @@ class MetricTests(unittest.TestCase):
         self.assertTrue(math.isnan(metrics["skip_idle_given_idle"]))
         self.assertTrue(math.isnan(metrics["strongest_idle"]))
 
+    def test_unhealthy_candidates_do_not_count_as_idle_or_free(self):
+        candidates = [
+            {"address": "w1", "active": 1, "max_parallel": 2, "cpu_millis": 600},
+            {"address": "w2", "active": 0, "max_parallel": 1,
+             "cpu_millis": 1100, "healthy": False},
+        ]
+        metrics = analyze.candidate_metrics([task("w1", candidates=candidates)])
+        self.assertEqual(metrics["skip_idle_all"], 0)
+        self.assertTrue(math.isnan(metrics["skip_idle_given_idle"]))
+        self.assertEqual(metrics["strongest_free_slot"], 1)
+        candidates[1]["healthy"] = True
+        metrics = analyze.candidate_metrics([task("w1", candidates=candidates)])
+        self.assertEqual(metrics["skip_idle_all"], 1)
+        self.assertEqual(metrics["strongest_free_slot"], 0)
+        candidates[0]["healthy"] = False
+        metrics = analyze.candidate_metrics([task("w1", candidates=candidates)])
+        self.assertEqual(metrics["strongest_free_slot"], 0)
+        self.assertEqual(metrics["free_slot_skip_all"], 1)
+
     def test_time_to_adapt_censor_and_floor(self):
         post = [task("target" if i < 3 else "other", i + 1) for i in range(6)]
         self.assertEqual(analyze.time_to_adapt(post, "target", 1.0, window=2),
@@ -90,6 +109,65 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(values["drift_phase_1_on_share"], 1 / 3)
         self.assertEqual(values["drift_phase_2_off_share"], 0)
         self.assertEqual(values["target_after_recovery_share"], 0)
+
+    def test_drift_references_counts_early_late_and_excess(self):
+        candidates = [{"address": "target", "active": 0, "max_parallel": 1,
+                       "cpu_millis": 1000},
+                      {"address": "other", "active": 0, "max_parallel": 1,
+                       "cpu_millis": 1000}]
+        no_target_slot = [dict(candidates[0], active=1), candidates[1]]
+        tasks = [task("target" if i <= 100 else "other", i,
+                      candidates=candidates) for i in range(1, 102)]
+        tasks += [task("target", 102, candidates=candidates),
+                  task("other", 103, candidates=no_target_slot)]
+        tasks += [task("target" if i == 104 else "other", i,
+                       candidates=candidates) for i in range(104, 154)]
+        event = [{"kind": "drift_on", "dispatch_count": 102, "target": "target"}]
+        values = analyze.drift_metrics(tasks, event, "fallback", 2, 0.5)
+        self.assertEqual((values["drift_pre_n"], values["drift_pre_all_n"],
+                          values["drift_post_n"]), (2, 102, 51))
+        self.assertEqual(values["drift_pre_share"], 0.5)
+        self.assertAlmostEqual(values["drift_pre_all_share"], 101 / 102)
+        self.assertAlmostEqual(values["drift_post_share"], 1 / 51)
+        self.assertEqual(values["drift_post_early_share"], 1 / 50)
+        self.assertEqual(values["drift_post_late_share"], 0)
+        self.assertEqual(values["excess_target_share_pre"], 0)
+        self.assertAlmostEqual(values["excess_target_share_post"],
+                               (0 + 0.5 - 49 * 0.5) / 51)
+
+    def test_tta_reference_selection_floor_and_fixed_threshold(self):
+        tasks = [task("other", i) for i in range(1, 101)]
+        tasks += [task("target" if i == 101 else "other", i)
+                  for i in range(101, 111)]
+        tasks += [task("other", i) for i in range(111, 114)]
+        events = [{"kind": "drift_on", "dispatch_count": 110, "target": "target"}]
+        default = analyze.drift_metrics(tasks, events, "fallback", 2, 0.5)
+        pre = analyze.drift_metrics(tasks, events, "fallback", 2, 0.5, "pre")
+        fixed = analyze.drift_metrics(tasks, events, "fallback", 2, 0.5,
+                                      "fixed", 0)
+        self.assertEqual(default["time_to_adapt"], "NA")
+        self.assertEqual(pre["time_to_adapt"], "2")
+        self.assertEqual(fixed["time_to_adapt"], "2")
+        self.assertEqual(analyze.time_to_adapt(tasks[-3:], "target", 0,
+                                               window=2, fixed=True)[0], "2")
+        post = [task("target", 1), task("target", 2), task("other", 3)]
+        self.assertEqual(analyze.time_to_adapt(post, "target", 0.5,
+                                               window=2, factor=0.1,
+                                               fixed=True)[0], "3")
+
+    def test_cell_end_off_is_neither_recovery_nor_new_phase(self):
+        tasks = [task("target", i) for i in range(101, 106)]
+        events = [{"kind": "drift_on", "dispatch_count": 102, "target": "target"},
+                  {"kind": "drift_off", "dispatch_count": 104,
+                   "detail": "cell_end cleanup"}]
+        values = analyze.drift_metrics(tasks, events, "fallback", 2, 0.5)
+        self.assertTrue(math.isnan(values["target_after_recovery_share"]))
+        self.assertNotIn("drift_phase_2_off_share", values)
+        self.assertEqual(values["drift_phase_1_on_share"], 1)
+        events[1]["detail"] = "stress_stopped"
+        values = analyze.drift_metrics(tasks, events, "fallback", 2, 0.5)
+        self.assertEqual(values["target_after_recovery_tasks"], 1)
+        self.assertEqual(values["drift_phase_2_off_share"], 1)
 
 
 class InputTests(unittest.TestCase):
@@ -118,6 +196,8 @@ class InputTests(unittest.TestCase):
             self.make_directory(root)
             cells, dropped, _ = analyze.load_cells(root)
             self.assertEqual(len(cells), 2)
+            self.assertNotIn("build_1_makespan_s", cells)
+            self.assertNotIn("client_builder_elapsed_s", cells)
             self.assertEqual(set(cells["n_tasks"]), {1})
             self.assertEqual(len(dropped), 1)
             self.assertIn("round 2", dropped[0])
@@ -139,6 +219,7 @@ class InputTests(unittest.TestCase):
             self.assertEqual(cells.iloc[0]["makespan_s"], 10)
             self.assertTrue(math.isnan(cells.iloc[0]["strongest_idle"]))
             self.assertTrue(math.isnan(cells.iloc[0]["time_to_adapt_rank"]))
+            self.assertTrue(math.isnan(cells.iloc[0]["excess_target_share_post"]))
             self.assertTrue(notes)
 
     def test_session_build_and_client_makespans(self):
@@ -168,6 +249,62 @@ class InputTests(unittest.TestCase):
             self.assertEqual(row["build_2_makespan_s"], 8)
             self.assertEqual(row["client_1_elapsed_s"], 10)
             self.assertEqual(row["client_2_elapsed_s"], 13)
+            self.assertEqual(row["build_1_client_1_elapsed_s"], 3)
+
+    def test_one_build_two_clients_emits_only_client_metrics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "results.csv").write_text(
+                "arm,round,build_idx,client,elapsed_s,cell_makespan_s\n"
+                "leastloaded,1,1,1,3,5\nleastloaded,1,1,2,5,5\n",
+                encoding="utf-8")
+            (root / "tasks_leastloaded_round1.jsonl").write_text(
+                json.dumps(task()) + "\n", encoding="utf-8")
+            cells, dropped, _ = analyze.load_cells(root)
+            self.assertFalse(dropped)
+            self.assertEqual(cells.iloc[0]["client_1_elapsed_s"], 3)
+            self.assertNotIn("build_1_makespan_s", cells)
+            self.assertNotIn("build_1_client_1_elapsed_s", cells)
+
+    def test_two_builds_one_client_emits_only_build_metrics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "results.csv").write_text(
+                "arm,round,build_idx,client,elapsed_s,cell_makespan_s\n"
+                "leastloaded,1,1,1,3,3\nleastloaded,1,2,1,5,5\n",
+                encoding="utf-8")
+            (root / "tasks_leastloaded_round1.jsonl").write_text(
+                json.dumps(task()) + "\n", encoding="utf-8")
+            cells, dropped, _ = analyze.load_cells(root)
+            self.assertFalse(dropped)
+            self.assertEqual(cells.iloc[0]["makespan_s"], 8)
+            self.assertEqual(cells.iloc[0]["build_1_makespan_s"], 3)
+            self.assertNotIn("client_1_elapsed_s", cells)
+            self.assertNotIn("build_1_client_1_elapsed_s", cells)
+
+    def test_short_drift_window_is_flagged_and_kept(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "results.csv").write_text(
+                "arm,round,elapsed_s\nleastloaded,1,10\n", encoding="utf-8")
+            records = [task("target", i, ts="2026-01-01T00:00:01Z")
+                       for i in range(1, 105)]
+            records.append({"event": "injected_event", "kind": "drift_on",
+                            "dispatch_count": 102, "target": "target"})
+            (root / "tasks_leastloaded_round1.jsonl").write_text(
+                "\n".join(json.dumps(x) for x in records) + "\n", encoding="utf-8")
+            cells, dropped, notes = analyze.load_cells(root)
+            self.assertFalse(dropped)
+            self.assertEqual(cells.iloc[0]["drift_window_flag"], "pre<15, post<100")
+            summary = root / "summary.md"
+            analyze.write_summary(summary, cells, analyze.pd.DataFrame(), dropped,
+                                  notes, 20, 0.5, "pre_all", None)
+            self.assertIn("Flagged drift cells", summary.read_text(encoding="utf-8"))
+            self.assertIn("reference=pre_all share", summary.read_text(encoding="utf-8"))
+            analyze.write_summary(summary, cells, analyze.pd.DataFrame(), dropped,
+                                  notes, 20, 0.5, "fixed", 0.2)
+            self.assertIn("reference=fixed share 0.2, threshold=0.2",
+                          summary.read_text(encoding="utf-8"))
 
     def test_label_parsing(self):
         parsed = analyze.parse_arm("hybrid-linucb-d-arm-g098-l100")
