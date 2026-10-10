@@ -1,0 +1,186 @@
+"""Synthetic contract tests for scripts/analyze_exp.py."""
+
+import csv
+import importlib.util
+import json
+import math
+import tempfile
+import unittest
+from pathlib import Path
+
+import numpy as np
+
+
+MODULE_PATH = Path(__file__).resolve().parents[1] / "analyze_exp.py"
+SPEC = importlib.util.spec_from_file_location("analyze_exp", MODULE_PATH)
+analyze = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(analyze)
+
+
+def task(address="w1", sequence=1, candidates=None, ts=None):
+    return {"event": "task_completed", "ts": ts or f"2026-01-01T00:00:{sequence:02d}Z",
+            "success": True, "worker_address": address, "dispatch_seq": sequence,
+            "worker_cpu_millis": 1100, "candidates": candidates}
+
+
+class StatisticsTests(unittest.TestCase):
+    def test_rank_biserial_and_holm_hand_calculation(self):
+        # Absolute ranks 1, 2, 3: W+ = 2, W- = 4.
+        self.assertAlmostEqual(analyze.rank_biserial([-1, 2, -3, 0]), -1 / 3)
+        self.assertEqual(analyze.holm([0.03, 0.01, 0.04]), [0.06, 0.03, 0.06])
+
+    def test_all_zero_wilcoxon(self):
+        result = analyze.paired_stats([2, 2, 2], [2, 2, 2], np.random.default_rng(1))
+        self.assertEqual(result["p_raw"], 1)
+        self.assertEqual(result["r_rb"], 0)
+        self.assertEqual(result["n_zero"], 3)
+
+    def test_exact_wilcoxon_without_ties(self):
+        result = analyze.paired_stats([1, 2, 3, 4, 5], [0] * 5, np.random.default_rng(1))
+        self.assertAlmostEqual(result["p_raw"], 0.0625)
+
+
+class MetricTests(unittest.TestCase):
+    def test_idle_skip_strongest_and_free_slot(self):
+        first = [
+            {"address": "w1", "active": 1, "max_parallel": 2, "cpu_millis": 600},
+            {"address": "w2", "active": 0, "max_parallel": 1, "cpu_millis": 1100},
+            {"address": "w3", "active": 0, "max_parallel": 1, "cpu_millis": 1100},
+        ]
+        second = [dict(first[0], active=0), dict(first[1], active=1),
+                  dict(first[2], active=1)]
+        no_idle = [dict(first[0], active=2), dict(first[1], active=1),
+                   dict(first[2], active=1)]
+        metrics = analyze.candidate_metrics([
+            task("w1", candidates=first), task("w1", candidates=second),
+            task("w1", candidates=no_idle), task("w3", candidates=first),
+        ])
+        self.assertEqual(metrics["skip_idle_all"], 0.25)
+        self.assertAlmostEqual(metrics["skip_idle_given_idle"], 1 / 3)
+        self.assertAlmostEqual(metrics["strongest_idle"], 2 / 3)  # w3 ties w2
+        self.assertEqual(metrics["free_slot_skip_all"], 0.0)
+
+    def test_no_idle_candidate_conditional_is_na(self):
+        candidates = [{"address": "w1", "active": 1, "max_parallel": 2,
+                       "cpu_millis": 1000}]
+        metrics = analyze.candidate_metrics([task(candidates=candidates)])
+        self.assertEqual(metrics["skip_idle_all"], 0)
+        self.assertTrue(math.isnan(metrics["skip_idle_given_idle"]))
+        self.assertTrue(math.isnan(metrics["strongest_idle"]))
+
+    def test_time_to_adapt_censor_and_floor(self):
+        post = [task("target" if i < 3 else "other", i + 1) for i in range(6)]
+        self.assertEqual(analyze.time_to_adapt(post, "target", 1.0, window=2),
+                         ("4", 4.0, False))
+        self.assertEqual(analyze.time_to_adapt(post[:3], "target", 1.0, window=2),
+                         ("> 3", 4.0, True))
+        display, rank, _ = analyze.time_to_adapt(post, "target", 0.049, window=2)
+        self.assertEqual(display, "NA")
+        self.assertTrue(math.isnan(rank))
+
+    def test_drift_windows_phases_and_recovery(self):
+        tasks = [task("target" if i <= 103 else "other", i) for i in range(101, 108)]
+        events = [{"event": "injected_event", "kind": "drift_on",
+                   "target": "target", "dispatch_count": 102},
+                  {"event": "injected_event", "kind": "drift_off",
+                   "target": "target", "dispatch_count": 105}]
+        values = analyze.drift_metrics(tasks, events, "fallback", 2, 0.5)
+        self.assertEqual(values["drift_pre_share"], 1)
+        self.assertAlmostEqual(values["drift_post_share"], 1 / 5)
+        self.assertEqual(values["drift_phase_1_on_share"], 1 / 3)
+        self.assertEqual(values["drift_phase_2_off_share"], 0)
+        self.assertEqual(values["target_after_recovery_share"], 0)
+
+
+class InputTests(unittest.TestCase):
+    def make_directory(self, root):
+        with (root / "results.csv").open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["arm", "round", "order_pos",
+                                                        "build_idx", "client", "elapsed_s",
+                                                        "cell_makespan_s"])
+            writer.writeheader()
+            for rnd in (1, 2):
+                for arm in ("leastloaded", "hybrid-linucb"):
+                    if rnd == 2 and arm == "hybrid-linucb":
+                        continue
+                    writer.writerow({"arm": arm, "round": rnd, "order_pos": 1,
+                                     "build_idx": 1, "client": "builder", "elapsed_s": 10,
+                                     "cell_makespan_s": 10})
+                    with (root / f"tasks_{arm}_round{rnd}.jsonl").open("w", encoding="utf-8") as log:
+                        log.write(json.dumps(task(candidates=[{"address": "w1", "active": 0,
+                            "max_parallel": 1, "cpu_millis": 1000}])) + "\n")
+                        log.write(json.dumps({"event": "injected_event", "kind": "drift_note",
+                                              "ts": "2026-01-01T00:00:02Z"}) + "\n")
+
+    def test_injected_event_excluded_and_incomplete_block_dropped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_directory(root)
+            cells, dropped, _ = analyze.load_cells(root)
+            self.assertEqual(len(cells), 2)
+            self.assertEqual(set(cells["n_tasks"]), {1})
+            self.assertEqual(len(dropped), 1)
+            self.assertIn("round 2", dropped[0])
+            self.assertEqual(analyze.main([str(root), "--out", str(root / "analysis"),
+                                           "--strict"]), 2)
+
+    def test_old_format_is_na(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "results.csv").write_text(
+                "scheduler,round,order_pos,workers,elapsed_s\nleastloaded,1,1,5,10\n",
+                encoding="utf-8")
+            (root / "tasks_leastloaded_round1.jsonl").write_text(
+                json.dumps({"ts": "2026-01-01T00:00:01Z", "success": True,
+                            "worker_id": "old-worker", "worker_cpu_millis": 600}) + "\n",
+                encoding="utf-8")
+            cells, dropped, notes = analyze.load_cells(root)
+            self.assertFalse(dropped)
+            self.assertEqual(cells.iloc[0]["makespan_s"], 10)
+            self.assertTrue(math.isnan(cells.iloc[0]["strongest_idle"]))
+            self.assertTrue(math.isnan(cells.iloc[0]["time_to_adapt_rank"]))
+            self.assertTrue(notes)
+
+    def test_session_build_and_client_makespans(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "meta.json").write_text(json.dumps({"ARMS": "leastloaded",
+                "REPS": "1", "CLIENTS": "2", "SESSION_BUILDS": "2", "MIN_TASKS": "1"}),
+                encoding="utf-8")
+            with (root / "results.csv").open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["arm", "round", "build_idx", "client", "elapsed_s",
+                                 "cell_makespan_s"])
+                writer.writerows([
+                    ["leastloaded", 1, 1, 1, 3, 5],
+                    ["leastloaded", 1, 1, 2, 5, 5],
+                    ["leastloaded", 1, 2, 1, 7, 8],
+                    ["leastloaded", 1, 2, 2, 8, 8],
+                ])
+            (root / "tasks_leastloaded_round1.jsonl").write_text(
+                json.dumps(task(candidates=[{"address": "w1", "active": 0,
+                    "max_parallel": 1, "cpu_millis": 1000}])) + "\n", encoding="utf-8")
+            cells, dropped, _ = analyze.load_cells(root)
+            self.assertFalse(dropped)
+            row = cells.iloc[0]
+            self.assertEqual(row["makespan_s"], 13)
+            self.assertEqual(row["build_1_makespan_s"], 5)
+            self.assertEqual(row["build_2_makespan_s"], 8)
+            self.assertEqual(row["client_1_elapsed_s"], 10)
+            self.assertEqual(row["client_2_elapsed_s"], 13)
+
+    def test_label_parsing(self):
+        parsed = analyze.parse_arm("hybrid-linucb-d-arm-g098-l100")
+        self.assertEqual(parsed["base"], "hybrid-linucb-d")
+        self.assertEqual(parsed["discount_mode"], "arm")
+        self.assertEqual(parsed["discount"], 0.98)
+        self.assertEqual(parsed["load_penalty"], 1.0)
+        self.assertEqual(analyze.parse_arm("hybrid-linucb-l0")["load_penalty"], 0)
+        for bad in ("sed-g095", "leastloaded-l025", "hybrid-linucb-d-l025-g095",
+                    "hybrid-linucb-d-g999", "hybrid-linucb-d-unknown"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                analyze.parse_arm(bad)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -123,6 +123,8 @@ def load_task_logs(out_dir):
         except ValueError as e:
             print(f"[warn] unreadable {path}: {e}")
             continue
+        if "event" in df.columns:
+            df = df[df["event"].isna() | df["event"].eq("task_completed")]
         if df.empty or "compile_time_ms" not in df.columns:
             continue
         if "ts" in df.columns:

@@ -143,6 +143,8 @@ def load_p99(out_dir):
             d = pd.read_json(path, lines=True)
         except ValueError:
             continue
+        if "event" in d.columns:
+            d = d[d["event"].isna() | d["event"].eq("task_completed")]
         if d.empty or "compile_time_ms" not in d.columns:
             continue
         rows.append(
