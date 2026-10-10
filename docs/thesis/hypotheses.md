@@ -1,10 +1,16 @@
 # Giả thuyết đăng ký trước: Thí nghiệm 1 và 2 (HG-LinUCB)
 
-> BẢN NHÁP — chưa có hiệu lực. File này chỉ được commit một lần, ngay trước
-> lượt chạy chính thức đầu tiên, và không được sửa sau khi đã có kết quả
-> (quy định chung số 3 của thầy). Các pilot ngày 2026-10-10 (1 block mỗi
-> kịch bản) chỉ dùng để kiểm tra công cụ và chọn tham số; số liệu pilot
+> ĐĂNG KÝ TRƯỚC — được commit một lần, ngay trước lượt chạy chính thức đầu
+> tiên, và không được sửa sau khi đã có kết quả (quy định chung số 3 của
+> thầy). Mọi thay đổi sau đó chỉ được ghi thành kịch bản bổ sung ở file
+> khác, kèm lý do. Các pilot ngày 2026-10-10 (một cell hoặc một block mỗi
+> cấu hình) chỉ dùng để kiểm tra công cụ và chọn tham số; số liệu pilot
 > không được gộp vào kết quả.
+>
+> Tài liệu này đăng ký cả Thí nghiệm 1 và 2. Thí nghiệm 1 chạy trước; Thí
+> nghiệm 2 và E2-lambda chỉ bắt đầu sau khi nhóm xem kết quả Thí nghiệm 1 và
+> xác nhận (mục 2b). Cấu hình Thí nghiệm 2 ở đây không được đổi sau khi đã
+> thấy kết quả Thí nghiệm 1.
 
 ## 0. Cấu hình chung (cố định)
 
@@ -86,7 +92,12 @@ Giả thuyết:
   worker rảnh mạnh hay yếu, `strongest_idle` (H1.2) là chỉ số có thể tách
   hai scheduler.
 - H1.3 SED có skip-idle lớn hơn LeastLoaded (SED dồn việc vào worker mạnh
-  dù có worker yếu đang rảnh).
+  dù có worker yếu đang rảnh). Cố định: metric là `skip_idle_all` (tính trên
+  mọi quyết định); so sánh SED với LeastLoaded là một họ riêng, chạy bằng
+  lệnh `analyze_exp.py <OUT_DIR> --strict --treatments sed --baselines
+  leastloaded --out <OUT_DIR>/analysis_sed_vs_ll` ở mỗi kịch bản E1;
+  Wilcoxon hai phía hiệu chỉnh Holm trong từng kịch bản E1 (họ gồm riêng cặp
+  này, theo từng metric). `skip_idle_given_idle` chỉ báo cáo mô tả.
 
 ## 2. Thí nghiệm 2: drift ẩn
 
@@ -97,7 +108,8 @@ trên cùng coordinator (`SESSION_BUILDS=2`, khoảng 590 quyết định), `-j8
 1 client. Thời điểm và số dispatch của mỗi sự kiện được ghi vào task log
 (`injected_event`).
 
-Lý do chọn phiên 2 build (quyết định của nhóm; thầy chưa trả lời câu Q8,
+Lý do chọn phiên 2 build (quyết định của nhóm, cố định tại thời điểm đăng
+ký; câu trả lời của thầy về Q8, nếu đến sau, chỉ được ghi thành nhận xét,
 mục 5): trên máy chính thức một build 295 TU kéo dài khoảng 94 s; trong
 pilot, biến thể 30 s bật ở dispatch ~124 và hồi phục ở dispatch ~250, nên
 một build chỉ còn khoảng 45 quyết định sau hồi phục, còn phiên 2 build còn
@@ -155,16 +167,29 @@ Giả thuyết:
   dừng vì lỗi lặp lại, chạy tiếp từ block bị dừng (`ROUND_START`), không
   chạy lại các block đã hoàn thành. Kịch bản không hoàn thành được báo cáo
   là "không hoàn thành", không phân tích một phần.
-- E2-lambda chạy cuối và có thể bị bỏ nếu hết thời gian; khi đó báo cáo là
-  "không chạy". Kết quả gửi thầy sau khi xong TN1 và ba biến thể TN2, không
-  chờ E2-lambda.
+- Chiến dịch được chia thành hai đợt có xác nhận ở giữa: đợt 1 gồm các kịch
+  bản E1-*, đợt 2 gồm E2-perm, E2-trans, E2-onoff rồi E2-lambda. Script
+  `campaign.sh` tự dừng sau E1-2c và chỉ chạy đợt 2 khi người vận hành tạo
+  tệp `PHASE2_APPROVED` trong thư mục kết quả sau khi xem kết quả đợt 1.
+  Việc xem kết quả đợt 1 không được dẫn tới đổi cấu hình, giả thuyết hay
+  danh sách arm của đợt 2; muốn đổi thì chạy thành kịch bản bổ sung và nói
+  rõ là bổ sung.
+- Việc có chạy E2-lambda hay không được quyết định MỘT LẦN, khi tạo
+  `PHASE2_APPROVED` (trước khi có bất kỳ kết quả TN2 nào): nếu không chạy thì
+  đặt `STOP_AFTER=E2-onoff` và ghi quyết định cùng lý do (thời gian, thiết
+  bị) vào `campaign.log`. Sau đó không đổi quyết định. Nếu E2-lambda không
+  chạy thì H2.4 được báo cáo là "không được đánh giá". Kết quả gửi thầy sau
+  khi xong TN1 và ba biến thể TN2, không chờ E2-lambda.
 
 ## 3. Tiêu chí loại dữ liệu (cố định trước)
 
 Một cell bị coi là hỏng và ghi vào `failures.csv` nếu: build thoát khác 0,
 thiếu `HGTIME`, ít hơn 5 worker đăng ký, có task thất bại, số task thành
-công nhỏ hơn số của build làm nóng; với drift: không có `drift_on`, onset >
-`DRIFT_AT` + 40, hoặc ít hơn 100 task sau onset.
+công nhỏ hơn số của build làm nóng; với drift: không có `drift_on` với
+`dispatch_count` ≥ 101, `dispatch_count` của sự kiện `drift_on` đầu tiên
+> `DRIFT_AT` + 40 (analyzer đặt onset = `dispatch_count` + 1 để tính cửa sổ,
+nhưng ngưỡng loại dùng chính `dispatch_count` như runner), hoặc ít hơn 100
+task hoàn thành sau sự kiện đó.
 
 Chạy lại có hai tầng, cố định trước:
 1. Cell hỏng được runner chạy lại ngay 1 lần (cụm mới).
@@ -173,7 +198,8 @@ Chạy lại có hai tầng, cố định trước:
    tối đa 2 lần cho mỗi kịch bản; quá số đó thì dừng chiến dịch để kiểm
    tra bằng tay. Không bao giờ giữ một phần block cũ ghép với block mới.
 
-Mọi lần hỏng và chạy lại đều nằm trong `failures.csv` và `campaign.log` và
+Mọi lần cell hỏng được ghi trong `failures.csv` (kèm lý do) và `runner.log`
+của kịch bản; `campaign.log` ghi mỗi lần runner dừng và chạy tiếp. Tất cả
 được báo cáo kèm kết quả. Phân tích chỉ dùng block hoàn chỉnh; một kịch bản
 chỉ được phân tích khi đủ 20 block hoàn chỉnh (mục 2b).
 
@@ -183,7 +209,7 @@ Máy chạy là Windows 10 + Docker Desktop (WSL2), hai CPU Xeon E5-2686 v4
 2.3 GHz (36 nhân/72 luồng, không có P/E core); máy dùng chung với công
 việc khác nên các ứng dụng nền (IDE, trình duyệt) được đóng và power plan
 đặt High performance trong lúc chạy. Báo cáo kiểm tra môi trường
-(`preflight.txt`: commit, phiên bản thư viện, tài nguyên Docker, CPU, hệ
+(`preflight_r<k>.txt`: commit, phiên bản thư viện, tài nguyên Docker, CPU, hệ
 điều hành, power plan, ứng dụng nền) được lưu cùng thư mục kết quả của từng
 kịch bản; `meta.json` ghi thêm nproc, CPU/RAM Docker và giới hạn của từng
 worker. Pilot ngày 2026-10-10 chạy trên một máy khác (i5-14600KF, P/E
