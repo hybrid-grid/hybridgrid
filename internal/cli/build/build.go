@@ -16,6 +16,7 @@ import (
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cache"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/fallback"
+	"github.com/h3nr1-d14z/hybridgrid/internal/cli/taskid"
 	"github.com/h3nr1-d14z/hybridgrid/internal/compiler"
 	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/client"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
@@ -386,6 +387,7 @@ func getClientArch() pb.Architecture {
 func (s *Service) compileRemotePreprocessed(ctx context.Context, req *Request, preprocessed []byte) (*remoteResult, error) {
 	compileReq := &pb.CompileRequest{
 		TaskId:             req.TaskID,
+		BuildId:            taskid.BuildSessionID(),
 		Compiler:           req.Args.Compiler,
 		CompilerArgs:       s.buildRemoteArgs(req.Args),
 		PreprocessedSource: preprocessed,
@@ -448,6 +450,7 @@ func (s *Service) compileRemotePreprocessed(ctx context.Context, req *Request, p
 func (s *Service) compileRemoteRaw(ctx context.Context, req *Request, rawSource []byte, includeFiles map[string][]byte) (*remoteResult, error) {
 	compileReq := &pb.CompileRequest{
 		TaskId:         req.TaskID,
+		BuildId:        taskid.BuildSessionID(),
 		Compiler:       req.Args.Compiler,
 		CompilerArgs:   s.buildRemoteArgsForRaw(req.Args),
 		RawSource:      rawSource,

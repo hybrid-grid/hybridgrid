@@ -253,7 +253,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			}()
 
 			// Start ops HTTP server (health, metrics, log-level).
-			opsSrv := &opshttp.Server{Port: httpPort, AuthToken: token}
+			opsSrv := &opshttp.Server{Port: httpPort, AuthToken: token, EventSink: srv, DispatchCounter: srv}
 			go func() {
 				if err := opsSrv.Start(); err != nil {
 					errCh <- fmt.Errorf("ops http server: %w", err)

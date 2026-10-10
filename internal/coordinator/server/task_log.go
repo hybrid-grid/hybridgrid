@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"sync"
@@ -27,17 +28,22 @@ type TaskLogger struct {
 // evaluation and bandit/RL training. Field names use snake_case so pandas
 // can ingest the file with pd.read_json(path, lines=True) without renaming.
 type TaskLogRecord struct {
-	TS               time.Time `json:"ts"`
-	Event            string    `json:"event"`
-	TaskID           string    `json:"task_id"`
-	BuildType        string    `json:"build_type"`
-	BuildID          string    `json:"build_id"`
-	Scheduler        string    `json:"scheduler"`
-	SchedulerParams  string    `json:"scheduler_params,omitempty"`
-	WorkerID         string    `json:"worker_id"`
-	WorkerArch       string    `json:"worker_arch"`
-	WorkerNativeArch string    `json:"worker_native_arch"`
-	WorkerCPUCores   int32     `json:"worker_cpu_cores"`
+	TS               time.Time           `json:"ts"`
+	Event            string              `json:"event"`
+	DispatchSeq      int64               `json:"dispatch_seq"`
+	DispatchTS       time.Time           `json:"dispatch_ts"`
+	ReceivedTS       time.Time           `json:"received_ts"`
+	WorkerAddress    string              `json:"worker_address"`
+	Candidates       []DispatchCandidate `json:"candidates"`
+	TaskID           string              `json:"task_id"`
+	BuildType        string              `json:"build_type"`
+	BuildID          string              `json:"build_id"`
+	Scheduler        string              `json:"scheduler"`
+	SchedulerParams  string              `json:"scheduler_params,omitempty"`
+	WorkerID         string              `json:"worker_id"`
+	WorkerArch       string              `json:"worker_arch"`
+	WorkerNativeArch string              `json:"worker_native_arch"`
+	WorkerCPUCores   int32               `json:"worker_cpu_cores"`
 	// WorkerCPUMillis is the cgroup-aware effective CPU limit in
 	// milli-cores (0 = no cgroup limit detected, i.e. WorkerCPUCores is
 	// the true value). Logged separately from WorkerCPUCores — which
@@ -71,6 +77,25 @@ type TaskLogRecord struct {
 	WasExploration   bool    `json:"was_exploration"`
 }
 
+// DispatchCandidate is a worker's state in the cluster just before selection.
+type DispatchCandidate struct {
+	Address     string `json:"address"`
+	Active      int32  `json:"active"`
+	MaxParallel int32  `json:"max_parallel"`
+	CPUMillis   int32  `json:"cpu_millis"`
+	Healthy     bool   `json:"healthy"`
+}
+
+// InjectedEvent is written in the same stream as completed tasks.
+type InjectedEvent struct {
+	TS            time.Time `json:"ts"`
+	Event         string    `json:"event"`
+	Kind          string    `json:"kind"`
+	Target        string    `json:"target"`
+	DispatchCount int64     `json:"dispatch_count"`
+	Detail        string    `json:"detail"`
+}
+
 // NewTaskLogger opens a JSON Lines log file. An empty path or "stdout"
 // directs output to os.Stdout.
 func NewTaskLogger(path string) (*TaskLogger, error) {
@@ -93,6 +118,19 @@ func (l *TaskLogger) Log(r *TaskLogRecord) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	_ = json.NewEncoder(l.w).Encode(r)
+}
+
+// LogInjectedEvent serializes an experiment event with task records.
+func (l *TaskLogger) LogInjectedEvent(kind, target string, dispatchCount int64, detail string) error {
+	if l == nil || l.w == nil {
+		return fmt.Errorf("failed to log injected event: task logger unavailable")
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return json.NewEncoder(l.w).Encode(InjectedEvent{
+		TS: time.Now().UTC(), Event: "injected_event", Kind: kind,
+		Target: target, DispatchCount: dispatchCount, Detail: detail,
+	})
 }
 
 // Close releases the underlying file when one was opened. Idempotent.

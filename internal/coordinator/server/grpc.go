@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"net"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -102,6 +103,9 @@ type dispatchResult struct {
 	worker           *registry.WorkerInfo
 	info             scheduler.DispatchInfo
 	activeAtDispatch int32
+	seq              int64
+	dispatchTS       time.Time
+	candidates       []DispatchCandidate
 	err              error
 }
 
@@ -111,17 +115,72 @@ type dispatchResult struct {
 // in Stop(). See dispatchRequest's doc comment for why this exists.
 func (s *Server) dispatchLoop() {
 	for req := range s.dispatchCh {
+		candidates := s.snapshotCandidates(req.buildType, req.arch, req.clientOS)
 		worker, info, err := scheduler.SelectWith(s.scheduler, req.buildType, req.arch, req.clientOS, req.ctx)
-		var activeAtDispatch int32
+		result := dispatchResult{worker: worker, info: info, candidates: candidates, err: err}
 		if err == nil {
 			// Read-then-book, both on this single goroutine: no other
 			// goroutine can interleave a SelectWith between this read
 			// and the IncrementTasks call below, because dispatchLoop
 			// is the only caller of either for the Compile() path.
-			activeAtDispatch = worker.ActiveTasks
-			s.registry.IncrementTasks(worker.ID)
+			result.activeAtDispatch = worker.ActiveTasks
+			if err = s.registry.IncrementTasks(worker.ID); err != nil {
+				result.err = err
+			} else {
+				result.seq = atomic.AddInt64(&s.dispatchCount, 1)
+				result.dispatchTS = time.Now().UTC()
+				metrics.Default().DispatchDecisions.Inc()
+			}
 		}
-		req.result <- dispatchResult{worker: worker, info: info, activeAtDispatch: activeAtDispatch, err: err}
+		req.result <- result
+	}
+}
+
+// snapshotCandidates includes unhealthy capability matches so their health is
+// visible, and applies the scheduler's same-OS-or-Docker predicate.
+func (s *Server) snapshotCandidates(buildType pb.BuildType, arch pb.Architecture, clientOS string) []DispatchCandidate {
+	workers := s.registry.List()
+	result := make([]DispatchCandidate, 0, len(workers))
+	for _, worker := range workers {
+		if !matchesDispatchCapability(worker.Capabilities, buildType, arch) {
+			continue
+		}
+		if clientOS != "" && worker.Capabilities.Os != clientOS && !worker.Capabilities.DockerAvailable {
+			continue
+		}
+		result = append(result, DispatchCandidate{
+			Address: worker.Address, Active: worker.ActiveTasks,
+			MaxParallel: worker.MaxParallel, CPUMillis: worker.Capabilities.CpuMillis,
+			Healthy: worker.IsHealthy(s.config.HeartbeatTTL),
+		})
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Address < result[j].Address })
+	return result
+}
+
+// matchesDispatchCapability mirrors registry.matchesCapability for the
+// snapshot. The registry's ListByCapability omits unhealthy workers.
+func matchesDispatchCapability(caps *pb.WorkerCapabilities, buildType pb.BuildType, arch pb.Architecture) bool {
+	if caps == nil {
+		return false
+	}
+	if arch != pb.Architecture_ARCH_UNSPECIFIED && caps.NativeArch != arch &&
+		!caps.DockerAvailable && (caps.Cpp == nil || !caps.Cpp.CrossCompile) {
+		return false
+	}
+	switch buildType {
+	case pb.BuildType_BUILD_TYPE_CPP:
+		return caps.Cpp != nil && len(caps.Cpp.Compilers) > 0
+	case pb.BuildType_BUILD_TYPE_GO:
+		return caps.Go != nil
+	case pb.BuildType_BUILD_TYPE_RUST:
+		return caps.Rust != nil
+	case pb.BuildType_BUILD_TYPE_NODEJS:
+		return caps.Nodejs != nil
+	case pb.BuildType_BUILD_TYPE_FLUTTER:
+		return caps.Flutter != nil
+	default:
+		return true
 	}
 }
 
@@ -135,6 +194,11 @@ func (s *Server) dispatchLoop() {
 // see Stop()'s comment for why this can't just rely on the gRPC
 // server's GracefulStop() to provide that guarantee.
 func (s *Server) dispatch(buildType pb.BuildType, arch pb.Architecture, clientOS string, ctx scheduler.TaskContext) (*registry.WorkerInfo, scheduler.DispatchInfo, int32, error) {
+	res := s.dispatchWithMetadata(buildType, arch, clientOS, ctx)
+	return res.worker, res.info, res.activeAtDispatch, res.err
+}
+
+func (s *Server) dispatchWithMetadata(buildType pb.BuildType, arch pb.Architecture, clientOS string, ctx scheduler.TaskContext) dispatchResult {
 	s.dispatchWG.Add(1)
 	defer s.dispatchWG.Done()
 
@@ -146,8 +210,15 @@ func (s *Server) dispatch(buildType pb.BuildType, arch pb.Architecture, clientOS
 		result:    make(chan dispatchResult, 1),
 	}
 	s.dispatchCh <- &req
-	res := <-req.result
-	return res.worker, res.info, res.activeAtDispatch, res.err
+	return <-req.result
+}
+
+// Dispatches returns the number of booked C/C++ dispatch attempts.
+func (s *Server) Dispatches() int64 { return atomic.LoadInt64(&s.dispatchCount) }
+
+// LogInjectedEvent writes an experiment event to the coordinator task log.
+func (s *Server) LogInjectedEvent(kind, target string, dispatchCount int64, detail string) error {
+	return s.taskLogger.LogInjectedEvent(kind, target, dispatchCount, detail)
 }
 
 // signalDispatchCapacity wakes every Compile() call waiting in the
@@ -475,6 +546,7 @@ type Server struct {
 	dispatchSignalMu sync.Mutex
 	dispatchSignal   chan struct{}
 	queuedCompiles   int64
+	dispatchCount    int64
 
 	activeTasks         int64
 	queuedTasks         int64
@@ -851,6 +923,9 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 		queueTime        time.Duration
 		taskStartTime    time.Time
 		activeAtDispatch int32
+		dispatchSeq      int64
+		dispatchTS       time.Time
+		candidates       []DispatchCandidate
 	)
 	atomic.AddInt64(&s.activeTasks, 1)
 	defer atomic.AddInt64(&s.activeTasks, -1)
@@ -862,7 +937,8 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 		queueDeadline time.Time
 	)
 	for attempt := 1; ; attempt++ {
-		worker, dispatchInfo, activeAtDispatch, err = s.dispatch(pb.BuildType_BUILD_TYPE_CPP, req.TargetArch, clientOSFilter, taskCtx)
+		selection := s.dispatchWithMetadata(pb.BuildType_BUILD_TYPE_CPP, req.TargetArch, clientOSFilter, taskCtx)
+		worker, dispatchInfo, activeAtDispatch, err = selection.worker, selection.info, selection.activeAtDispatch, selection.err
 		if err != nil {
 			// dispatch() itself found no eligible worker — every worker is
 			// genuinely at MaxParallel right now (this is the schedulers'
@@ -948,6 +1024,7 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 			}, nil
 		}
 		tracing.AddEvent(ctx, "scheduler.select.done")
+		dispatchSeq, dispatchTS, candidates = selection.seq, selection.dispatchTS, selection.candidates
 		span.SetAttributes(tracing.AttrWorkerID.String(worker.ID))
 
 		// activeAtDispatch was captured inside dispatch(), before
@@ -1082,6 +1159,11 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 		s.taskLogger.Log(&TaskLogRecord{
 			TS:                          time.Now().UTC(),
 			Event:                       "task_completed",
+			DispatchSeq:                 dispatchSeq,
+			DispatchTS:                  dispatchTS,
+			ReceivedTS:                  start.UTC(),
+			WorkerAddress:               worker.Address,
+			Candidates:                  candidates,
 			TaskID:                      req.TaskId,
 			BuildType:                   "cpp",
 			BuildID:                     buildID,

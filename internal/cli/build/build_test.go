@@ -3,16 +3,77 @@ package build
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"google.golang.org/grpc"
+
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 	"github.com/h3nr1-d14z/hybridgrid/internal/compiler"
 	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/client"
 )
+
+type captureCompileServer struct {
+	pb.UnimplementedBuildServiceServer
+	requests chan *pb.CompileRequest
+}
+
+func (s *captureCompileServer) Compile(_ context.Context, req *pb.CompileRequest) (*pb.CompileResponse, error) {
+	s.requests <- req
+	return &pb.CompileResponse{Status: pb.TaskStatus_STATUS_COMPLETED}, nil
+}
+
+func TestCompileRemote_BuildIDPropagated(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	capture := &captureCompileServer{requests: make(chan *pb.CompileRequest, 4)}
+	grpcServer := grpc.NewServer()
+	pb.RegisterBuildServiceServer(grpcServer, capture)
+	go func() { _ = grpcServer.Serve(listener) }()
+	defer grpcServer.Stop()
+	grpcClient, err := client.New(client.Config{Address: listener.Addr().String(), Insecure: true, Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer grpcClient.Close()
+	svc := &Service{client: grpcClient, maxRetries: 1}
+	req := &Request{TaskID: "task", SourceFile: "source.c", Args: &compiler.ParsedArgs{Compiler: "gcc"},
+		TargetArch: pb.Architecture_ARCH_X86_64, Timeout: time.Second}
+	for _, tc := range []struct {
+		name, buildID string
+	}{
+		{"generated", ""}, {"environment", "my-build-42"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HG_BUILD_ID", tc.buildID)
+			for _, raw := range []bool{false, true} {
+				var err error
+				if raw {
+					_, err = svc.compileRemoteRaw(context.Background(), req, []byte("int x;"), nil)
+				} else {
+					_, err = svc.compileRemotePreprocessed(context.Background(), req, []byte("int x;"))
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				got := <-capture.requests
+				if tc.buildID != "" && got.BuildId != tc.buildID {
+					t.Errorf("BuildId=%q, want %q", got.BuildId, tc.buildID)
+				}
+				if tc.buildID == "" && !strings.HasPrefix(got.BuildId, "build-") {
+					t.Errorf("generated BuildId=%q", got.BuildId)
+				}
+			}
+		})
+	}
+}
 
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
