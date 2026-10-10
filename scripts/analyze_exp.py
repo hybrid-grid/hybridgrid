@@ -25,6 +25,7 @@ BOOT_N = 10000
 METRICS = (
     "makespan_s", "skip_idle_all", "skip_idle_given_idle", "strongest_idle",
     "free_slot_skip_all", "free_slot_skip_given_free", "strongest_free_slot",
+    "had_idle_share", "had_free_share",
     "drift_pre_share", "drift_pre_all_share", "drift_post_share",
     "drift_pre_n", "drift_pre_all_n", "drift_post_n",
     "drift_post_early_share", "drift_post_late_share",
@@ -126,7 +127,8 @@ def _share(tasks, target):
 def candidate_metrics(tasks):
     """Exact snapshot-based idle and free-slot rates, or NA for old logs."""
     names = ("skip_idle_all", "skip_idle_given_idle", "strongest_idle",
-             "free_slot_skip_all", "free_slot_skip_given_free", "strongest_free_slot")
+             "free_slot_skip_all", "free_slot_skip_given_free", "strongest_free_slot",
+             "had_idle_share", "had_free_share")
     na = dict.fromkeys(names, math.nan)
     if not tasks:
         return na
@@ -164,7 +166,9 @@ def candidate_metrics(tasks):
             "strongest_idle": strongest_idle / idle_n if idle_n else math.nan,
             "free_slot_skip_all": skipped_free / count,
             "free_slot_skip_given_free": skipped_free / free_n if free_n else math.nan,
-            "strongest_free_slot": strongest_free / free_n if free_n else math.nan}
+            "strongest_free_slot": strongest_free / free_n if free_n else math.nan,
+            "had_idle_share": idle_n / count,
+            "had_free_share": free_n / count}
 
 
 def time_to_adapt(post, target, reference_share, window=20, factor=0.5,

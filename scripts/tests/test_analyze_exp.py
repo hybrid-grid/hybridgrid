@@ -63,6 +63,19 @@ class MetricTests(unittest.TestCase):
         self.assertAlmostEqual(metrics["strongest_idle"], 2 / 3)  # w3 ties w2
         self.assertEqual(metrics["free_slot_skip_all"], 0.0)
 
+    def test_had_idle_and_free_shares(self):
+        tasks = [task(candidates=[{"address": "w1", "active": active,
+                                   "max_parallel": 2, "cpu_millis": 1000}])
+                 for active in (0, 1, 1, 2)]
+        metrics = analyze.candidate_metrics(tasks)
+        self.assertEqual(metrics["had_idle_share"], 0.25)
+        self.assertEqual(metrics["had_free_share"], 0.75)
+
+    def test_missing_candidates_has_na_shares(self):
+        metrics = analyze.candidate_metrics([{"worker_address": "w1"}])
+        self.assertTrue(math.isnan(metrics["had_idle_share"]))
+        self.assertTrue(math.isnan(metrics["had_free_share"]))
+
     def test_no_idle_candidate_conditional_is_na(self):
         candidates = [{"address": "w1", "active": 1, "max_parallel": 2,
                        "cpu_millis": 1000}]
@@ -79,11 +92,14 @@ class MetricTests(unittest.TestCase):
         ]
         metrics = analyze.candidate_metrics([task("w1", candidates=candidates)])
         self.assertEqual(metrics["skip_idle_all"], 0)
+        self.assertEqual(metrics["had_idle_share"], 0)
+        self.assertEqual(metrics["had_free_share"], 1)
         self.assertTrue(math.isnan(metrics["skip_idle_given_idle"]))
         self.assertEqual(metrics["strongest_free_slot"], 1)
         candidates[1]["healthy"] = True
         metrics = analyze.candidate_metrics([task("w1", candidates=candidates)])
         self.assertEqual(metrics["skip_idle_all"], 1)
+        self.assertEqual(metrics["had_idle_share"], 1)
         self.assertEqual(metrics["strongest_free_slot"], 0)
         candidates[0]["healthy"] = False
         metrics = analyze.candidate_metrics([task("w1", candidates=candidates)])
@@ -249,6 +265,14 @@ class InputTests(unittest.TestCase):
             self.assertIn("round 2", dropped[0])
             self.assertEqual(analyze.main([str(root), "--out", str(root / "analysis"),
                                            "--strict"]), 2)
+            for name in ("had_idle_share", "had_free_share"):
+                self.assertIn(name, analyze.METRICS)
+            with (root / "analysis" / "cells.csv").open(newline="", encoding="utf-8") as handle:
+                self.assertTrue({"had_idle_share", "had_free_share"}.issubset(
+                    csv.DictReader(handle).fieldnames))
+            summary = (root / "analysis" / "summary.md").read_text(encoding="utf-8")
+            self.assertIn("## had_idle_share", summary)
+            self.assertIn("## had_free_share", summary)
 
     def test_old_format_is_na(self):
         with tempfile.TemporaryDirectory() as directory:
