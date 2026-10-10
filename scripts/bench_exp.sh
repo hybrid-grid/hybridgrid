@@ -256,7 +256,9 @@ start_stress() {
     compose exec -d -T "$DRIFT_TARGET" stress-ng --cpu "$DRIFT_CPU" || return 1
     for try in 1 2 3 4 5 6 7 8 9 10; do
         if compose exec -T "$DRIFT_TARGET" pgrep -x stress-ng >/dev/null 2>&1; then
-            post_event drift_on "$count" 'stress_started' || return 1
+            # Onset = counter once stress-ng is confirmed running; docker exec
+            # takes ~0.5-1 s on Docker Desktop, so the trigger reading is early.
+            post_event drift_on "$(dispatch_count 2>/dev/null || printf '%s' "$count")" "stress_started trigger=$count" || return 1
             return 0
         fi
         sleep 0.2
@@ -267,7 +269,7 @@ stop_stress_phase() {
     local count=$1
     if compose exec -T "$DRIFT_TARGET" pgrep -x stress-ng >/dev/null 2>&1; then
         compose exec -T "$DRIFT_TARGET" pkill -x stress-ng || return 1
-        post_event drift_off "$count" 'stress_stopped' || return 1
+        post_event drift_off "$(dispatch_count 2>/dev/null || printf '%s' "$count")" "stress_stopped trigger=$count" || return 1
     fi
 }
 inject_drift() {
