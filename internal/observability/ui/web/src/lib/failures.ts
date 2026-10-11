@@ -25,9 +25,13 @@ export function isFailedTask(task: TaskInfo): boolean {
   return tone === 'failed' || tone === 'timeout'
 }
 
+// Raw-source compiles run in a per-task temp dir on the worker
+// (…/hg-worker-task-<id>-<n>/main.c); that prefix is noise to a reader.
+const WORKER_TEMP_DIR = /^.*\/hg-worker-task-[^/]+\//
+
 export function parseLocation(message: string): FailureLocation | undefined {
   const match = LOCATION_PREFIX.exec(message)
-  return match ? { file: match[1], line: Number(match[2]) } : undefined
+  return match ? { file: match[1].replace(WORKER_TEMP_DIR, ''), line: Number(match[2]) } : undefined
 }
 
 /**

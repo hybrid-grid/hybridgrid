@@ -188,3 +188,42 @@ function packSlots(rows: TimelineRow[], now: number): TimelineRow[][] {
   }
   return slots
 }
+
+export interface ActivityWindow {
+  start: number
+  end: number
+  taskCount: number
+}
+
+// Idle time longer than this splits activity into separate bursts.
+export const BURST_GAP_MS = 30_000
+
+/**
+ * Splits task activity into bursts separated by idle gaps. Builds that
+ * take seconds but run minutes apart would otherwise share one axis and
+ * be squeezed into slivers at its edges. Newest burst first.
+ */
+export function activityBursts(tasks: TaskInfo[], now: number, gapMs = BURST_GAP_MS): ActivityWindow[] {
+  const intervals = tasks
+    .filter((task) => task.started_at_ms > 0)
+    .map((task) => ({ start: taskQueueStart(task), end: taskRunEnd(task, now) }))
+    .sort((a, b) => a.start - b.start)
+
+  const bursts: ActivityWindow[] = []
+  for (const interval of intervals) {
+    const last = bursts.at(-1)
+    if (last && interval.start - last.end <= gapMs) {
+      bursts[bursts.length - 1] = { start: last.start, end: Math.max(last.end, interval.end), taskCount: last.taskCount + 1 }
+    } else {
+      bursts.push({ start: interval.start, end: interval.end, taskCount: 1 })
+    }
+  }
+  return bursts.reverse()
+}
+
+/** Tasks whose queue-or-run interval overlaps the window. */
+export function tasksInWindow(tasks: TaskInfo[], window: ActivityWindow, now: number): TaskInfo[] {
+  return tasks.filter(
+    (task) => task.started_at_ms > 0 && taskQueueStart(task) <= window.end && taskRunEnd(task, now) >= window.start,
+  )
+}

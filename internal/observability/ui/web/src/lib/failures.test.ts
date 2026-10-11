@@ -24,6 +24,11 @@ describe('parseLocation', () => {
     expect(parseLocation("src/a.cc:142:18: error: no member named 'span'")).toEqual({ file: 'src/a.cc', line: 142 })
   })
 
+  it('strips the worker temp directory from raw-source paths', () => {
+    const message = "/var/folders/yv/T/hg-worker-task-7bbe3ad0e9ec9efa-6000-2910362472/codec_09.c:3:10: fatal error: 'common.h' file not found"
+    expect(parseLocation(message)).toEqual({ file: 'codec_09.c', line: 3 })
+  })
+
   it('returns undefined for messages without a location', () => {
     expect(parseLocation('ld: undefined reference to `foo`')).toBeUndefined()
   })

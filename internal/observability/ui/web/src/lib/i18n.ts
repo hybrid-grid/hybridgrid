@@ -97,6 +97,8 @@ const en: Record<string, Record<string, string>> = {
     viewAllBuilds: 'All builds',
     recentBuildsEyebrow: 'Recent',
     recentBuildsTitle: 'Latest builds',
+    clusterScopeLatest: 'Latest burst',
+    clusterScopeAll: 'All ({n} bursts)',
   },
   builds: {
     eyebrow: 'History',
@@ -396,6 +398,8 @@ const vi: typeof en = {
     viewAllBuilds: 'Tất cả build',
     recentBuildsEyebrow: 'Gần đây',
     recentBuildsTitle: 'Build mới nhất',
+    clusterScopeLatest: 'Đợt gần nhất',
+    clusterScopeAll: 'Tất cả ({n} đợt)',
   },
   builds: {
     eyebrow: 'Lịch sử',

@@ -1,9 +1,10 @@
 import { useNavigate } from '@tanstack/react-router'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
+import { Segmented } from '@/components/FilterControls'
 import { TimelineTrack } from '@/components/TimelineTrack'
 import { useNow } from '@/hooks/useNow'
 import { useT } from '@/lib/i18n'
-import { layoutCluster, type ClusterLane } from '@/lib/timeline'
+import { activityBursts, layoutCluster, tasksInWindow, type ClusterLane } from '@/lib/timeline'
 import type { TaskInfo, WorkerInfo } from '@/lib/types'
 import { cn, formatClock } from '@/lib/utils'
 
@@ -22,7 +23,15 @@ export function ClusterActivity({ tasks, workers }: ClusterActivityProps) {
   const t = useT()
   const navigate = useNavigate()
   const now = useNow(1000)
-  const layout = useMemo(() => layoutCluster(tasks, workers, now), [tasks, workers, now])
+  const [scope, setScope] = useState<'latest' | 'all'>('latest')
+  const bursts = useMemo(() => activityBursts(tasks, now), [tasks, now])
+  // Default to the newest burst: builds seconds long but minutes apart
+  // would otherwise be squeezed into slivers at the edges of one axis.
+  const visibleTasks = useMemo(
+    () => (scope === 'latest' && bursts.length > 1 ? tasksInWindow(tasks, bursts[0], now) : tasks),
+    [scope, bursts, tasks, now],
+  )
+  const layout = useMemo(() => layoutCluster(visibleTasks, workers, now), [visibleTasks, workers, now])
   const dispatchedCount = layout.lanes.reduce((sum, lane) => sum + lane.taskCount, 0)
 
   if (dispatchedCount === 0) {
@@ -47,6 +56,17 @@ export function ClusterActivity({ tasks, workers }: ClusterActivityProps) {
           <span className="font-tabular text-(--color-status-timeout)">
             {t('overview.clusterUndispatched', { n: layout.undispatched })}
           </span>
+        )}
+        {bursts.length > 1 && (
+          <Segmented
+            label={t('overview.clusterActivityTitle')}
+            value={scope}
+            onChange={setScope}
+            options={[
+              { value: 'latest', label: t('overview.clusterScopeLatest') },
+              { value: 'all', label: t('overview.clusterScopeAll', { n: bursts.length }) },
+            ]}
+          />
         )}
         <Legend />
       </div>

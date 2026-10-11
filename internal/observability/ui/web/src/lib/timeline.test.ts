@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { layoutCluster, layoutTimeline, peakConcurrentTasks, taskToneClass } from './timeline'
+import { activityBursts, layoutCluster, layoutTimeline, peakConcurrentTasks, taskToneClass, tasksInWindow } from './timeline'
 import type { TaskInfo, WorkerInfo } from './types'
 
 function task(id: string, startedAtMs: number, completedAtMs?: number, durationMs?: number): TaskInfo {
@@ -114,5 +114,29 @@ describe('layoutCluster', () => {
     expect(layout.ticks).toHaveLength(5)
     expect(layout.ticks[0]).toBe(layout.windowStart)
     expect(layout.ticks.at(-1)).toBe(layout.windowEnd)
+  })
+})
+
+describe('activityBursts', () => {
+  it('splits activity on idle gaps and returns the newest burst first', () => {
+    const tasks = [task('a', 1_000, 2_000), task('b', 1_500, 2_500), task('c', 100_000, 101_000)]
+    const bursts = activityBursts(tasks, 200_000, 30_000)
+
+    expect(bursts.map((b) => [b.start, b.end, b.taskCount])).toEqual([
+      [100_000, 101_000, 1],
+      [1_000, 2_500, 2],
+    ])
+  })
+
+  it('keeps a running task inside the current burst', () => {
+    const running = { ...task('live', 5_000), status: 'running' }
+    expect(activityBursts([running], 9_000)[0].end).toBe(9_000)
+  })
+})
+
+describe('tasksInWindow', () => {
+  it('selects tasks overlapping the window', () => {
+    const tasks = [task('a', 1_000, 2_000), task('c', 100_000, 101_000)]
+    expect(tasksInWindow(tasks, { start: 90_000, end: 110_000, taskCount: 1 }, 200_000).map((t) => t.id)).toEqual(['c'])
   })
 })
