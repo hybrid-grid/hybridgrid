@@ -106,7 +106,10 @@ func (s *Service) Close() error {
 
 // Request represents a build request.
 type Request struct {
-	TaskID     string
+	TaskID string
+	// BuildID groups this compile with the other translation units of one
+	// logical build (HG_BUILD_ID). Empty means "not part of a build".
+	BuildID    string
 	SourceFile string
 	OutputFile string
 	Args       *compiler.ParsedArgs
@@ -383,9 +386,11 @@ func getClientArch() pb.Architecture {
 // compileRemotePreprocessed sends preprocessed source to a remote worker.
 // Preprocessed source is self-contained (all #includes resolved), so any worker
 // can compile it, even on a different OS via Docker.
-func (s *Service) compileRemotePreprocessed(ctx context.Context, req *Request, preprocessed []byte) (*remoteResult, error) {
-	compileReq := &pb.CompileRequest{
+// newPreprocessedRequest builds the wire request for a preprocessed compile.
+func (s *Service) newPreprocessedRequest(req *Request, preprocessed []byte) *pb.CompileRequest {
+	return &pb.CompileRequest{
 		TaskId:             req.TaskID,
+		BuildId:            req.BuildID,
 		Compiler:           req.Args.Compiler,
 		CompilerArgs:       s.buildRemoteArgs(req.Args),
 		PreprocessedSource: preprocessed,
@@ -395,6 +400,10 @@ func (s *Service) compileRemotePreprocessed(ctx context.Context, req *Request, p
 		ClientOs:           getClientOS(),
 		ClientArch:         getClientArch(),
 	}
+}
+
+func (s *Service) compileRemotePreprocessed(ctx context.Context, req *Request, preprocessed []byte) (*remoteResult, error) {
+	compileReq := s.newPreprocessedRequest(req, preprocessed)
 
 	var lastErr error
 	delay := s.retryDelay
@@ -445,9 +454,11 @@ func (s *Service) compileRemotePreprocessed(ctx context.Context, req *Request, p
 }
 
 // compileRemoteRaw sends raw source to a remote worker for cross-compilation.
-func (s *Service) compileRemoteRaw(ctx context.Context, req *Request, rawSource []byte, includeFiles map[string][]byte) (*remoteResult, error) {
-	compileReq := &pb.CompileRequest{
+// newRawRequest builds the wire request for a raw-source compile.
+func (s *Service) newRawRequest(req *Request, rawSource []byte, includeFiles map[string][]byte) *pb.CompileRequest {
+	return &pb.CompileRequest{
 		TaskId:         req.TaskID,
+		BuildId:        req.BuildID,
 		Compiler:       req.Args.Compiler,
 		CompilerArgs:   s.buildRemoteArgsForRaw(req.Args),
 		RawSource:      rawSource,
@@ -458,6 +469,10 @@ func (s *Service) compileRemoteRaw(ctx context.Context, req *Request, rawSource 
 		ClientOs:       getClientOS(),
 		ClientArch:     getClientArch(),
 	}
+}
+
+func (s *Service) compileRemoteRaw(ctx context.Context, req *Request, rawSource []byte, includeFiles map[string][]byte) (*remoteResult, error) {
+	compileReq := s.newRawRequest(req, rawSource, includeFiles)
 
 	var lastErr error
 	delay := s.retryDelay

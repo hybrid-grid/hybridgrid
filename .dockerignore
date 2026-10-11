@@ -18,6 +18,9 @@ dist/
 *.so
 *.dylib
 
+# Frontend deps/build output (rebuilt fresh in the ui-builder stage)
+node_modules/
+
 # Test artifacts
 coverage.out
 coverage.html

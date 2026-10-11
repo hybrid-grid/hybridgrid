@@ -1,0 +1,29 @@
+---
+const lines = [
+  { text: '$ hgbuild make -j8', tone: 'prompt' },
+  { text: '[cache]  main.c → main.o (0.01s)', tone: 'signal' },
+  { text: '[remote] utils.c → utils.o (1.18s, worker-2a7646d)', tone: 'muted' },
+  { text: '[remote] parser.c → parser.o (1.34s, worker-a80f574)', tone: 'muted' },
+  { text: '[local]  fallback.c → fallback.o (2.02s, fallback)', tone: 'timeout' },
+  { text: '[remote] render.c → render.o (0.97s, worker-e54cf13)', tone: 'muted' },
+  { text: '6 files compiled in 2.1s (3 workers, 1 cache hit)', tone: 'signal' },
+];
+
+const toneClass: Record<string, string> = {
+  prompt: 'text-ink',
+  signal: 'text-signal',
+  muted: 'text-ink-secondary',
+  timeout: 'text-status-timeout',
+};
+---
+
+<div class="w-full max-w-xl overflow-hidden rounded-xl border border-hairline-strong bg-surface shadow-[0_20px_60px_rgba(0,0,0,0.45)]">
+  <div class="flex items-center gap-1.5 border-b border-hairline px-4 py-2.5">
+    <span class="h-2.5 w-2.5 rounded-full bg-status-failed/70"></span>
+    <span class="h-2.5 w-2.5 rounded-full bg-status-timeout/70"></span>
+    <span class="h-2.5 w-2.5 rounded-full bg-signal/70"></span>
+  </div>
+  <pre class="overflow-x-auto p-4 font-mono text-[12.5px] leading-relaxed"><code>{lines.map((line) => (
+    <span class={`block ${toneClass[line.tone]}`}>{line.text}</span>
+  ))}</code></pre>
+</div>

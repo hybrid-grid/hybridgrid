@@ -1,6 +1,21 @@
 # syntax=docker/dockerfile:1.4
 
 # =============================================================================
+# Stage 0: UI Builder - Builds the dashboard's React frontend
+# =============================================================================
+FROM node:20-alpine AS ui-builder
+
+WORKDIR /app/internal/observability/ui/web
+
+# Copy package manifests first for better layer caching
+COPY internal/observability/ui/web/package.json internal/observability/ui/web/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --no-fund --no-audit
+
+COPY internal/observability/ui/web/ ./
+RUN npm run build
+
+# =============================================================================
 # Stage 1: Builder - Compiles all Go binaries
 # =============================================================================
 FROM golang:1.25-alpine AS builder
@@ -23,6 +38,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 # Copy source code
 COPY . .
+
+# Pull in the pre-built dashboard frontend so hg-dashboard's go:embed
+# directive (internal/observability/ui/server.go) has web/dist to embed
+COPY --from=ui-builder /app/internal/observability/ui/web/dist ./internal/observability/ui/web/dist
 
 # Build version info from git
 ARG VERSION=dev
@@ -135,7 +154,24 @@ ENTRYPOINT ["/usr/local/bin/hg-dashboard"]
 CMD ["serve"]
 
 # =============================================================================
-# Stage 6: All-in-one image (for development/testing)
+# Stage 6: hg-dashboard-web - Standalone frontend image
+# =============================================================================
+FROM nginxinc/nginx-unprivileged:1.27-alpine AS hg-dashboard-web
+
+ENV API_BACKEND_URL=http://hg-dashboard:8081 \
+    NGINX_ENVSUBST_FILTER=^API_BACKEND_URL$
+
+COPY --from=ui-builder /app/internal/observability/ui/web/dist /usr/share/nginx/html
+COPY --chmod=755 internal/observability/ui/web/docker/10-validate-backend.sh /docker-entrypoint.d/10-validate-backend.sh
+COPY internal/observability/ui/web/docker/default.conf.template /etc/nginx/templates/default.conf.template
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1
+
+# =============================================================================
+# Stage 7: All-in-one image (for development/testing)
 # =============================================================================
 FROM alpine:3.19 AS all-in-one
 

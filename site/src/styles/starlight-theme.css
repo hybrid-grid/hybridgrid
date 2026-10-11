@@ -1,0 +1,37 @@
+/*
+ * Hybrid-Grid docs theme: same phosphor-green "compile farm" identity as
+ * the product dashboard and landing page, reskinned onto Starlight's
+ * default component set instead of rebuilding docs UI from scratch.
+ */
+:root {
+  --sl-color-accent-low: #0d3323;
+  --sl-color-accent: #1f8f5c;
+  --sl-color-accent-high: #a8f5cd;
+  --sl-color-white: #f4f6f5;
+  --sl-color-gray-1: #eef1ef;
+  --sl-color-gray-2: #c3c9c6;
+  --sl-color-gray-3: #8d968f;
+  --sl-color-gray-4: #565f5a;
+  --sl-color-gray-5: #363f3a;
+  --sl-color-gray-6: #232a26;
+  --sl-color-gray-7: #181e1b;
+  --sl-color-black: #10140f;
+
+  --sl-font: ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --sl-font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #d3f3e3;
+  --sl-color-accent: #187a4e;
+  --sl-color-accent-high: #0d4a30;
+  --sl-color-white: #10140f;
+  --sl-color-gray-1: #232a26;
+  --sl-color-gray-2: #454e49;
+  --sl-color-gray-3: #6b746f;
+  --sl-color-gray-4: #9aa39d;
+  --sl-color-gray-5: #c7ccc9;
+  --sl-color-gray-6: #e7ebe8;
+  --sl-color-gray-7: #f3f5f4;
+  --sl-color-black: #ffffff;
+}

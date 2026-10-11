@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -27,7 +28,11 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/telemetry"
 )
 
-//go:embed assets/*
+// The SPA's built output. Run `npm run build` inside web/ (or `make
+// build-ui`) before `go build`/`go:embed` picks up web/dist — it is
+// gitignored generated output, not committed source.
+//
+//go:embed all:web/dist
 var assetsFS embed.FS
 
 // The dashboard's wire types live in internal/telemetry so the gRPC
@@ -145,10 +150,25 @@ func (s *Server) routes() http.Handler {
 
 	mux.HandleFunc("/ws", s.handleWebSocket)
 
-	assetsContent, _ := fs.Sub(assetsFS, "assets")
-	mux.Handle("/", http.FileServer(http.FS(assetsContent)))
+	assetsContent, _ := fs.Sub(assetsFS, "web/dist")
+	mux.Handle("/", spaHandler(assetsContent))
 
 	return mux
+}
+
+// spaHandler serves the built SPA, falling back to index.html for any
+// path that isn't a real file — the TanStack Router routes (/builds,
+// /builds/{id}, /workers, ...) are client-side only, so a hard
+// refresh or direct link on one of them has no matching file on disk.
+func spaHandler(content fs.FS) http.Handler {
+	fileServer := http.FileServer(http.FS(content))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := fs.Stat(content, strings.TrimPrefix(r.URL.Path, "/")); err != nil {
+			r = r.Clone(r.Context())
+			r.URL.Path = "/"
+		}
+		fileServer.ServeHTTP(w, r)
+	})
 }
 
 // Start brings up the WebSocket hub, opens the gRPC event stream that

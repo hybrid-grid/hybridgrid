@@ -122,6 +122,26 @@ docker compose up -d --scale worker=4
 open http://localhost:8080
 ```
 
+### Standalone Frontend Image
+
+Build the dashboard frontend as an independent static image:
+
+```bash
+docker build --target hg-dashboard-web -t hybridgrid-dashboard-web .
+```
+
+At runtime, set `API_BACKEND_URL` to the HTTP address of `hg-dashboard` (the service that exposes `/api/v1/*` and `/ws`), not the coordinator's gRPC port:
+
+```bash
+docker run --rm -p 3000:8080 \
+  -e API_BACKEND_URL=http://host.docker.internal:8081 \
+  hybridgrid-dashboard-web
+
+open http://localhost:3000
+```
+
+`API_BACKEND_URL` must be an `http://` or `https://` origin reachable from inside the container, without a path. On Linux, add `--add-host=host.docker.internal:host-gateway` when `hg-dashboard` runs directly on the host.
+
 ### Using Binaries
 
 ```bash

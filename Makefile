@@ -1,17 +1,27 @@
-.PHONY: all build clean test lint proto-gen install changelog run-coord run-worker run-dashboard
+.PHONY: all build build-ui clean test test-ui lint proto-gen install changelog run-coord run-worker run-dashboard
 
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "v0.0.0-dev")
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 GOBIN := $(shell go env GOPATH)/bin
+UI_DIR := internal/observability/ui/web
 
 all: build
 
-build:
+build: build-ui
 	@mkdir -p bin
 	go build $(LDFLAGS) -o bin/hgbuild ./cmd/hgbuild
 	go build $(LDFLAGS) -o bin/hg-coord ./cmd/hg-coord
 	go build $(LDFLAGS) -o bin/hg-worker ./cmd/hg-worker
 	go build $(LDFLAGS) -o bin/hg-dashboard ./cmd/hg-dashboard
+
+# Builds the dashboard's React frontend into web/dist, which
+# hg-dashboard's go:embed directive (internal/observability/ui/server.go)
+# picks up. Required before building/running hg-dashboard from source.
+build-ui:
+	@cd $(UI_DIR) && npm ci --no-fund --no-audit && npm run build
+
+test-ui:
+	@cd $(UI_DIR) && npm ci --no-fund --no-audit && npm test && npm run lint
 
 proto-gen:
 	@echo "Generating protobuf code..."
@@ -26,17 +36,17 @@ proto-install:
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
-test:
+test: build-ui
 	go test -v -race ./...
 
-test-coverage:
+test-coverage: build-ui
 	go test -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
 
-test-integration:
+test-integration: build-ui
 	INTEGRATION_TEST=1 go test -v ./test/integration/...
 
-lint:
+lint: build-ui
 	golangci-lint run
 
 clean:
@@ -55,7 +65,7 @@ run-coord:
 run-worker:
 	go run ./cmd/hg-worker serve
 
-run-dashboard:
+run-dashboard: build-ui
 	go run ./cmd/hg-dashboard serve
 
 changelog:
