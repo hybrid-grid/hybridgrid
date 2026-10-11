@@ -2,7 +2,10 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
+
+	"github.com/h3nr1-d14z/hybridgrid/internal/cli/taskid"
 )
 
 func TestFallbackEnabled_Default(t *testing.T) {
@@ -138,4 +141,39 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	noFallback = false
 	os.Exit(code)
+}
+
+func TestEnsureBuildSession(t *testing.T) {
+	tests := []struct {
+		name      string
+		env       []string
+		wantExact string
+	}{
+		{"keeps an explicit id", []string{"PATH=/bin", "HG_BUILD_ID=release-42"}, "release-42"},
+		{"generates one when missing", []string{"PATH=/bin"}, ""},
+		{"replaces an empty value", []string{"HG_BUILD_ID="}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := envValue(ensureBuildSession(tt.env), taskid.BuildIDEnvVar)
+			if tt.wantExact != "" && got != tt.wantExact {
+				t.Fatalf("HG_BUILD_ID = %q, want %q", got, tt.wantExact)
+			}
+			if tt.wantExact == "" && !strings.HasPrefix(got, "build-") {
+				t.Fatalf("HG_BUILD_ID = %q, want a generated build- id", got)
+			}
+		})
+	}
+}
+
+func TestWrappedBuildID(t *testing.T) {
+	t.Setenv(taskid.BuildIDEnvVar, "")
+	if got := wrappedBuildID(); got != "" {
+		t.Fatalf("without HG_BUILD_ID got %q, want empty so lone cc calls do not each become a build", got)
+	}
+
+	t.Setenv(taskid.BuildIDEnvVar, "demo-1")
+	if got := wrappedBuildID(); got != "demo-1" {
+		t.Fatalf("got %q, want demo-1", got)
+	}
 }

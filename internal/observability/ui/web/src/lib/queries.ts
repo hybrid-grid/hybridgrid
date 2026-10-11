@@ -59,3 +59,18 @@ export function useConsole(taskId: string | undefined) {
     refetchInterval: 4000,
   })
 }
+
+/**
+ * Deep task window for the Tasks, Failures, Cache and worker pages. The
+ * coordinator retains up to 20k tasks; 2k keeps the payload reasonable
+ * while covering many builds. Polled slower than the overview window.
+ */
+export const TASK_HISTORY_LIMIT = 2000
+
+export function useTaskHistory() {
+  return useQuery({
+    queryKey: queryKeys.tasks(TASK_HISTORY_LIMIT),
+    queryFn: () => api.tasks(TASK_HISTORY_LIMIT),
+    refetchInterval: 10_000,
+  })
+}

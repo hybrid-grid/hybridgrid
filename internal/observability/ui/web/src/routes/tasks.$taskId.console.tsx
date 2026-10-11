@@ -1,15 +1,24 @@
-import { createFileRoute, useRouter } from '@tanstack/react-router'
+import { createFileRoute, Link, useRouter } from '@tanstack/react-router'
 import { ArrowLeft } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Panel } from '@/components/Panel'
+import { ConsoleTabs } from '@/components/ConsoleTabs'
 import { PageHeader } from '@/components/PageHeader'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Panel } from '@/components/Panel'
+import { Button } from '@/components/ui/button'
 import { useT } from '@/lib/i18n'
-import { useConsole } from '@/lib/queries'
-import { cn } from '@/lib/utils'
+import { useConsole, useTasks } from '@/lib/queries'
+
+interface ConsoleSearch {
+  build?: string
+}
+
+// The console endpoint does not return the owning build, so fall back to
+// the recent-task window when the link that got here did not carry it.
+const TASK_LOOKUP_WINDOW = 200
 
 export const Route = createFileRoute('/tasks/$taskId/console')({
+  validateSearch: (search: Record<string, unknown>): ConsoleSearch => ({
+    build: typeof search.build === 'string' && search.build ? search.build : undefined,
+  }),
   component: TaskConsolePage,
 })
 
@@ -17,18 +26,30 @@ function TaskConsolePage() {
   const { taskId } = Route.useParams()
   const router = useRouter()
   const t = useT()
+  const { build: buildFromLink } = Route.useSearch()
   const { data, isLoading, isError } = useConsole(taskId)
+  const { data: recent } = useTasks(TASK_LOOKUP_WINDOW)
+  const buildId = buildFromLink ?? recent?.tasks.find((task) => task.id === taskId)?.build_id
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-4">
       <PageHeader
-        eyebrow={<span className="font-mono">{taskId}</span>}
+        eyebrow={<span className="font-mono normal-case tracking-normal">{taskId}</span>}
         title={t('console.title')}
         actions={
-          <Button variant="outline" size="sm" onClick={() => router.history.back()} className="gap-1.5">
-            <ArrowLeft className="h-3.5 w-3.5" />
-            {t('console.back')}
-          </Button>
+          buildId ? (
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/builds/$buildId" params={{ buildId }} search={{ task: taskId }}>
+                <ArrowLeft className="h-3.5 w-3.5" />
+                {t('console.backToBuild')}
+              </Link>
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" onClick={() => router.history.back()}>
+              <ArrowLeft className="h-3.5 w-3.5" />
+              {t('console.back')}
+            </Button>
+          )
         }
       />
 
@@ -40,46 +61,12 @@ function TaskConsolePage() {
       )}
 
       {data && (
-        <Panel padded={false}>
-          <Tabs defaultValue="stdout">
-            <div className="flex items-center justify-between border-b border-(--color-hairline) px-4 py-2">
-              <TabsList>
-                <TabsTrigger value="stdout">{t('buildDetail.stdout')}</TabsTrigger>
-                <TabsTrigger value="stderr">{t('buildDetail.stderr')}</TabsTrigger>
-              </TabsList>
-              {data.truncated && (
-                <span className="text-[10px] uppercase tracking-wide text-(--color-status-timeout)">
-                  {t('console.truncatedNote')}
-                </span>
-              )}
-            </div>
-            <TabsContent value="stdout">
-              <ConsolePane text={data.stdout} />
-            </TabsContent>
-            <TabsContent value="stderr">
-              <ConsolePane text={data.stderr} tone="failed" />
-            </TabsContent>
-          </Tabs>
+        <Panel padded={false} className="overflow-hidden">
+          <ConsoleTabs output={data} heightClass="h-[64vh]" />
         </Panel>
       )}
 
       <p className="text-[11px] text-(--color-ink-faint)">{t('console.provenance')}</p>
     </div>
-  )
-}
-
-function ConsolePane({ text, tone }: { text?: string; tone?: 'failed' }) {
-  const t = useT()
-  return (
-    <ScrollArea className="h-[60vh] bg-(--color-surface-inset)">
-      <pre
-        className={cn(
-          'whitespace-pre-wrap break-words p-4 font-mono text-[11px] leading-relaxed',
-          tone === 'failed' ? 'text-(--color-status-failed)' : 'text-(--color-ink-secondary)',
-        )}
-      >
-        {text || t('common.empty')}
-      </pre>
-    </ScrollArea>
   )
 }

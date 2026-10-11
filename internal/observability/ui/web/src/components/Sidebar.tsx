@@ -1,18 +1,21 @@
 import { Link } from '@tanstack/react-router'
-import { Boxes, GitBranch, LayoutGrid, Radio } from 'lucide-react'
+import { Boxes, Database, GitBranch, LayoutGrid, ListChecks, OctagonAlert, Radio } from 'lucide-react'
 import { useT } from '@/lib/i18n'
 
 const NAV_ITEMS = [
   { to: '/', labelKey: 'nav.overview', icon: LayoutGrid },
   { to: '/builds', labelKey: 'nav.builds', icon: GitBranch },
+  { to: '/tasks', labelKey: 'nav.tasks', icon: ListChecks },
+  { to: '/failures', labelKey: 'nav.failures', icon: OctagonAlert },
   { to: '/workers', labelKey: 'nav.workers', icon: Boxes },
+  { to: '/cache', labelKey: 'nav.cache', icon: Database },
 ] as const
 
 export function Sidebar() {
   const t = useT()
 
   return (
-    <aside className="flex h-full w-[208px] shrink-0 flex-col border-r border-(--color-hairline) bg-(--color-canvas)">
+    <aside className="hidden h-full w-[208px] md:flex shrink-0 flex-col border-r border-(--color-hairline) bg-(--color-canvas)">
       <div className="flex items-center gap-2 px-4 py-4">
         <Radio className="h-4 w-4 text-(--color-signal)" strokeWidth={2.25} />
         <span className="font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-(--color-ink)">
@@ -41,5 +44,29 @@ export function Sidebar() {
         {t('nav.brandSubtitle')}
       </div>
     </aside>
+  )
+}
+
+/** Below md the sidebar collapses into this icon row inside the header. */
+export function MobileNav() {
+  const t = useT()
+
+  return (
+    <nav className="flex items-center gap-0.5 md:hidden">
+      <Radio className="mr-2 h-4 w-4 text-(--color-signal)" strokeWidth={2.25} aria-hidden />
+      {NAV_ITEMS.map(({ to, labelKey, icon: Icon }) => (
+        <Link
+          key={to}
+          to={to}
+          activeOptions={{ exact: to === '/' }}
+          aria-label={t(labelKey)}
+          title={t(labelKey)}
+          className="flex h-8 w-8 items-center justify-center rounded-(--radius-sm) text-(--color-ink-muted) transition-colors hover:bg-(--color-canvas-raised) hover:text-(--color-ink)"
+          activeProps={{ className: 'bg-(--color-canvas-raised) text-(--color-signal)' }}
+        >
+          <Icon className="h-4 w-4" strokeWidth={2} />
+        </Link>
+      ))}
+    </nav>
   )
 }

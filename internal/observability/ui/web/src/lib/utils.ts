@@ -10,8 +10,9 @@ export function formatDuration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`
   const seconds = ms / 1000
   if (seconds < 60) return `${seconds.toFixed(1)}s`
-  const minutes = Math.floor(seconds / 60)
-  const remainder = Math.round(seconds % 60)
+  const totalSeconds = Math.round(seconds)
+  const minutes = Math.floor(totalSeconds / 60)
+  const remainder = totalSeconds % 60
   return `${minutes}m ${remainder}s`
 }
 
@@ -30,4 +31,15 @@ export function formatUptime(seconds: number): string {
   const days = Math.floor(hours / 24)
   const remHours = hours % 24
   return `${days}d ${remHours}h`
+}
+
+/** Wall-clock "14:03:27" for a Unix-milliseconds timestamp. */
+export function formatClock(ms: number | undefined): string {
+  if (!ms) return '—'
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+}
+
+export function formatPercent(ratio: number | undefined, digits = 0): string {
+  if (ratio === undefined || Number.isNaN(ratio)) return '—'
+  return `${(ratio * 100).toFixed(digits)}%`
 }

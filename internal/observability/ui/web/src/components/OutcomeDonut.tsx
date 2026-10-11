@@ -61,10 +61,10 @@ export function OutcomeDonut({ completed, failed, running, total }: OutcomeDonut
         })}
       </svg>
       <div className="flex flex-col gap-1 text-[11px]">
-        <LegendRow color="var(--color-status-success)" label={t('status.STATUS_COMPLETED')} value={completed} />
-        <LegendRow color="var(--color-status-failed)" label={t('status.STATUS_FAILED')} value={failed} />
-        <LegendRow color="var(--color-status-running)" label={t('status.STATUS_RUNNING')} value={running} />
-        <LegendRow color="var(--color-status-queued)" label={t('status.STATUS_QUEUED')} value={queued} />
+        <LegendRow color="var(--color-status-success)" label={t('status.success')} value={completed} />
+        <LegendRow color="var(--color-status-failed)" label={t('status.failed')} value={failed} />
+        <LegendRow color="var(--color-status-running)" label={t('status.running')} value={running} />
+        <LegendRow color="var(--color-status-queued)" label={t('status.queued')} value={queued} />
       </div>
     </div>
   )

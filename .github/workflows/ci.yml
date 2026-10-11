@@ -15,6 +15,7 @@ env:
   # and govulncheck scans the stdlib of the toolchain in use — three
   # patch releases of stdlib CVEs turned the Security Scan red.
   GO_VERSION: "1.25.13"
+  NODE_VERSION: "22"
 
 jobs:
   # ============================================
@@ -35,6 +36,21 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: internal/observability/ui/web/package-lock.json
+
+      - name: Test and build dashboard UI
+        working-directory: internal/observability/ui/web
+        run: |
+          npm ci --no-fund --no-audit
+          npm test
+          npm run lint
+          npm run build
 
       - name: Download dependencies
         run: go mod download
@@ -75,6 +91,19 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: internal/observability/ui/web/package-lock.json
+
+      - name: Build dashboard UI
+        working-directory: internal/observability/ui/web
+        run: |
+          npm ci --no-fund --no-audit
+          npm run build
 
       - name: Run go vet
         run: go vet ./...
@@ -160,6 +189,19 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: internal/observability/ui/web/package-lock.json
+
+      - name: Build dashboard UI
+        working-directory: internal/observability/ui/web
+        run: |
+          npm ci --no-fund --no-audit
+          npm run build
 
       - name: Run Gosec
         uses: securego/gosec@master

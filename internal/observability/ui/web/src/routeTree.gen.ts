@@ -10,9 +10,13 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as WorkersRouteImport } from './routes/workers'
+import { Route as CacheRouteImport } from './routes/cache'
+import { Route as FailuresRouteImport } from './routes/failures'
 import { Route as BuildsIndexRouteImport } from './routes/builds.index'
 import { Route as BuildsBuildIdRouteImport } from './routes/builds.$buildId'
+import { Route as TasksIndexRouteImport } from './routes/tasks.index'
+import { Route as WorkersIndexRouteImport } from './routes/workers.index'
+import { Route as WorkersWorkerIdRouteImport } from './routes/workers.$workerId'
 import { Route as TasksTaskIdConsoleRouteImport } from './routes/tasks.$taskId.console'
 
 const IndexRoute = IndexRouteImport.update({
@@ -20,9 +24,14 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const WorkersRoute = WorkersRouteImport.update({
-  id: '/workers',
-  path: '/workers',
+const CacheRoute = CacheRouteImport.update({
+  id: '/cache',
+  path: '/cache',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FailuresRoute = FailuresRouteImport.update({
+  id: '/failures',
+  path: '/failures',
   getParentRoute: () => rootRouteImport,
 } as any)
 const BuildsIndexRoute = BuildsIndexRouteImport.update({
@@ -35,6 +44,21 @@ const BuildsBuildIdRoute = BuildsBuildIdRouteImport.update({
   path: '/builds/$buildId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TasksIndexRoute = TasksIndexRouteImport.update({
+  id: '/tasks/',
+  path: '/tasks/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WorkersIndexRoute = WorkersIndexRouteImport.update({
+  id: '/workers/',
+  path: '/workers/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WorkersWorkerIdRoute = WorkersWorkerIdRouteImport.update({
+  id: '/workers/$workerId',
+  path: '/workers/$workerId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TasksTaskIdConsoleRoute = TasksTaskIdConsoleRouteImport.update({
   id: '/tasks/$taskId/console',
   path: '/tasks/$taskId/console',
@@ -43,51 +67,83 @@ const TasksTaskIdConsoleRoute = TasksTaskIdConsoleRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/workers': typeof WorkersRoute
+  '/cache': typeof CacheRoute
+  '/failures': typeof FailuresRoute
   '/builds/$buildId': typeof BuildsBuildIdRoute
+  '/workers/$workerId': typeof WorkersWorkerIdRoute
   '/builds/': typeof BuildsIndexRoute
+  '/tasks/': typeof TasksIndexRoute
+  '/workers/': typeof WorkersIndexRoute
   '/tasks/$taskId/console': typeof TasksTaskIdConsoleRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/workers': typeof WorkersRoute
+  '/cache': typeof CacheRoute
+  '/failures': typeof FailuresRoute
   '/builds/$buildId': typeof BuildsBuildIdRoute
+  '/workers/$workerId': typeof WorkersWorkerIdRoute
   '/builds': typeof BuildsIndexRoute
+  '/tasks': typeof TasksIndexRoute
+  '/workers': typeof WorkersIndexRoute
   '/tasks/$taskId/console': typeof TasksTaskIdConsoleRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/workers': typeof WorkersRoute
+  '/cache': typeof CacheRoute
+  '/failures': typeof FailuresRoute
   '/builds/$buildId': typeof BuildsBuildIdRoute
+  '/workers/$workerId': typeof WorkersWorkerIdRoute
   '/builds/': typeof BuildsIndexRoute
+  '/tasks/': typeof TasksIndexRoute
+  '/workers/': typeof WorkersIndexRoute
   '/tasks/$taskId/console': typeof TasksTaskIdConsoleRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/workers'
+    | '/cache'
+    | '/failures'
     | '/builds/$buildId'
+    | '/workers/$workerId'
     | '/builds/'
+    | '/tasks/'
+    | '/workers/'
     | '/tasks/$taskId/console'
   fileRoutesByTo: FileRoutesByTo
   to:
-    '/' | '/workers' | '/builds/$buildId' | '/builds' | '/tasks/$taskId/console'
+    | '/'
+    | '/cache'
+    | '/failures'
+    | '/builds/$buildId'
+    | '/workers/$workerId'
+    | '/builds'
+    | '/tasks'
+    | '/workers'
+    | '/tasks/$taskId/console'
   id:
     | '__root__'
     | '/'
-    | '/workers'
+    | '/cache'
+    | '/failures'
     | '/builds/$buildId'
+    | '/workers/$workerId'
     | '/builds/'
+    | '/tasks/'
+    | '/workers/'
     | '/tasks/$taskId/console'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  WorkersRoute: typeof WorkersRoute
+  CacheRoute: typeof CacheRoute
+  FailuresRoute: typeof FailuresRoute
   BuildsBuildIdRoute: typeof BuildsBuildIdRoute
+  WorkersWorkerIdRoute: typeof WorkersWorkerIdRoute
   BuildsIndexRoute: typeof BuildsIndexRoute
+  TasksIndexRoute: typeof TasksIndexRoute
+  WorkersIndexRoute: typeof WorkersIndexRoute
   TasksTaskIdConsoleRoute: typeof TasksTaskIdConsoleRoute
 }
 
@@ -100,11 +156,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/workers': {
-      id: '/workers'
-      path: '/workers'
-      fullPath: '/workers'
-      preLoaderRoute: typeof WorkersRouteImport
+    '/cache': {
+      id: '/cache'
+      path: '/cache'
+      fullPath: '/cache'
+      preLoaderRoute: typeof CacheRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/failures': {
+      id: '/failures'
+      path: '/failures'
+      fullPath: '/failures'
+      preLoaderRoute: typeof FailuresRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/builds/': {
@@ -121,6 +184,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BuildsBuildIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/tasks/': {
+      id: '/tasks/'
+      path: '/tasks'
+      fullPath: '/tasks/'
+      preLoaderRoute: typeof TasksIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/workers/': {
+      id: '/workers/'
+      path: '/workers'
+      fullPath: '/workers/'
+      preLoaderRoute: typeof WorkersIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/workers/$workerId': {
+      id: '/workers/$workerId'
+      path: '/workers/$workerId'
+      fullPath: '/workers/$workerId'
+      preLoaderRoute: typeof WorkersWorkerIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/tasks/$taskId/console': {
       id: '/tasks/$taskId/console'
       path: '/tasks/$taskId/console'
@@ -133,9 +217,13 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  WorkersRoute: WorkersRoute,
+  CacheRoute: CacheRoute,
+  FailuresRoute: FailuresRoute,
   BuildsBuildIdRoute: BuildsBuildIdRoute,
+  WorkersWorkerIdRoute: WorkersWorkerIdRoute,
   BuildsIndexRoute: BuildsIndexRoute,
+  TasksIndexRoute: TasksIndexRoute,
+  WorkersIndexRoute: WorkersIndexRoute,
   TasksTaskIdConsoleRoute: TasksTaskIdConsoleRoute,
 }
 export const routeTree = rootRouteImport

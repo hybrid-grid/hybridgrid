@@ -955,3 +955,36 @@ func TestService_Build_RemoteFailureFallsBack(t *testing.T) {
 		t.Fatalf("unexpected exit code %d: %s", result.ExitCode, result.Stderr)
 	}
 }
+
+func TestRemoteCompileRequests_CarryBuildID(t *testing.T) {
+	svc := &Service{}
+	req := &Request{
+		TaskID:     "task-1",
+		BuildID:    "build-abc",
+		SourceFile: "src/main.c",
+		Args:       &compiler.ParsedArgs{Compiler: "gcc", Flags: []string{"-O2"}},
+		TargetArch: pb.Architecture_ARCH_ARM64,
+		Timeout:    time.Minute,
+	}
+
+	tests := []struct {
+		name string
+		got  *pb.CompileRequest
+	}{
+		{"preprocessed", svc.newPreprocessedRequest(req, []byte("int x;"))},
+		{"raw", svc.newRawRequest(req, []byte("int x;"), nil)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.got.GetBuildId() != "build-abc" {
+				t.Errorf("BuildId = %q, want %q", tt.got.GetBuildId(), "build-abc")
+			}
+			if tt.got.GetTaskId() != "task-1" {
+				t.Errorf("TaskId = %q, want %q", tt.got.GetTaskId(), "task-1")
+			}
+			if tt.got.GetSourceFilename() != "main.c" {
+				t.Errorf("SourceFilename = %q, want %q", tt.got.GetSourceFilename(), "main.c")
+			}
+		})
+	}
+}

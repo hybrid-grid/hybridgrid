@@ -1,43 +1,51 @@
-# Astro Starter Kit: Minimal
+# Hybrid-Grid Website
 
-```sh
-npm create astro@latest -- --template minimal
+This directory contains the Hybrid-Grid landing page and documentation site. It is built with Astro 7, Starlight, and Tailwind CSS, independently from the Go binaries and the React operations dashboard.
+
+## Requirements
+
+- Node.js 22.12 or newer
+- npm
+
+## Development
+
+Install the locked dependencies:
+
+```bash
+cd site
+npm ci
 ```
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
+Start the local development server:
 
-## 🚀 Project Structure
-
-Inside of your Astro project, you'll see the following folders and files:
-
-```text
-/
-├── public/
-├── src/
-│   └── pages/
-│       └── index.astro
-└── package.json
+```bash
+npm run dev
 ```
 
-Astro looks for `.astro` or `.md` files in the `src/pages/` directory. Each page is exposed as a route based on its file name.
+The site is available at `http://localhost:4321` by default. When using the project’s Claude development workflow, start Astro in background mode as described in `CLAUDE.md`.
 
-There's nothing special about `src/components/`, but that's where we like to put any Astro/React/Vue/Svelte/Preact components.
+## Build and preview
 
-Any static assets, like images, can be placed in the `public/` directory.
+Create the production output in `site/dist`:
 
-## 🧞 Commands
+```bash
+npm run build
+```
 
-All commands are run from the root of the project, from a terminal:
+Preview that output locally:
 
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `npm install`             | Installs dependencies                            |
-| `npm run dev`             | Starts local dev server at `localhost:4321`      |
-| `npm run build`           | Build your production site to `./dist/`          |
-| `npm run preview`         | Preview your build locally, before deploying     |
-| `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `npm run astro -- --help` | Get help using the Astro CLI                     |
+```bash
+npm run preview
+```
 
-## 👀 Want to learn more?
+## Project structure
 
-Feel free to check [our documentation](https://docs.astro.build) or jump into our [Discord server](https://astro.build/chat).
+- `src/pages/index.astro` — landing page entry point.
+- `src/components/` — landing-page sections and shared Astro components.
+- `src/content/docs/` — Starlight documentation pages.
+- `src/styles/` — landing-page and Starlight theme styles.
+- `src/assets/` and `public/` — bundled and static assets.
+- `astro.config.mjs` — Starlight navigation, branding, social links, and Vite integrations.
+- `src/content.config.ts` — Starlight content collection configuration.
+
+When adding or moving documentation pages, update the sidebar in `astro.config.mjs` so navigation and content slugs remain aligned. Run `npm run build` before opening a pull request to catch broken links, invalid frontmatter, and type errors.

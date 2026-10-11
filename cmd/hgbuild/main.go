@@ -914,6 +914,7 @@ func runCompiler(defaultCompiler, envVar string, args []string) error {
 	// Build request
 	req := &build.Request{
 		TaskID:     taskid.NewTaskID(),
+		BuildID:    wrappedBuildID(),
 		SourceFile: parsed.InputFiles[0],
 		OutputFile: outputFile,
 		Args:       parsed,
@@ -1228,8 +1229,9 @@ func wrapBuildCommand(command string, args []string) error {
 		return err
 	}
 
-	// Build environment
-	env := os.Environ()
+	// Build environment. Every translation unit the wrapped tool compiles
+	// inherits one HG_BUILD_ID, so the coordinator groups them as one build.
+	env := ensureBuildSession(os.Environ())
 
 	// Set CC and CXX environment variables (for build systems that respect them)
 	env = setEnv(env, "CC", ccValue)
@@ -1303,6 +1305,37 @@ func createCompilerWrapper(dir, name, self, modeEnv string) (string, error) {
 }
 
 // setEnv sets an environment variable in the env slice.
+// ensureBuildSession returns env with HG_BUILD_ID set, generating a fresh
+// session id when the caller did not export one.
+func ensureBuildSession(env []string) []string {
+	if envValue(env, taskid.BuildIDEnvVar) != "" {
+		return env
+	}
+	return setEnv(env, taskid.BuildIDEnvVar, taskid.BuildSessionID())
+}
+
+// wrappedBuildID is the build session for a single cc/c++ invocation. It is
+// only set when HG_BUILD_ID is exported (by `hgbuild make` or the user): a
+// lone compiler call must not mint its own one-task "build", which would
+// crowd real builds out of the coordinator's bounded build history.
+func wrappedBuildID() string {
+	if os.Getenv(taskid.BuildIDEnvVar) == "" {
+		return ""
+	}
+	return taskid.BuildSessionID()
+}
+
+// envValue returns the value of key in an os.Environ-style slice.
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			return strings.TrimPrefix(e, prefix)
+		}
+	}
+	return ""
+}
+
 func setEnv(env []string, key, value string) []string {
 	prefix := key + "="
 	for i, e := range env {

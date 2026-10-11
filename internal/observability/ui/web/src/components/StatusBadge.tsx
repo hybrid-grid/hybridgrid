@@ -1,25 +1,20 @@
 import { useT } from '@/lib/i18n'
-import type { CircuitState, TaskStatus } from '@/lib/types'
+import { normalizeStatus, STATUS_COLOR, type StatusTone } from '@/lib/status'
+import type { CircuitState } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
-const STATUS_COLOR: Record<string, string> = {
-  STATUS_QUEUED: 'var(--color-status-queued)',
-  STATUS_RUNNING: 'var(--color-status-running)',
-  STATUS_COMPLETED: 'var(--color-status-success)',
-  STATUS_FAILED: 'var(--color-status-failed)',
-  STATUS_TIMEOUT: 'var(--color-status-timeout)',
-}
-
 interface StatusBadgeProps {
-  status: TaskStatus
+  status: string
+  exitCode?: number
+  /** Overrides the derived tone, e.g. a build that is running because of in-flight tasks. */
+  tone?: StatusTone
   className?: string
 }
 
-export function StatusBadge({ status, className }: StatusBadgeProps) {
+export function StatusBadge({ status, exitCode, tone, className }: StatusBadgeProps) {
   const t = useT()
-  const color = STATUS_COLOR[status] ?? 'var(--color-ink-faint)'
-  const label = t(`status.${status}`) === `status.${status}` ? status.replace('STATUS_', '') : t(`status.${status}`)
-  const isRunning = status === 'STATUS_RUNNING'
+  const resolved = tone ?? normalizeStatus(status, exitCode)
+  const color = STATUS_COLOR[resolved]
 
   return (
     <span
@@ -34,11 +29,25 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
       }}
     >
       <span
-        className={cn('h-1.5 w-1.5 rounded-full', isRunning && 'animate-(--animate-heartbeat)')}
+        className={cn('h-1.5 w-1.5 rounded-full', resolved === 'running' && 'animate-(--animate-heartbeat)')}
         style={{ backgroundColor: color }}
       />
-      {label}
+      {t(`status.${resolved}`)}
     </span>
+  )
+}
+
+/** Bare status dot for dense rows where a full badge would be noise. */
+export function StatusDot({ tone, className }: { tone: StatusTone; className?: string }) {
+  const t = useT()
+  return (
+    <span
+      role="img"
+      aria-label={t(`status.${tone}`)}
+      title={t(`status.${tone}`)}
+      className={cn('inline-block h-2 w-2 shrink-0 rounded-full', tone === 'running' && 'animate-(--animate-heartbeat)', className)}
+      style={{ backgroundColor: STATUS_COLOR[tone] }}
+    />
   )
 }
 
