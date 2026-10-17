@@ -62,10 +62,9 @@ type Builder struct {
 
 // Registry holds the builders discovered on this worker.
 type Registry struct {
-	mu     sync.RWMutex
-	byID   map[string]Builder
-	order  []string
-	binary func(id string) string
+	mu    sync.RWMutex
+	byID  map[string]Builder
+	order []string
 }
 
 // NewRegistry returns an empty registry. The binary hook (optional,
