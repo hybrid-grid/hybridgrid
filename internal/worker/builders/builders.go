@@ -116,6 +116,9 @@ func (r *Registry) Discover(dir string) []string {
 			continue
 		}
 		id := strings.TrimPrefix(name, "hg-exec-")
+		// Windows executables carry the .exe suffix; it is not part
+		// of the builder id.
+		id = strings.TrimSuffix(id, ".exe")
 		if !validID(id) {
 			continue
 		}

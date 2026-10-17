@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -80,7 +81,11 @@ func fixtureDir(t *testing.T, mode string) string {
 	if err != nil {
 		t.Fatalf("failed to read test binary: %v", err)
 	}
-	dst := filepath.Join(dir, "hg-exec-fixture")
+	name := "hg-exec-fixture"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	dst := filepath.Join(dir, name)
 	if err := os.WriteFile(dst, src, 0o755); err != nil {
 		t.Fatalf("failed to write fixture: %v", err)
 	}
