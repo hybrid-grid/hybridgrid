@@ -1,8 +1,11 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +22,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/build"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/flutter"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/output"
+	"github.com/h3nr1-d14z/hybridgrid/internal/cli/sourcearchive"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/taskid"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/unity"
 	"github.com/h3nr1-d14z/hybridgrid/internal/compiler"
@@ -316,6 +320,12 @@ Examples:
   hgbuild build *.c -o myapp              Compile multiple files`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Unknown build types are plugin-builder ids: route the
+			// project through the custom-builder path instead of the
+			// per-TU compile loop.
+			if !isCoreBuildType(buildType) {
+				return runCustomBuild(buildType, args)
+			}
 			c, err := client.New(newClientConfig(coordinator, 5*time.Minute))
 			if err != nil {
 				return fmt.Errorf("failed to connect: %w", err)
@@ -427,7 +437,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVarP(&buildType, "type", "t", "cpp", "build type (cpp, flutter, unity, rust, go)")
+	cmd.Flags().StringVarP(&buildType, "type", "t", "cpp", "build type (cpp, flutter, unity, rust, go, or any plugin builder id)")
 	cmd.Flags().StringVarP(&output, "output", "o", "", "output file (for single file builds)")
 	cmd.Flags().StringVar(&compiler, "compiler", "", "compiler to use (auto-detect if empty)")
 	cmd.Flags().StringSliceVar(&compArgs, "args", nil, "compiler arguments")
@@ -463,6 +473,165 @@ func newUnityCmd() *cobra.Command {
 	}
 
 	return unity.NewCommand(deps)
+}
+
+// isCoreBuildType reports whether buildType names a built-in type the
+// build command handles itself (cpp compiles per-TU; flutter and unity
+// have dedicated subcommands). Everything else is a plugin-builder id.
+func isCoreBuildType(buildType string) bool {
+	switch buildType {
+	case "cpp", "flutter", "unity", "rust", "go":
+		return true
+	}
+	return false
+}
+
+// customSourceExclude keeps VCS metadata, dependency caches, and stale
+// build outputs out of the plugin-builder source archive.
+func customSourceExclude(relPath string, isDir bool) bool {
+	relPath = strings.TrimPrefix(relPath, "./")
+	if relPath == "" {
+		return false
+	}
+	for _, part := range strings.Split(relPath, "/") {
+		switch part {
+		case ".git", ".hg", ".svn", "node_modules", "__pycache__",
+			".venv", "venv", "dist", "out", "build", "target", "bin", "obj":
+			return true
+		}
+	}
+	return strings.HasSuffix(relPath, ".DS_Store")
+}
+
+// runCustomBuild submits a whole-project build to a plugin builder:
+// archive the project, send it with the builder id, then unpack the
+// returned artifacts into outDir (default "hybridgrid-out").
+func runCustomBuild(builderID string, args []string) error {
+	project := "."
+	if len(args) > 0 {
+		project = args[0]
+	}
+
+	archive, hash, err := sourcearchive.Create(project, customSourceExclude)
+	if err != nil {
+		return fmt.Errorf("failed to archive project: %w", err)
+	}
+
+	c, err := client.New(newClientConfig(coordinator, 30*time.Minute))
+	if err != nil {
+		return fmt.Errorf("failed to connect: %w", err)
+	}
+	defer c.Close()
+
+	buildID := taskid.BuildSessionID()
+	taskID := taskid.NewTaskID()
+	fmt.Printf("Custom build %q (session %s, task %s, source %d bytes)\n",
+		builderID, buildID, taskID, len(archive))
+
+	// Builder args come from the positional args after the project
+	// path, so `hgbuild build -t mytool . --release --verbose` passes
+	// --release --verbose straight through to the plugin.
+	var builderArgs []string
+	if len(args) > 1 {
+		builderArgs = args[1:]
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	resp, err := c.Build(ctx, &pb.BuildRequest{
+		TaskId:        taskID,
+		BuildId:       buildID,
+		SourceHash:    hash,
+		SourceArchive: archive,
+		CustomBuilder: builderID,
+		Config: &pb.BuildRequest_CustomConfig{
+			CustomConfig: &pb.CustomConfig{Args: builderArgs},
+		},
+		TimeoutSeconds: 1800,
+	})
+	if err != nil {
+		return fmt.Errorf("build failed: %w", err)
+	}
+
+	if resp.Stdout != "" {
+		fmt.Print(resp.Stdout)
+		if !strings.HasSuffix(resp.Stdout, "\n") {
+			fmt.Println()
+		}
+	}
+
+	if resp.Status != pb.TaskStatus_STATUS_COMPLETED {
+		if resp.Stderr != "" {
+			fmt.Fprintf(os.Stderr, "builder stderr:\n%s\n", resp.Stderr)
+		}
+		return fmt.Errorf("builder %q failed (exit %d)", builderID, resp.ExitCode)
+	}
+
+	if len(resp.Artifacts) == 0 {
+		fmt.Println("Build succeeded (no artifacts).")
+		return nil
+	}
+
+	outDir := "hybridgrid-out"
+	if err := extractArtifactArchive(outDir, resp.Artifacts); err != nil {
+		return fmt.Errorf("failed to unpack artifacts: %w", err)
+	}
+	fmt.Printf("Artifacts written to %s:\n", outDir)
+	for _, a := range resp.ArtifactList {
+		checksum := a.Checksum
+		if len(checksum) > 12 {
+			checksum = checksum[:12]
+		}
+		fmt.Printf("  %-40s %8d bytes  sha256:%s…\n", a.Path, a.SizeBytes, checksum)
+	}
+	return nil
+}
+
+// extractArtifactArchive unpacks a plain-tar artifact archive into dir,
+// refusing entries that escape dir (path traversal).
+func extractArtifactArchive(dir string, data []byte) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	reader := tar.NewReader(bytes.NewReader(data))
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if header.Typeflag != tar.TypeReg {
+			continue
+		}
+		target := filepath.Join(absDir, filepath.Clean(filepath.FromSlash(header.Name)))
+		if !strings.HasPrefix(target, absDir+string(os.PathSeparator)) {
+			return fmt.Errorf("artifact %q escapes the output directory", header.Name)
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		if err := writeTarFile(target, reader, header); err != nil {
+			return err
+		}
+	}
+}
+
+// writeTarFile streams one tar entry to disk with its declared mode.
+func writeTarFile(target string, reader io.Reader, header *tar.Header) error {
+	file, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode&0o777))
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = io.Copy(file, reader)
+	return err
 }
 
 // detectCompiler returns an appropriate compiler based on file extension.

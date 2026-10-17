@@ -647,6 +647,116 @@ func TestBuild_NotImplemented(t *testing.T) {
 	assert.Contains(t, resp.Stderr, "not implemented")
 }
 
+func TestBuild_Custom_NoWorker(t *testing.T) {
+	_, client, cleanup := setupTestServer(t, Config{Port: 0, HeartbeatTTL: 30 * time.Second})
+	defer cleanup()
+
+	resp, err := client.Build(context.Background(), &pb.BuildRequest{
+		TaskId:        "custom-no-worker",
+		CustomBuilder: "demo",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, pb.TaskStatus_STATUS_FAILED, resp.Status)
+	assert.Contains(t, resp.Stderr, "no worker available")
+}
+
+func TestBuild_Custom_ForwardsToWorker(t *testing.T) {
+	s, client, cleanup := setupTestServer(t, Config{Port: 0, HeartbeatTTL: 30 * time.Second, RequestTimeout: 30 * time.Second})
+	defer cleanup()
+
+	var gotBuilder string
+	var gotArgs []string
+	addr, workerCleanup := setupTestWorker(t, func(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+		gotBuilder = req.CustomBuilder
+		gotArgs = req.GetCustomConfig().GetArgs()
+		return &pb.BuildResponse{
+			Status:      pb.TaskStatus_STATUS_COMPLETED,
+			ExitCode:    0,
+			Stdout:      "demo console output",
+			Artifacts:   []byte("demo-artifact-bytes"),
+			BuildTimeMs: 42,
+		}, nil
+	})
+	defer workerCleanup()
+
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "custom-worker-1",
+		Address: addr,
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch:     pb.Architecture_ARCH_X86_64,
+			CustomBuilders: []string{"demo", "other"},
+		},
+		MaxParallel: 2,
+	}))
+
+	resp, err := client.Build(context.Background(), &pb.BuildRequest{
+		TaskId:        "custom-forward",
+		SourceHash:    "aabb",
+		SourceArchive: []byte("fake-tar"),
+		CustomBuilder: "demo",
+		Config: &pb.BuildRequest_CustomConfig{
+			CustomConfig: &pb.CustomConfig{Args: []string{"--release", "--verbose"}},
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, pb.TaskStatus_STATUS_COMPLETED, resp.Status)
+	assert.Equal(t, "demo console output", resp.Stdout)
+	assert.Equal(t, []byte("demo-artifact-bytes"), resp.Artifacts)
+	assert.Equal(t, "demo", gotBuilder, "worker must receive the custom_builder routing")
+	assert.Equal(t, []string{"--release", "--verbose"}, gotArgs, "builder args must pass through")
+}
+
+func TestBuild_Custom_QueuesUntilSlotFrees(t *testing.T) {
+	addr, workerCleanup := setupTestWorker(t, func(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+		return &pb.BuildResponse{Status: pb.TaskStatus_STATUS_COMPLETED, ExitCode: 0, Stdout: "ok"}, nil
+	})
+	defer workerCleanup()
+
+	cfg := Config{Port: 0, HeartbeatTTL: 30 * time.Second, RequestTimeout: 30 * time.Second, DispatchQueueTimeout: 5 * time.Second}
+	s, client, cleanup := setupTestServer(t, cfg)
+	defer cleanup()
+
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "custom-worker-busy",
+		Address: addr,
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch:     pb.Architecture_ARCH_X86_64,
+			CustomBuilders: []string{"demo"},
+		},
+		MaxParallel: 1,
+		ActiveTasks: 1,
+	}))
+
+	type buildResult struct {
+		resp *pb.BuildResponse
+		err  error
+	}
+	res := make(chan buildResult, 1)
+	go func() {
+		resp, err := client.Build(context.Background(), &pb.BuildRequest{
+			TaskId:        "custom-queued-1",
+			CustomBuilder: "demo",
+		})
+		res <- buildResult{resp, err}
+	}()
+
+	time.Sleep(1800 * time.Millisecond)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&s.queuedCompiles),
+		"after the fast dispatch budget the custom build should be parked in the dispatch queue")
+
+	s.registry.DecrementTasks("custom-worker-busy", true, 10*time.Millisecond)
+	s.signalDispatchCapacity()
+
+	select {
+	case r := <-res:
+		require.NoError(t, r.err)
+		assert.Equal(t, pb.TaskStatus_STATUS_COMPLETED, r.resp.Status)
+		assert.Equal(t, int64(0), atomic.LoadInt64(&s.queuedCompiles))
+	case <-time.After(5 * time.Second):
+		t.Fatal("queued custom build did not finish within 5s of the slot freeing")
+	}
+}
+
 func TestBuild_Flutter_NoWorker(t *testing.T) {
 	_, client, cleanup := setupTestServer(t, Config{Port: 0, HeartbeatTTL: 30 * time.Second})
 	defer cleanup()

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/interceptors"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 	hgtls "github.com/h3nr1-d14z/hybridgrid/internal/security/tls"
+	"github.com/h3nr1-d14z/hybridgrid/internal/worker/builders"
 	"github.com/h3nr1-d14z/hybridgrid/internal/worker/executor"
 )
 
@@ -29,6 +32,11 @@ type Config struct {
 	TLS             hgtls.Config
 	Tracing         tracing.Config
 	EnableRequestID bool
+
+	// Builders is the plugin-builder registry discovered from
+	// --builder-dir. May be nil: the worker then serves no custom
+	// builders (requests name one fail with a clear message).
+	Builders *builders.Registry
 }
 
 // DefaultConfig returns sensible defaults.
@@ -49,6 +57,7 @@ type Server struct {
 	server       *grpc.Server
 	executor     *executor.Manager
 	capabilities *pb.WorkerCapabilities
+	builders     *builders.Registry
 
 	activeTasks  int64
 	totalTasks   int64
@@ -67,6 +76,7 @@ func New(cfg Config) *Server {
 		config:       cfg,
 		capabilities: caps,
 		executor:     executor.NewManager(caps.NativeArch, caps.DockerAvailable),
+		builders:     cfg.Builders,
 	}
 }
 
@@ -257,6 +267,9 @@ func (s *Server) Build(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResp
 	if req.TaskId == "" {
 		return nil, status.Error(codes.InvalidArgument, "task_id required")
 	}
+	if req.CustomBuilder != "" {
+		return s.handleCustomBuild(ctx, req)
+	}
 
 	if req.BuildType != pb.BuildType_BUILD_TYPE_FLUTTER {
 		return nil, status.Error(codes.Unimplemented, "use Compile for compilation tasks")
@@ -322,6 +335,118 @@ func (s *Server) Build(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResp
 		atomic.AddInt64(&s.failedTasks, 1)
 	}
 
+	return resp, nil
+}
+
+// handleCustomBuild runs a plugin-builder build: extract the source
+// archive into a fresh work directory, execute the hg-exec-<id> plugin
+// with the task JSON on stdin, and archive the plugin's declared
+// outputs back as the response artifacts. The plugin's stderr is the
+// console text; its stdout carries the structured result JSON.
+func (s *Server) handleCustomBuild(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+	if s.builders == nil {
+		return nil, status.Error(codes.Unimplemented, fmt.Sprintf("worker has no plugin builders configured (requested %q)", req.CustomBuilder))
+	}
+	b, ok := s.builders.Get(req.CustomBuilder)
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "unknown plugin builder %q on this worker", req.CustomBuilder)
+	}
+
+	active := atomic.AddInt64(&s.activeTasks, 1)
+	defer atomic.AddInt64(&s.activeTasks, -1)
+
+	if active > int64(s.config.MaxConcurrent) {
+		return nil, status.Error(codes.ResourceExhausted, "too many concurrent tasks")
+	}
+
+	atomic.AddInt64(&s.totalTasks, 1)
+
+	timeout := s.config.DefaultTimeout
+	if req.TimeoutSeconds > 0 {
+		timeout = time.Duration(req.TimeoutSeconds) * time.Second
+	}
+
+	execCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	workDir, err := os.MkdirTemp("", "hg-builder-")
+	if err != nil {
+		atomic.AddInt64(&s.failedTasks, 1)
+		return &pb.BuildResponse{
+			Status:   pb.TaskStatus_STATUS_FAILED,
+			ExitCode: 1,
+			Stderr:   fmt.Sprintf("failed to create work directory: %v", err),
+		}, nil
+	}
+	defer os.RemoveAll(workDir)
+
+	if err := executor.ExtractSourceArchive(workDir, req.SourceArchive); err != nil {
+		atomic.AddInt64(&s.failedTasks, 1)
+		return &pb.BuildResponse{
+			Status:   pb.TaskStatus_STATUS_FAILED,
+			ExitCode: 1,
+			Stderr:   fmt.Sprintf("failed to extract source archive: %v", err),
+		}, nil
+	}
+
+	custom := req.GetCustomConfig()
+	task := builders.Task{
+		TaskID:    req.TaskId,
+		BuildID:   req.BuildId,
+		BuilderID: b.ID,
+		WorkDir:   workDir,
+		TimeoutMs: timeout.Milliseconds(),
+	}
+	if custom != nil {
+		task.Args = custom.GetArgs()
+		task.Env = custom.GetEnv()
+	}
+
+	start := time.Now()
+	result, console, runErr := b.Run(execCtx, task)
+	buildTime := time.Since(start)
+	atomic.AddInt64(&s.totalTimeMs, buildTime.Milliseconds())
+
+	resp := &pb.BuildResponse{
+		Status:      pb.TaskStatus_STATUS_FAILED,
+		ExitCode:    1,
+		Stdout:      console,
+		BuildTimeMs: buildTime.Milliseconds(),
+	}
+
+	if runErr != nil {
+		atomic.AddInt64(&s.failedTasks, 1)
+		resp.Stderr = fmt.Sprintf("builder execution error: %v", runErr)
+		return resp, nil
+	}
+
+	if !result.Success {
+		atomic.AddInt64(&s.failedTasks, 1)
+		errText := result.Error
+		if errText == "" {
+			errText = strings.TrimSpace(console)
+			if len(errText) > 1024 {
+				errText = errText[len(errText)-1024:]
+			}
+		}
+		resp.Stderr = errText
+		return resp, nil
+	}
+
+	if len(result.Outputs) > 0 {
+		archiveBytes, artifactList, err := executor.ArchivePaths(workDir, result.Outputs)
+		if err != nil {
+			atomic.AddInt64(&s.failedTasks, 1)
+			resp.Stderr = fmt.Sprintf("failed to collect builder outputs: %v", err)
+			return resp, nil
+		}
+		resp.Artifacts = archiveBytes
+		resp.ArtifactList = artifactList
+	}
+
+	resp.Status = pb.TaskStatus_STATUS_COMPLETED
+	resp.ExitCode = 0
+	atomic.AddInt64(&s.successTasks, 1)
 	return resp, nil
 }
 

@@ -735,6 +735,60 @@ func (x *NodeConfig) GetEnvVars() map[string]string {
 	return nil
 }
 
+// CustomConfig configures a plugin-builder build: everything the
+// hg-exec-<id> plugin needs beyond the source archive itself.
+type CustomConfig struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Args          []string               `protobuf:"bytes,1,rep,name=args,proto3" json:"args,omitempty"`                                                                         // passthrough args to the builder
+	Env           map[string]string      `protobuf:"bytes,2,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // extra env for the builder process
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CustomConfig) Reset() {
+	*x = CustomConfig{}
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CustomConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CustomConfig) ProtoMessage() {}
+
+func (x *CustomConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CustomConfig.ProtoReflect.Descriptor instead.
+func (*CustomConfig) Descriptor() ([]byte, []int) {
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *CustomConfig) GetArgs() []string {
+	if x != nil {
+		return x.Args
+	}
+	return nil
+}
+
+func (x *CustomConfig) GetEnv() map[string]string {
+	if x != nil {
+		return x.Env
+	}
+	return nil
+}
+
 type CppCapability struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
 	Compilers    []string               `protobuf:"bytes,1,rep,name=compilers,proto3" json:"compilers,omitempty"` // [gcc, clang, cl.exe]
@@ -750,7 +804,7 @@ type CppCapability struct {
 
 func (x *CppCapability) Reset() {
 	*x = CppCapability{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[7]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -762,7 +816,7 @@ func (x *CppCapability) String() string {
 func (*CppCapability) ProtoMessage() {}
 
 func (x *CppCapability) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[7]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -775,7 +829,7 @@ func (x *CppCapability) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CppCapability.ProtoReflect.Descriptor instead.
 func (*CppCapability) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{7}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *CppCapability) GetCompilers() []string {
@@ -832,7 +886,7 @@ type FlutterCapability struct {
 
 func (x *FlutterCapability) Reset() {
 	*x = FlutterCapability{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[8]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -844,7 +898,7 @@ func (x *FlutterCapability) String() string {
 func (*FlutterCapability) ProtoMessage() {}
 
 func (x *FlutterCapability) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[8]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -857,7 +911,7 @@ func (x *FlutterCapability) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FlutterCapability.ProtoReflect.Descriptor instead.
 func (*FlutterCapability) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{8}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *FlutterCapability) GetSdkVersion() string {
@@ -899,7 +953,7 @@ type UnityCapability struct {
 
 func (x *UnityCapability) Reset() {
 	*x = UnityCapability{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[9]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -911,7 +965,7 @@ func (x *UnityCapability) String() string {
 func (*UnityCapability) ProtoMessage() {}
 
 func (x *UnityCapability) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[9]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -924,7 +978,7 @@ func (x *UnityCapability) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnityCapability.ProtoReflect.Descriptor instead.
 func (*UnityCapability) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{9}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *UnityCapability) GetVersions() []string {
@@ -958,7 +1012,7 @@ type CocosCapability struct {
 
 func (x *CocosCapability) Reset() {
 	*x = CocosCapability{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[10]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -970,7 +1024,7 @@ func (x *CocosCapability) String() string {
 func (*CocosCapability) ProtoMessage() {}
 
 func (x *CocosCapability) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[10]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -983,7 +1037,7 @@ func (x *CocosCapability) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CocosCapability.ProtoReflect.Descriptor instead.
 func (*CocosCapability) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{10}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *CocosCapability) GetVersions() []string {
@@ -1010,7 +1064,7 @@ type RustCapability struct {
 
 func (x *RustCapability) Reset() {
 	*x = RustCapability{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[11]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1022,7 +1076,7 @@ func (x *RustCapability) String() string {
 func (*RustCapability) ProtoMessage() {}
 
 func (x *RustCapability) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[11]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1035,7 +1089,7 @@ func (x *RustCapability) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RustCapability.ProtoReflect.Descriptor instead.
 func (*RustCapability) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{11}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *RustCapability) GetToolchains() []string {
@@ -1062,7 +1116,7 @@ type GoCapability struct {
 
 func (x *GoCapability) Reset() {
 	*x = GoCapability{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[12]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1074,7 +1128,7 @@ func (x *GoCapability) String() string {
 func (*GoCapability) ProtoMessage() {}
 
 func (x *GoCapability) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[12]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1087,7 +1141,7 @@ func (x *GoCapability) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GoCapability.ProtoReflect.Descriptor instead.
 func (*GoCapability) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{12}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *GoCapability) GetVersion() string {
@@ -1114,7 +1168,7 @@ type NodeCapability struct {
 
 func (x *NodeCapability) Reset() {
 	*x = NodeCapability{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[13]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1126,7 +1180,7 @@ func (x *NodeCapability) String() string {
 func (*NodeCapability) ProtoMessage() {}
 
 func (x *NodeCapability) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[13]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1139,7 +1193,7 @@ func (x *NodeCapability) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeCapability.ProtoReflect.Descriptor instead.
 func (*NodeCapability) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{13}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *NodeCapability) GetVersions() []string {
@@ -1178,20 +1232,25 @@ type WorkerCapabilities struct {
 	// fall back to cpu_cores * 1000 in that case.
 	CpuMillis int32 `protobuf:"varint,12,opt,name=cpu_millis,json=cpuMillis,proto3" json:"cpu_millis,omitempty"`
 	// Multi-platform capabilities
-	Cpp           *CppCapability     `protobuf:"bytes,20,opt,name=cpp,proto3" json:"cpp,omitempty"`
-	Flutter       *FlutterCapability `protobuf:"bytes,21,opt,name=flutter,proto3" json:"flutter,omitempty"`
-	Unity         *UnityCapability   `protobuf:"bytes,22,opt,name=unity,proto3" json:"unity,omitempty"`
-	Cocos         *CocosCapability   `protobuf:"bytes,23,opt,name=cocos,proto3" json:"cocos,omitempty"`
-	Rust          *RustCapability    `protobuf:"bytes,24,opt,name=rust,proto3" json:"rust,omitempty"`
-	Go            *GoCapability      `protobuf:"bytes,25,opt,name=go,proto3" json:"go,omitempty"`
-	Nodejs        *NodeCapability    `protobuf:"bytes,26,opt,name=nodejs,proto3" json:"nodejs,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Cpp     *CppCapability     `protobuf:"bytes,20,opt,name=cpp,proto3" json:"cpp,omitempty"`
+	Flutter *FlutterCapability `protobuf:"bytes,21,opt,name=flutter,proto3" json:"flutter,omitempty"`
+	Unity   *UnityCapability   `protobuf:"bytes,22,opt,name=unity,proto3" json:"unity,omitempty"`
+	Cocos   *CocosCapability   `protobuf:"bytes,23,opt,name=cocos,proto3" json:"cocos,omitempty"`
+	Rust    *RustCapability    `protobuf:"bytes,24,opt,name=rust,proto3" json:"rust,omitempty"`
+	Go      *GoCapability      `protobuf:"bytes,25,opt,name=go,proto3" json:"go,omitempty"`
+	Nodejs  *NodeCapability    `protobuf:"bytes,26,opt,name=nodejs,proto3" json:"nodejs,omitempty"`
+	// Plugin builders discovered from --builder-dir (hg-exec-<id>
+	// executables that completed the builderv1alpha1 handshake). Workers
+	// advertise the builder ids here; BuildRequest.custom_builder routes
+	// a build to one.
+	CustomBuilders []string `protobuf:"bytes,27,rep,name=custom_builders,json=customBuilders,proto3" json:"custom_builders,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *WorkerCapabilities) Reset() {
 	*x = WorkerCapabilities{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[14]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1203,7 +1262,7 @@ func (x *WorkerCapabilities) String() string {
 func (*WorkerCapabilities) ProtoMessage() {}
 
 func (x *WorkerCapabilities) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[14]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1216,7 +1275,7 @@ func (x *WorkerCapabilities) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerCapabilities.ProtoReflect.Descriptor instead.
 func (*WorkerCapabilities) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{14}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *WorkerCapabilities) GetWorkerId() string {
@@ -1352,6 +1411,13 @@ func (x *WorkerCapabilities) GetNodejs() *NodeCapability {
 	return nil
 }
 
+func (x *WorkerCapabilities) GetCustomBuilders() []string {
+	if x != nil {
+		return x.CustomBuilders
+	}
+	return nil
+}
+
 type HandshakeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Capabilities  *WorkerCapabilities    `protobuf:"bytes,1,opt,name=capabilities,proto3" json:"capabilities,omitempty"`
@@ -1363,7 +1429,7 @@ type HandshakeRequest struct {
 
 func (x *HandshakeRequest) Reset() {
 	*x = HandshakeRequest{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[15]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1375,7 +1441,7 @@ func (x *HandshakeRequest) String() string {
 func (*HandshakeRequest) ProtoMessage() {}
 
 func (x *HandshakeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[15]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1388,7 +1454,7 @@ func (x *HandshakeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HandshakeRequest.ProtoReflect.Descriptor instead.
 func (*HandshakeRequest) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{15}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *HandshakeRequest) GetCapabilities() *WorkerCapabilities {
@@ -1424,7 +1490,7 @@ type HandshakeResponse struct {
 
 func (x *HandshakeResponse) Reset() {
 	*x = HandshakeResponse{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[16]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1436,7 +1502,7 @@ func (x *HandshakeResponse) String() string {
 func (*HandshakeResponse) ProtoMessage() {}
 
 func (x *HandshakeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[16]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1449,7 +1515,7 @@ func (x *HandshakeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HandshakeResponse.ProtoReflect.Descriptor instead.
 func (*HandshakeResponse) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{16}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *HandshakeResponse) GetAccepted() bool {
@@ -1501,7 +1567,12 @@ type BuildRequest struct {
 	//	*BuildRequest_RustConfig
 	//	*BuildRequest_GoConfig
 	//	*BuildRequest_NodeConfig
+	//	*BuildRequest_CustomConfig
 	Config isBuildRequest_Config `protobuf_oneof:"config"`
+	// Plugin builder id (e.g. "rust", "script"). When non-empty the
+	// request routes to that worker-side plugin builder instead of a
+	// core build type.
+	CustomBuilder string `protobuf:"bytes,19,opt,name=custom_builder,json=customBuilder,proto3" json:"custom_builder,omitempty"`
 	// Build session ID for grouping related builds (clients read
 	// HG_BUILD_ID from the wrapping build tool; empty for ungrouped)
 	BuildId string `protobuf:"bytes,17,opt,name=build_id,json=buildId,proto3" json:"build_id,omitempty"`
@@ -1515,7 +1586,7 @@ type BuildRequest struct {
 
 func (x *BuildRequest) Reset() {
 	*x = BuildRequest{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[17]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1527,7 +1598,7 @@ func (x *BuildRequest) String() string {
 func (*BuildRequest) ProtoMessage() {}
 
 func (x *BuildRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[17]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1540,7 +1611,7 @@ func (x *BuildRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuildRequest.ProtoReflect.Descriptor instead.
 func (*BuildRequest) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{17}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *BuildRequest) GetTaskId() string {
@@ -1648,6 +1719,22 @@ func (x *BuildRequest) GetNodeConfig() *NodeConfig {
 	return nil
 }
 
+func (x *BuildRequest) GetCustomConfig() *CustomConfig {
+	if x != nil {
+		if x, ok := x.Config.(*BuildRequest_CustomConfig); ok {
+			return x.CustomConfig
+		}
+	}
+	return nil
+}
+
+func (x *BuildRequest) GetCustomBuilder() string {
+	if x != nil {
+		return x.CustomBuilder
+	}
+	return ""
+}
+
 func (x *BuildRequest) GetBuildId() string {
 	if x != nil {
 		return x.BuildId
@@ -1708,6 +1795,11 @@ type BuildRequest_NodeConfig struct {
 	NodeConfig *NodeConfig `protobuf:"bytes,16,opt,name=node_config,json=nodeConfig,proto3,oneof"`
 }
 
+type BuildRequest_CustomConfig struct {
+	// Plugin-builder configuration (with BuildRequest.custom_builder)
+	CustomConfig *CustomConfig `protobuf:"bytes,18,opt,name=custom_config,json=customConfig,proto3,oneof"`
+}
+
 func (*BuildRequest_CppConfig) isBuildRequest_Config() {}
 
 func (*BuildRequest_FlutterConfig) isBuildRequest_Config() {}
@@ -1722,6 +1814,8 @@ func (*BuildRequest_GoConfig) isBuildRequest_Config() {}
 
 func (*BuildRequest_NodeConfig) isBuildRequest_Config() {}
 
+func (*BuildRequest_CustomConfig) isBuildRequest_Config() {}
+
 type ArtifactInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"` // e.g., "app-release.apk"
@@ -1734,7 +1828,7 @@ type ArtifactInfo struct {
 
 func (x *ArtifactInfo) Reset() {
 	*x = ArtifactInfo{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[18]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1746,7 +1840,7 @@ func (x *ArtifactInfo) String() string {
 func (*ArtifactInfo) ProtoMessage() {}
 
 func (x *ArtifactInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[18]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1759,7 +1853,7 @@ func (x *ArtifactInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactInfo.ProtoReflect.Descriptor instead.
 func (*ArtifactInfo) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{18}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ArtifactInfo) GetName() string {
@@ -1813,7 +1907,7 @@ type BuildResponse struct {
 
 func (x *BuildResponse) Reset() {
 	*x = BuildResponse{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[19]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1825,7 +1919,7 @@ func (x *BuildResponse) String() string {
 func (*BuildResponse) ProtoMessage() {}
 
 func (x *BuildResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[19]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1838,7 +1932,7 @@ func (x *BuildResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuildResponse.ProtoReflect.Descriptor instead.
 func (*BuildResponse) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{19}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *BuildResponse) GetStatus() TaskStatus {
@@ -1924,7 +2018,7 @@ type BuildChunk struct {
 
 func (x *BuildChunk) Reset() {
 	*x = BuildChunk{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[20]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1936,7 +2030,7 @@ func (x *BuildChunk) String() string {
 func (*BuildChunk) ProtoMessage() {}
 
 func (x *BuildChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[20]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1949,7 +2043,7 @@ func (x *BuildChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuildChunk.ProtoReflect.Descriptor instead.
 func (*BuildChunk) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{20}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *BuildChunk) GetPayload() isBuildChunk_Payload {
@@ -2008,7 +2102,7 @@ type BuildMetadata struct {
 
 func (x *BuildMetadata) Reset() {
 	*x = BuildMetadata{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[21]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2020,7 +2114,7 @@ func (x *BuildMetadata) String() string {
 func (*BuildMetadata) ProtoMessage() {}
 
 func (x *BuildMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[21]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2033,7 +2127,7 @@ func (x *BuildMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuildMetadata.ProtoReflect.Descriptor instead.
 func (*BuildMetadata) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{21}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *BuildMetadata) GetTaskId() string {
@@ -2113,7 +2207,7 @@ type CompileRequest struct {
 
 func (x *CompileRequest) Reset() {
 	*x = CompileRequest{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[22]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2125,7 +2219,7 @@ func (x *CompileRequest) String() string {
 func (*CompileRequest) ProtoMessage() {}
 
 func (x *CompileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[22]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2138,7 +2232,7 @@ func (x *CompileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompileRequest.ProtoReflect.Descriptor instead.
 func (*CompileRequest) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{22}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *CompileRequest) GetTaskId() string {
@@ -2270,7 +2364,7 @@ type CompileResponse struct {
 
 func (x *CompileResponse) Reset() {
 	*x = CompileResponse{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[23]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2282,7 +2376,7 @@ func (x *CompileResponse) String() string {
 func (*CompileResponse) ProtoMessage() {}
 
 func (x *CompileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[23]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2295,7 +2389,7 @@ func (x *CompileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompileResponse.ProtoReflect.Descriptor instead.
 func (*CompileResponse) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{23}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *CompileResponse) GetStatus() TaskStatus {
@@ -2369,7 +2463,7 @@ type HealthRequest struct {
 
 func (x *HealthRequest) Reset() {
 	*x = HealthRequest{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[24]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2381,7 +2475,7 @@ func (x *HealthRequest) String() string {
 func (*HealthRequest) ProtoMessage() {}
 
 func (x *HealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[24]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2394,7 +2488,7 @@ func (x *HealthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthRequest.ProtoReflect.Descriptor instead.
 func (*HealthRequest) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{24}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{25}
 }
 
 type HealthResponse struct {
@@ -2411,7 +2505,7 @@ type HealthResponse struct {
 
 func (x *HealthResponse) Reset() {
 	*x = HealthResponse{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[25]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2423,7 +2517,7 @@ func (x *HealthResponse) String() string {
 func (*HealthResponse) ProtoMessage() {}
 
 func (x *HealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[25]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2436,7 +2530,7 @@ func (x *HealthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthResponse.ProtoReflect.Descriptor instead.
 func (*HealthResponse) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{25}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *HealthResponse) GetHealthy() bool {
@@ -2489,7 +2583,7 @@ type WorkerStatusRequest struct {
 
 func (x *WorkerStatusRequest) Reset() {
 	*x = WorkerStatusRequest{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[26]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2501,7 +2595,7 @@ func (x *WorkerStatusRequest) String() string {
 func (*WorkerStatusRequest) ProtoMessage() {}
 
 func (x *WorkerStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[26]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2514,7 +2608,7 @@ func (x *WorkerStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerStatusRequest.ProtoReflect.Descriptor instead.
 func (*WorkerStatusRequest) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{26}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{27}
 }
 
 type WorkerStatusResponse struct {
@@ -2528,7 +2622,7 @@ type WorkerStatusResponse struct {
 
 func (x *WorkerStatusResponse) Reset() {
 	*x = WorkerStatusResponse{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[27]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2540,7 +2634,7 @@ func (x *WorkerStatusResponse) String() string {
 func (*WorkerStatusResponse) ProtoMessage() {}
 
 func (x *WorkerStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[27]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2553,7 +2647,7 @@ func (x *WorkerStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerStatusResponse.ProtoReflect.Descriptor instead.
 func (*WorkerStatusResponse) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{27}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *WorkerStatusResponse) GetWorkers() []*WorkerStatusResponse_WorkerInfo {
@@ -2587,7 +2681,7 @@ type WorkersForBuildRequest struct {
 
 func (x *WorkersForBuildRequest) Reset() {
 	*x = WorkersForBuildRequest{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[28]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2599,7 +2693,7 @@ func (x *WorkersForBuildRequest) String() string {
 func (*WorkersForBuildRequest) ProtoMessage() {}
 
 func (x *WorkersForBuildRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[28]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2612,7 +2706,7 @@ func (x *WorkersForBuildRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkersForBuildRequest.ProtoReflect.Descriptor instead.
 func (*WorkersForBuildRequest) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{28}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *WorkersForBuildRequest) GetBuildType() BuildType {
@@ -2639,7 +2733,7 @@ type WorkersForBuildResponse struct {
 
 func (x *WorkersForBuildResponse) Reset() {
 	*x = WorkersForBuildResponse{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[29]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2651,7 +2745,7 @@ func (x *WorkersForBuildResponse) String() string {
 func (*WorkersForBuildResponse) ProtoMessage() {}
 
 func (x *WorkersForBuildResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[29]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2664,7 +2758,7 @@ func (x *WorkersForBuildResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkersForBuildResponse.ProtoReflect.Descriptor instead.
 func (*WorkersForBuildResponse) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{29}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *WorkersForBuildResponse) GetWorkerIds() []string {
@@ -2691,7 +2785,7 @@ type ReportCacheHitRequest struct {
 
 func (x *ReportCacheHitRequest) Reset() {
 	*x = ReportCacheHitRequest{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[30]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2703,7 +2797,7 @@ func (x *ReportCacheHitRequest) String() string {
 func (*ReportCacheHitRequest) ProtoMessage() {}
 
 func (x *ReportCacheHitRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[30]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2716,7 +2810,7 @@ func (x *ReportCacheHitRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportCacheHitRequest.ProtoReflect.Descriptor instead.
 func (*ReportCacheHitRequest) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{30}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ReportCacheHitRequest) GetHits() int32 {
@@ -2736,7 +2830,7 @@ type ReportCacheHitResponse struct {
 
 func (x *ReportCacheHitResponse) Reset() {
 	*x = ReportCacheHitResponse{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[31]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2748,7 +2842,7 @@ func (x *ReportCacheHitResponse) String() string {
 func (*ReportCacheHitResponse) ProtoMessage() {}
 
 func (x *ReportCacheHitResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[31]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2761,7 +2855,7 @@ func (x *ReportCacheHitResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportCacheHitResponse.ProtoReflect.Descriptor instead.
 func (*ReportCacheHitResponse) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{31}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ReportCacheHitResponse) GetAcknowledged() bool {
@@ -2791,7 +2885,7 @@ type WorkerStatusResponse_WorkerInfo struct {
 
 func (x *WorkerStatusResponse_WorkerInfo) Reset() {
 	*x = WorkerStatusResponse_WorkerInfo{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[38]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2803,7 +2897,7 @@ func (x *WorkerStatusResponse_WorkerInfo) String() string {
 func (*WorkerStatusResponse_WorkerInfo) ProtoMessage() {}
 
 func (x *WorkerStatusResponse_WorkerInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[38]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2816,7 +2910,7 @@ func (x *WorkerStatusResponse_WorkerInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerStatusResponse_WorkerInfo.ProtoReflect.Descriptor instead.
 func (*WorkerStatusResponse_WorkerInfo) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{27, 0}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{28, 0}
 }
 
 func (x *WorkerStatusResponse_WorkerInfo) GetWorkerId() string {
@@ -2965,6 +3059,12 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\benv_vars\x18\x04 \x03(\v2&.hybridgrid.v1.NodeConfig.EnvVarsEntryR\aenvVars\x1a:\n" +
 	"\fEnvVarsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x92\x01\n" +
+	"\fCustomConfig\x12\x12\n" +
+	"\x04args\x18\x01 \x03(\tR\x04args\x126\n" +
+	"\x03env\x18\x02 \x03(\v2$.hybridgrid.v1.CustomConfig.EnvEntryR\x03env\x1a6\n" +
+	"\bEnvEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf1\x01\n" +
 	"\rCppCapability\x12\x1c\n" +
 	"\tcompilers\x18\x01 \x03(\tR\tcompilers\x12#\n" +
@@ -2997,7 +3097,7 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\rcross_compile\x18\x02 \x01(\bR\fcrossCompile\"W\n" +
 	"\x0eNodeCapability\x12\x1a\n" +
 	"\bversions\x18\x01 \x03(\tR\bversions\x12)\n" +
-	"\x10package_managers\x18\x02 \x03(\tR\x0fpackageManagers\"\xab\x06\n" +
+	"\x10package_managers\x18\x02 \x03(\tR\x0fpackageManagers\"\xd4\x06\n" +
 	"\x12WorkerCapabilities\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\tR\bworkerId\x12\x1a\n" +
 	"\bhostname\x18\x02 \x01(\tR\bhostname\x12\x1b\n" +
@@ -3020,7 +3120,8 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\x05cocos\x18\x17 \x01(\v2\x1e.hybridgrid.v1.CocosCapabilityR\x05cocos\x121\n" +
 	"\x04rust\x18\x18 \x01(\v2\x1d.hybridgrid.v1.RustCapabilityR\x04rust\x12+\n" +
 	"\x02go\x18\x19 \x01(\v2\x1b.hybridgrid.v1.GoCapabilityR\x02go\x125\n" +
-	"\x06nodejs\x18\x1a \x01(\v2\x1d.hybridgrid.v1.NodeCapabilityR\x06nodejs\"\x9f\x01\n" +
+	"\x06nodejs\x18\x1a \x01(\v2\x1d.hybridgrid.v1.NodeCapabilityR\x06nodejs\x12'\n" +
+	"\x0fcustom_builders\x18\x1b \x03(\tR\x0ecustomBuilders\"\x9f\x01\n" +
 	"\x10HandshakeRequest\x12E\n" +
 	"\fcapabilities\x18\x01 \x01(\v2!.hybridgrid.v1.WorkerCapabilitiesR\fcapabilities\x12\x1d\n" +
 	"\n" +
@@ -3030,7 +3131,7 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\baccepted\x18\x01 \x01(\bR\baccepted\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12,\n" +
 	"\x12assigned_worker_id\x18\x03 \x01(\tR\x10assignedWorkerId\x12<\n" +
-	"\x1aheartbeat_interval_seconds\x18\x04 \x01(\x05R\x18heartbeatIntervalSeconds\"\xb5\x06\n" +
+	"\x1aheartbeat_interval_seconds\x18\x04 \x01(\x05R\x18heartbeatIntervalSeconds\"\xa0\a\n" +
 	"\fBuildRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1f\n" +
 	"\vsource_hash\x18\x02 \x01(\tR\n" +
@@ -3049,7 +3150,9 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"rustConfig\x126\n" +
 	"\tgo_config\x18\x0f \x01(\v2\x17.hybridgrid.v1.GoConfigH\x00R\bgoConfig\x12<\n" +
 	"\vnode_config\x18\x10 \x01(\v2\x19.hybridgrid.v1.NodeConfigH\x00R\n" +
-	"nodeConfig\x12\x19\n" +
+	"nodeConfig\x12B\n" +
+	"\rcustom_config\x18\x12 \x01(\v2\x1b.hybridgrid.v1.CustomConfigH\x00R\fcustomConfig\x12%\n" +
+	"\x0ecustom_builder\x18\x13 \x01(\tR\rcustomBuilder\x12\x19\n" +
 	"\bbuild_id\x18\x11 \x01(\tR\abuildId\x12!\n" +
 	"\fdocker_image\x18\x14 \x01(\tR\vdockerImage\x12'\n" +
 	"\x0ftimeout_seconds\x18\x15 \x01(\x05R\x0etimeoutSeconds\x12\x1a\n" +
@@ -3224,7 +3327,7 @@ func file_hybridgrid_v1_build_proto_rawDescGZIP() []byte {
 }
 
 var file_hybridgrid_v1_build_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_hybridgrid_v1_build_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
+var file_hybridgrid_v1_build_proto_msgTypes = make([]protoimpl.MessageInfo, 41)
 var file_hybridgrid_v1_build_proto_goTypes = []any{
 	(Architecture)(0),                       // 0: hybridgrid.v1.Architecture
 	(BuildType)(0),                          // 1: hybridgrid.v1.BuildType
@@ -3237,101 +3340,105 @@ var file_hybridgrid_v1_build_proto_goTypes = []any{
 	(*RustConfig)(nil),                      // 8: hybridgrid.v1.RustConfig
 	(*GoConfig)(nil),                        // 9: hybridgrid.v1.GoConfig
 	(*NodeConfig)(nil),                      // 10: hybridgrid.v1.NodeConfig
-	(*CppCapability)(nil),                   // 11: hybridgrid.v1.CppCapability
-	(*FlutterCapability)(nil),               // 12: hybridgrid.v1.FlutterCapability
-	(*UnityCapability)(nil),                 // 13: hybridgrid.v1.UnityCapability
-	(*CocosCapability)(nil),                 // 14: hybridgrid.v1.CocosCapability
-	(*RustCapability)(nil),                  // 15: hybridgrid.v1.RustCapability
-	(*GoCapability)(nil),                    // 16: hybridgrid.v1.GoCapability
-	(*NodeCapability)(nil),                  // 17: hybridgrid.v1.NodeCapability
-	(*WorkerCapabilities)(nil),              // 18: hybridgrid.v1.WorkerCapabilities
-	(*HandshakeRequest)(nil),                // 19: hybridgrid.v1.HandshakeRequest
-	(*HandshakeResponse)(nil),               // 20: hybridgrid.v1.HandshakeResponse
-	(*BuildRequest)(nil),                    // 21: hybridgrid.v1.BuildRequest
-	(*ArtifactInfo)(nil),                    // 22: hybridgrid.v1.ArtifactInfo
-	(*BuildResponse)(nil),                   // 23: hybridgrid.v1.BuildResponse
-	(*BuildChunk)(nil),                      // 24: hybridgrid.v1.BuildChunk
-	(*BuildMetadata)(nil),                   // 25: hybridgrid.v1.BuildMetadata
-	(*CompileRequest)(nil),                  // 26: hybridgrid.v1.CompileRequest
-	(*CompileResponse)(nil),                 // 27: hybridgrid.v1.CompileResponse
-	(*HealthRequest)(nil),                   // 28: hybridgrid.v1.HealthRequest
-	(*HealthResponse)(nil),                  // 29: hybridgrid.v1.HealthResponse
-	(*WorkerStatusRequest)(nil),             // 30: hybridgrid.v1.WorkerStatusRequest
-	(*WorkerStatusResponse)(nil),            // 31: hybridgrid.v1.WorkerStatusResponse
-	(*WorkersForBuildRequest)(nil),          // 32: hybridgrid.v1.WorkersForBuildRequest
-	(*WorkersForBuildResponse)(nil),         // 33: hybridgrid.v1.WorkersForBuildResponse
-	(*ReportCacheHitRequest)(nil),           // 34: hybridgrid.v1.ReportCacheHitRequest
-	(*ReportCacheHitResponse)(nil),          // 35: hybridgrid.v1.ReportCacheHitResponse
-	nil,                                     // 36: hybridgrid.v1.FlutterConfig.DartDefinesEntry
-	nil,                                     // 37: hybridgrid.v1.UnityConfig.ExtraArgsEntry
-	nil,                                     // 38: hybridgrid.v1.CocosConfig.PlatformOptionsEntry
-	nil,                                     // 39: hybridgrid.v1.GoConfig.LdflagsEntry
-	nil,                                     // 40: hybridgrid.v1.NodeConfig.EnvVarsEntry
-	nil,                                     // 41: hybridgrid.v1.CompileRequest.IncludeFilesEntry
-	(*WorkerStatusResponse_WorkerInfo)(nil), // 42: hybridgrid.v1.WorkerStatusResponse.WorkerInfo
+	(*CustomConfig)(nil),                    // 11: hybridgrid.v1.CustomConfig
+	(*CppCapability)(nil),                   // 12: hybridgrid.v1.CppCapability
+	(*FlutterCapability)(nil),               // 13: hybridgrid.v1.FlutterCapability
+	(*UnityCapability)(nil),                 // 14: hybridgrid.v1.UnityCapability
+	(*CocosCapability)(nil),                 // 15: hybridgrid.v1.CocosCapability
+	(*RustCapability)(nil),                  // 16: hybridgrid.v1.RustCapability
+	(*GoCapability)(nil),                    // 17: hybridgrid.v1.GoCapability
+	(*NodeCapability)(nil),                  // 18: hybridgrid.v1.NodeCapability
+	(*WorkerCapabilities)(nil),              // 19: hybridgrid.v1.WorkerCapabilities
+	(*HandshakeRequest)(nil),                // 20: hybridgrid.v1.HandshakeRequest
+	(*HandshakeResponse)(nil),               // 21: hybridgrid.v1.HandshakeResponse
+	(*BuildRequest)(nil),                    // 22: hybridgrid.v1.BuildRequest
+	(*ArtifactInfo)(nil),                    // 23: hybridgrid.v1.ArtifactInfo
+	(*BuildResponse)(nil),                   // 24: hybridgrid.v1.BuildResponse
+	(*BuildChunk)(nil),                      // 25: hybridgrid.v1.BuildChunk
+	(*BuildMetadata)(nil),                   // 26: hybridgrid.v1.BuildMetadata
+	(*CompileRequest)(nil),                  // 27: hybridgrid.v1.CompileRequest
+	(*CompileResponse)(nil),                 // 28: hybridgrid.v1.CompileResponse
+	(*HealthRequest)(nil),                   // 29: hybridgrid.v1.HealthRequest
+	(*HealthResponse)(nil),                  // 30: hybridgrid.v1.HealthResponse
+	(*WorkerStatusRequest)(nil),             // 31: hybridgrid.v1.WorkerStatusRequest
+	(*WorkerStatusResponse)(nil),            // 32: hybridgrid.v1.WorkerStatusResponse
+	(*WorkersForBuildRequest)(nil),          // 33: hybridgrid.v1.WorkersForBuildRequest
+	(*WorkersForBuildResponse)(nil),         // 34: hybridgrid.v1.WorkersForBuildResponse
+	(*ReportCacheHitRequest)(nil),           // 35: hybridgrid.v1.ReportCacheHitRequest
+	(*ReportCacheHitResponse)(nil),          // 36: hybridgrid.v1.ReportCacheHitResponse
+	nil,                                     // 37: hybridgrid.v1.FlutterConfig.DartDefinesEntry
+	nil,                                     // 38: hybridgrid.v1.UnityConfig.ExtraArgsEntry
+	nil,                                     // 39: hybridgrid.v1.CocosConfig.PlatformOptionsEntry
+	nil,                                     // 40: hybridgrid.v1.GoConfig.LdflagsEntry
+	nil,                                     // 41: hybridgrid.v1.NodeConfig.EnvVarsEntry
+	nil,                                     // 42: hybridgrid.v1.CustomConfig.EnvEntry
+	nil,                                     // 43: hybridgrid.v1.CompileRequest.IncludeFilesEntry
+	(*WorkerStatusResponse_WorkerInfo)(nil), // 44: hybridgrid.v1.WorkerStatusResponse.WorkerInfo
 }
 var file_hybridgrid_v1_build_proto_depIdxs = []int32{
 	0,  // 0: hybridgrid.v1.CppConfig.target_arch:type_name -> hybridgrid.v1.Architecture
-	36, // 1: hybridgrid.v1.FlutterConfig.dart_defines:type_name -> hybridgrid.v1.FlutterConfig.DartDefinesEntry
-	37, // 2: hybridgrid.v1.UnityConfig.extra_args:type_name -> hybridgrid.v1.UnityConfig.ExtraArgsEntry
-	38, // 3: hybridgrid.v1.CocosConfig.platform_options:type_name -> hybridgrid.v1.CocosConfig.PlatformOptionsEntry
-	39, // 4: hybridgrid.v1.GoConfig.ldflags:type_name -> hybridgrid.v1.GoConfig.LdflagsEntry
-	40, // 5: hybridgrid.v1.NodeConfig.env_vars:type_name -> hybridgrid.v1.NodeConfig.EnvVarsEntry
-	2,  // 6: hybridgrid.v1.FlutterCapability.platforms:type_name -> hybridgrid.v1.TargetPlatform
-	2,  // 7: hybridgrid.v1.UnityCapability.build_targets:type_name -> hybridgrid.v1.TargetPlatform
-	2,  // 8: hybridgrid.v1.CocosCapability.platforms:type_name -> hybridgrid.v1.TargetPlatform
-	0,  // 9: hybridgrid.v1.WorkerCapabilities.native_arch:type_name -> hybridgrid.v1.Architecture
-	11, // 10: hybridgrid.v1.WorkerCapabilities.cpp:type_name -> hybridgrid.v1.CppCapability
-	12, // 11: hybridgrid.v1.WorkerCapabilities.flutter:type_name -> hybridgrid.v1.FlutterCapability
-	13, // 12: hybridgrid.v1.WorkerCapabilities.unity:type_name -> hybridgrid.v1.UnityCapability
-	14, // 13: hybridgrid.v1.WorkerCapabilities.cocos:type_name -> hybridgrid.v1.CocosCapability
-	15, // 14: hybridgrid.v1.WorkerCapabilities.rust:type_name -> hybridgrid.v1.RustCapability
-	16, // 15: hybridgrid.v1.WorkerCapabilities.go:type_name -> hybridgrid.v1.GoCapability
-	17, // 16: hybridgrid.v1.WorkerCapabilities.nodejs:type_name -> hybridgrid.v1.NodeCapability
-	18, // 17: hybridgrid.v1.HandshakeRequest.capabilities:type_name -> hybridgrid.v1.WorkerCapabilities
-	1,  // 18: hybridgrid.v1.BuildRequest.build_type:type_name -> hybridgrid.v1.BuildType
-	2,  // 19: hybridgrid.v1.BuildRequest.target_platform:type_name -> hybridgrid.v1.TargetPlatform
-	4,  // 20: hybridgrid.v1.BuildRequest.cpp_config:type_name -> hybridgrid.v1.CppConfig
-	5,  // 21: hybridgrid.v1.BuildRequest.flutter_config:type_name -> hybridgrid.v1.FlutterConfig
-	6,  // 22: hybridgrid.v1.BuildRequest.unity_config:type_name -> hybridgrid.v1.UnityConfig
-	7,  // 23: hybridgrid.v1.BuildRequest.cocos_config:type_name -> hybridgrid.v1.CocosConfig
-	8,  // 24: hybridgrid.v1.BuildRequest.rust_config:type_name -> hybridgrid.v1.RustConfig
-	9,  // 25: hybridgrid.v1.BuildRequest.go_config:type_name -> hybridgrid.v1.GoConfig
-	10, // 26: hybridgrid.v1.BuildRequest.node_config:type_name -> hybridgrid.v1.NodeConfig
-	3,  // 27: hybridgrid.v1.BuildResponse.status:type_name -> hybridgrid.v1.TaskStatus
-	22, // 28: hybridgrid.v1.BuildResponse.artifact_list:type_name -> hybridgrid.v1.ArtifactInfo
-	25, // 29: hybridgrid.v1.BuildChunk.metadata:type_name -> hybridgrid.v1.BuildMetadata
-	1,  // 30: hybridgrid.v1.BuildMetadata.build_type:type_name -> hybridgrid.v1.BuildType
-	2,  // 31: hybridgrid.v1.BuildMetadata.target_platform:type_name -> hybridgrid.v1.TargetPlatform
-	0,  // 32: hybridgrid.v1.CompileRequest.target_arch:type_name -> hybridgrid.v1.Architecture
-	0,  // 33: hybridgrid.v1.CompileRequest.client_arch:type_name -> hybridgrid.v1.Architecture
-	41, // 34: hybridgrid.v1.CompileRequest.include_files:type_name -> hybridgrid.v1.CompileRequest.IncludeFilesEntry
-	3,  // 35: hybridgrid.v1.CompileResponse.status:type_name -> hybridgrid.v1.TaskStatus
-	42, // 36: hybridgrid.v1.WorkerStatusResponse.workers:type_name -> hybridgrid.v1.WorkerStatusResponse.WorkerInfo
-	1,  // 37: hybridgrid.v1.WorkersForBuildRequest.build_type:type_name -> hybridgrid.v1.BuildType
-	2,  // 38: hybridgrid.v1.WorkersForBuildRequest.target_platform:type_name -> hybridgrid.v1.TargetPlatform
-	0,  // 39: hybridgrid.v1.WorkerStatusResponse.WorkerInfo.native_arch:type_name -> hybridgrid.v1.Architecture
-	19, // 40: hybridgrid.v1.BuildService.Handshake:input_type -> hybridgrid.v1.HandshakeRequest
-	21, // 41: hybridgrid.v1.BuildService.Build:input_type -> hybridgrid.v1.BuildRequest
-	24, // 42: hybridgrid.v1.BuildService.StreamBuild:input_type -> hybridgrid.v1.BuildChunk
-	26, // 43: hybridgrid.v1.BuildService.Compile:input_type -> hybridgrid.v1.CompileRequest
-	28, // 44: hybridgrid.v1.BuildService.HealthCheck:input_type -> hybridgrid.v1.HealthRequest
-	30, // 45: hybridgrid.v1.BuildService.GetWorkerStatus:input_type -> hybridgrid.v1.WorkerStatusRequest
-	32, // 46: hybridgrid.v1.BuildService.GetWorkersForBuild:input_type -> hybridgrid.v1.WorkersForBuildRequest
-	34, // 47: hybridgrid.v1.BuildService.ReportCacheHit:input_type -> hybridgrid.v1.ReportCacheHitRequest
-	20, // 48: hybridgrid.v1.BuildService.Handshake:output_type -> hybridgrid.v1.HandshakeResponse
-	23, // 49: hybridgrid.v1.BuildService.Build:output_type -> hybridgrid.v1.BuildResponse
-	23, // 50: hybridgrid.v1.BuildService.StreamBuild:output_type -> hybridgrid.v1.BuildResponse
-	27, // 51: hybridgrid.v1.BuildService.Compile:output_type -> hybridgrid.v1.CompileResponse
-	29, // 52: hybridgrid.v1.BuildService.HealthCheck:output_type -> hybridgrid.v1.HealthResponse
-	31, // 53: hybridgrid.v1.BuildService.GetWorkerStatus:output_type -> hybridgrid.v1.WorkerStatusResponse
-	33, // 54: hybridgrid.v1.BuildService.GetWorkersForBuild:output_type -> hybridgrid.v1.WorkersForBuildResponse
-	35, // 55: hybridgrid.v1.BuildService.ReportCacheHit:output_type -> hybridgrid.v1.ReportCacheHitResponse
-	48, // [48:56] is the sub-list for method output_type
-	40, // [40:48] is the sub-list for method input_type
-	40, // [40:40] is the sub-list for extension type_name
-	40, // [40:40] is the sub-list for extension extendee
-	0,  // [0:40] is the sub-list for field type_name
+	37, // 1: hybridgrid.v1.FlutterConfig.dart_defines:type_name -> hybridgrid.v1.FlutterConfig.DartDefinesEntry
+	38, // 2: hybridgrid.v1.UnityConfig.extra_args:type_name -> hybridgrid.v1.UnityConfig.ExtraArgsEntry
+	39, // 3: hybridgrid.v1.CocosConfig.platform_options:type_name -> hybridgrid.v1.CocosConfig.PlatformOptionsEntry
+	40, // 4: hybridgrid.v1.GoConfig.ldflags:type_name -> hybridgrid.v1.GoConfig.LdflagsEntry
+	41, // 5: hybridgrid.v1.NodeConfig.env_vars:type_name -> hybridgrid.v1.NodeConfig.EnvVarsEntry
+	42, // 6: hybridgrid.v1.CustomConfig.env:type_name -> hybridgrid.v1.CustomConfig.EnvEntry
+	2,  // 7: hybridgrid.v1.FlutterCapability.platforms:type_name -> hybridgrid.v1.TargetPlatform
+	2,  // 8: hybridgrid.v1.UnityCapability.build_targets:type_name -> hybridgrid.v1.TargetPlatform
+	2,  // 9: hybridgrid.v1.CocosCapability.platforms:type_name -> hybridgrid.v1.TargetPlatform
+	0,  // 10: hybridgrid.v1.WorkerCapabilities.native_arch:type_name -> hybridgrid.v1.Architecture
+	12, // 11: hybridgrid.v1.WorkerCapabilities.cpp:type_name -> hybridgrid.v1.CppCapability
+	13, // 12: hybridgrid.v1.WorkerCapabilities.flutter:type_name -> hybridgrid.v1.FlutterCapability
+	14, // 13: hybridgrid.v1.WorkerCapabilities.unity:type_name -> hybridgrid.v1.UnityCapability
+	15, // 14: hybridgrid.v1.WorkerCapabilities.cocos:type_name -> hybridgrid.v1.CocosCapability
+	16, // 15: hybridgrid.v1.WorkerCapabilities.rust:type_name -> hybridgrid.v1.RustCapability
+	17, // 16: hybridgrid.v1.WorkerCapabilities.go:type_name -> hybridgrid.v1.GoCapability
+	18, // 17: hybridgrid.v1.WorkerCapabilities.nodejs:type_name -> hybridgrid.v1.NodeCapability
+	19, // 18: hybridgrid.v1.HandshakeRequest.capabilities:type_name -> hybridgrid.v1.WorkerCapabilities
+	1,  // 19: hybridgrid.v1.BuildRequest.build_type:type_name -> hybridgrid.v1.BuildType
+	2,  // 20: hybridgrid.v1.BuildRequest.target_platform:type_name -> hybridgrid.v1.TargetPlatform
+	4,  // 21: hybridgrid.v1.BuildRequest.cpp_config:type_name -> hybridgrid.v1.CppConfig
+	5,  // 22: hybridgrid.v1.BuildRequest.flutter_config:type_name -> hybridgrid.v1.FlutterConfig
+	6,  // 23: hybridgrid.v1.BuildRequest.unity_config:type_name -> hybridgrid.v1.UnityConfig
+	7,  // 24: hybridgrid.v1.BuildRequest.cocos_config:type_name -> hybridgrid.v1.CocosConfig
+	8,  // 25: hybridgrid.v1.BuildRequest.rust_config:type_name -> hybridgrid.v1.RustConfig
+	9,  // 26: hybridgrid.v1.BuildRequest.go_config:type_name -> hybridgrid.v1.GoConfig
+	10, // 27: hybridgrid.v1.BuildRequest.node_config:type_name -> hybridgrid.v1.NodeConfig
+	11, // 28: hybridgrid.v1.BuildRequest.custom_config:type_name -> hybridgrid.v1.CustomConfig
+	3,  // 29: hybridgrid.v1.BuildResponse.status:type_name -> hybridgrid.v1.TaskStatus
+	23, // 30: hybridgrid.v1.BuildResponse.artifact_list:type_name -> hybridgrid.v1.ArtifactInfo
+	26, // 31: hybridgrid.v1.BuildChunk.metadata:type_name -> hybridgrid.v1.BuildMetadata
+	1,  // 32: hybridgrid.v1.BuildMetadata.build_type:type_name -> hybridgrid.v1.BuildType
+	2,  // 33: hybridgrid.v1.BuildMetadata.target_platform:type_name -> hybridgrid.v1.TargetPlatform
+	0,  // 34: hybridgrid.v1.CompileRequest.target_arch:type_name -> hybridgrid.v1.Architecture
+	0,  // 35: hybridgrid.v1.CompileRequest.client_arch:type_name -> hybridgrid.v1.Architecture
+	43, // 36: hybridgrid.v1.CompileRequest.include_files:type_name -> hybridgrid.v1.CompileRequest.IncludeFilesEntry
+	3,  // 37: hybridgrid.v1.CompileResponse.status:type_name -> hybridgrid.v1.TaskStatus
+	44, // 38: hybridgrid.v1.WorkerStatusResponse.workers:type_name -> hybridgrid.v1.WorkerStatusResponse.WorkerInfo
+	1,  // 39: hybridgrid.v1.WorkersForBuildRequest.build_type:type_name -> hybridgrid.v1.BuildType
+	2,  // 40: hybridgrid.v1.WorkersForBuildRequest.target_platform:type_name -> hybridgrid.v1.TargetPlatform
+	0,  // 41: hybridgrid.v1.WorkerStatusResponse.WorkerInfo.native_arch:type_name -> hybridgrid.v1.Architecture
+	20, // 42: hybridgrid.v1.BuildService.Handshake:input_type -> hybridgrid.v1.HandshakeRequest
+	22, // 43: hybridgrid.v1.BuildService.Build:input_type -> hybridgrid.v1.BuildRequest
+	25, // 44: hybridgrid.v1.BuildService.StreamBuild:input_type -> hybridgrid.v1.BuildChunk
+	27, // 45: hybridgrid.v1.BuildService.Compile:input_type -> hybridgrid.v1.CompileRequest
+	29, // 46: hybridgrid.v1.BuildService.HealthCheck:input_type -> hybridgrid.v1.HealthRequest
+	31, // 47: hybridgrid.v1.BuildService.GetWorkerStatus:input_type -> hybridgrid.v1.WorkerStatusRequest
+	33, // 48: hybridgrid.v1.BuildService.GetWorkersForBuild:input_type -> hybridgrid.v1.WorkersForBuildRequest
+	35, // 49: hybridgrid.v1.BuildService.ReportCacheHit:input_type -> hybridgrid.v1.ReportCacheHitRequest
+	21, // 50: hybridgrid.v1.BuildService.Handshake:output_type -> hybridgrid.v1.HandshakeResponse
+	24, // 51: hybridgrid.v1.BuildService.Build:output_type -> hybridgrid.v1.BuildResponse
+	24, // 52: hybridgrid.v1.BuildService.StreamBuild:output_type -> hybridgrid.v1.BuildResponse
+	28, // 53: hybridgrid.v1.BuildService.Compile:output_type -> hybridgrid.v1.CompileResponse
+	30, // 54: hybridgrid.v1.BuildService.HealthCheck:output_type -> hybridgrid.v1.HealthResponse
+	32, // 55: hybridgrid.v1.BuildService.GetWorkerStatus:output_type -> hybridgrid.v1.WorkerStatusResponse
+	34, // 56: hybridgrid.v1.BuildService.GetWorkersForBuild:output_type -> hybridgrid.v1.WorkersForBuildResponse
+	36, // 57: hybridgrid.v1.BuildService.ReportCacheHit:output_type -> hybridgrid.v1.ReportCacheHitResponse
+	50, // [50:58] is the sub-list for method output_type
+	42, // [42:50] is the sub-list for method input_type
+	42, // [42:42] is the sub-list for extension type_name
+	42, // [42:42] is the sub-list for extension extendee
+	0,  // [0:42] is the sub-list for field type_name
 }
 
 func init() { file_hybridgrid_v1_build_proto_init() }
@@ -3339,7 +3446,7 @@ func file_hybridgrid_v1_build_proto_init() {
 	if File_hybridgrid_v1_build_proto != nil {
 		return
 	}
-	file_hybridgrid_v1_build_proto_msgTypes[17].OneofWrappers = []any{
+	file_hybridgrid_v1_build_proto_msgTypes[18].OneofWrappers = []any{
 		(*BuildRequest_CppConfig)(nil),
 		(*BuildRequest_FlutterConfig)(nil),
 		(*BuildRequest_UnityConfig)(nil),
@@ -3347,8 +3454,9 @@ func file_hybridgrid_v1_build_proto_init() {
 		(*BuildRequest_RustConfig)(nil),
 		(*BuildRequest_GoConfig)(nil),
 		(*BuildRequest_NodeConfig)(nil),
+		(*BuildRequest_CustomConfig)(nil),
 	}
-	file_hybridgrid_v1_build_proto_msgTypes[20].OneofWrappers = []any{
+	file_hybridgrid_v1_build_proto_msgTypes[21].OneofWrappers = []any{
 		(*BuildChunk_Metadata)(nil),
 		(*BuildChunk_SourceChunk)(nil),
 	}
@@ -3358,7 +3466,7 @@ func file_hybridgrid_v1_build_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_hybridgrid_v1_build_proto_rawDesc), len(file_hybridgrid_v1_build_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   39,
+			NumMessages:   41,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
