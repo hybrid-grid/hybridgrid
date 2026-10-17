@@ -750,6 +750,174 @@ func TestBuild_Flutter_CacheMissForwardsAndCaches(t *testing.T) {
 	assert.Equal(t, int64(1), atomic.LoadInt64(&buildCalls))
 }
 
+func newUnityBuildRequest(taskID, sourceHash string) *pb.BuildRequest {
+	return &pb.BuildRequest{
+		TaskId:         taskID,
+		SourceHash:     sourceHash,
+		BuildType:      pb.BuildType_BUILD_TYPE_UNITY,
+		TargetPlatform: pb.TargetPlatform_PLATFORM_ANDROID,
+		Config: &pb.BuildRequest_UnityConfig{
+			UnityConfig: &pb.UnityConfig{
+				UnityVersion: "2022.3",
+				BuildMethod:  "BuildScript.Build",
+			},
+		},
+	}
+}
+
+// TestBuild_Flutter_QueuesUntilSlotFrees mirrors
+// TestCompile_QueuesUntilSlotFrees for the archive-build path: the only
+// flutter worker is at capacity, so after the fast dispatch budget the
+// Build call parks in the dispatch queue instead of failing, and
+// dispatches to the (mock) worker once the slot frees.
+func TestBuild_Flutter_QueuesUntilSlotFrees(t *testing.T) {
+	addr, workerCleanup := setupTestWorker(t, func(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+		return &pb.BuildResponse{Status: pb.TaskStatus_STATUS_COMPLETED, ExitCode: 0, Stdout: "ok"}, nil
+	})
+	defer workerCleanup()
+
+	cfg := Config{Port: 0, HeartbeatTTL: 30 * time.Second, RequestTimeout: 30 * time.Second, DispatchQueueTimeout: 5 * time.Second}
+	s, client, cleanup := setupTestServer(t, cfg)
+	defer cleanup()
+
+	// One slot, already occupied: every fast attempt fails the
+	// capacity check.
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "flutter-worker-busy",
+		Address: addr,
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch: pb.Architecture_ARCH_X86_64,
+			Flutter: &pb.FlutterCapability{
+				SdkVersion: "3.10.0",
+				Platforms:  []pb.TargetPlatform{pb.TargetPlatform_PLATFORM_ANDROID},
+			},
+		},
+		MaxParallel: 1,
+		ActiveTasks: 1, // full until the test frees it
+	}))
+
+	type buildResult struct {
+		resp *pb.BuildResponse
+		err  error
+	}
+	res := make(chan buildResult, 1)
+	go func() {
+		resp, err := client.Build(context.Background(), newFlutterBuildRequest("flutter-queued-1", "deadbeef"))
+		res <- buildResult{resp, err}
+	}()
+
+	// Well past the fast budget (~700 ms) plus the entry re-check
+	// budget (~700 ms): the call must be parked, not failed and not
+	// dispatched.
+	time.Sleep(1800 * time.Millisecond)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&s.queuedCompiles),
+		"after the fast dispatch budget the flutter build should be parked in the dispatch queue")
+
+	// The occupying task finishes: slot frees, signal fires.
+	s.registry.DecrementTasks("flutter-worker-busy", true, 10*time.Millisecond)
+	s.signalDispatchCapacity()
+
+	select {
+	case r := <-res:
+		require.NoError(t, r.err)
+		assert.Equal(t, pb.TaskStatus_STATUS_COMPLETED, r.resp.Status,
+			"the queued flutter build should dispatch and complete once capacity frees")
+		assert.Equal(t, int64(0), atomic.LoadInt64(&s.queuedCompiles),
+			"queue admission must be released when the build finishes")
+	case <-time.After(5 * time.Second):
+		t.Fatal("queued flutter build did not finish within 5s of the slot freeing")
+	}
+}
+
+// TestBuild_Flutter_QueueTimeout verifies the queued phase is bounded
+// for archive builds too: with capacity never freeing, Build fails
+// with the queue-timeout message after DispatchQueueTimeout.
+func TestBuild_Flutter_QueueTimeout(t *testing.T) {
+	addr, workerCleanup := setupTestWorker(t, nil)
+	defer workerCleanup()
+
+	s, client, cleanup := setupTestServer(t, Config{
+		Port:                 0,
+		HeartbeatTTL:         30 * time.Second,
+		RequestTimeout:       30 * time.Second,
+		DispatchQueueTimeout: 300 * time.Millisecond,
+	})
+	defer cleanup()
+
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "flutter-worker-full",
+		Address: addr,
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch: pb.Architecture_ARCH_X86_64,
+			Flutter: &pb.FlutterCapability{
+				SdkVersion: "3.10.0",
+				Platforms:  []pb.TargetPlatform{pb.TargetPlatform_PLATFORM_ANDROID},
+			},
+		},
+		MaxParallel: 1,
+		ActiveTasks: 1,
+	}))
+
+	resp, err := client.Build(context.Background(), newFlutterBuildRequest("flutter-queue-timeout", "cafe1234"))
+	require.NoError(t, err)
+	assert.Equal(t, pb.TaskStatus_STATUS_FAILED, resp.Status)
+	assert.Contains(t, resp.Stderr, "dispatch queue timeout")
+	assert.Equal(t, int64(0), atomic.LoadInt64(&s.queuedCompiles))
+}
+
+// TestBuild_Unity_QueuesUntilSlotFrees covers the unity handler on the
+// same shared backpressure path.
+func TestBuild_Unity_QueuesUntilSlotFrees(t *testing.T) {
+	addr, workerCleanup := setupTestWorker(t, func(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+		return &pb.BuildResponse{Status: pb.TaskStatus_STATUS_COMPLETED, ExitCode: 0, Stdout: "ok"}, nil
+	})
+	defer workerCleanup()
+
+	cfg := Config{Port: 0, HeartbeatTTL: 30 * time.Second, RequestTimeout: 30 * time.Second, DispatchQueueTimeout: 5 * time.Second}
+	s, client, cleanup := setupTestServer(t, cfg)
+	defer cleanup()
+
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "unity-worker-busy",
+		Address: addr,
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch: pb.Architecture_ARCH_X86_64,
+			Unity: &pb.UnityCapability{
+				Versions:     []string{"2022.3"},
+				BuildTargets: []pb.TargetPlatform{pb.TargetPlatform_PLATFORM_ANDROID},
+			},
+		},
+		MaxParallel: 1,
+		ActiveTasks: 1,
+	}))
+
+	type buildResult struct {
+		resp *pb.BuildResponse
+		err  error
+	}
+	res := make(chan buildResult, 1)
+	go func() {
+		resp, err := client.Build(context.Background(), newUnityBuildRequest("unity-queued-1", "beef5678"))
+		res <- buildResult{resp, err}
+	}()
+
+	time.Sleep(1800 * time.Millisecond)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&s.queuedCompiles),
+		"after the fast dispatch budget the unity build should be parked in the dispatch queue")
+
+	s.registry.DecrementTasks("unity-worker-busy", true, 10*time.Millisecond)
+	s.signalDispatchCapacity()
+
+	select {
+	case r := <-res:
+		require.NoError(t, r.err)
+		assert.Equal(t, pb.TaskStatus_STATUS_COMPLETED, r.resp.Status)
+		assert.Equal(t, int64(0), atomic.LoadInt64(&s.queuedCompiles))
+	case <-time.After(5 * time.Second):
+		t.Fatal("queued unity build did not finish within 5s of the slot freeing")
+	}
+}
+
 // --- StreamBuild ---
 
 func TestStreamBuild_NoMetadata(t *testing.T) {
