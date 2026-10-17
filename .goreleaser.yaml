@@ -7,6 +7,9 @@ project_name: hybridgrid
 
 before:
   hooks:
+    # hg-dashboard embeds web/dist via go:embed (internal/observability/ui/server.go),
+    # but web/dist is gitignored -- build the UI first or go build fails on a fresh checkout.
+    - sh -c 'cd internal/observability/ui/web && npm ci --no-fund --no-audit && npm run build'
     # Skip go mod tidy and go generate - dependencies already committed and some require Go 1.24+
     # - go mod tidy
     # - go generate ./...
