@@ -30,7 +30,8 @@ proto-gen:
 		--go-grpc_out=gen/go --go-grpc_opt=module=github.com/h3nr1-d14z/hybridgrid/gen/go \
 		-I proto \
 	proto/hybridgrid/v1/build.proto \
-	proto/hybridgrid/v1/telemetry.proto
+	proto/hybridgrid/v1/telemetry.proto \
+	proto/hybridgrid/v1/scheduler_plugin.proto
 
 proto-install:
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest

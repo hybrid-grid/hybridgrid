@@ -424,6 +424,15 @@ type Config struct {
 	// "no worker available" failure. 0 disables queueing entirely
 	// (ablation: the pre-backpressure reject-after-budget behavior).
 	DispatchQueueTimeout time.Duration
+	// SchedulerPluginAddr is the gRPC endpoint of an external scheduler
+	// plugin (contract schedulerv1alpha1). Used when SchedulerType is
+	// "external"; the plugin decides dispatches within
+	// SchedulerPluginTimeout and the in-process fallback (leastloaded)
+	// answers when it fails, times out, or returns an unknown worker.
+	SchedulerPluginAddr string
+	// SchedulerPluginTimeout bounds each plugin Select call. Default
+	// 50ms when zero.
+	SchedulerPluginTimeout time.Duration
 }
 
 // DefaultConfig returns sensible defaults.
@@ -492,6 +501,20 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 			Registry:       reg,
 			CircuitChecker: cm,
 		})
+	case "external":
+		plugin, err := scheduler.NewPluginScheduler(scheduler.PluginConfig{
+			Address:  cfg.SchedulerPluginAddr,
+			Timeout:  cfg.SchedulerPluginTimeout,
+			Inner:    scheduler.NewLeastLoadedScheduler(reg),
+			Registry: reg,
+			Circuit:  cm,
+			Insecure: true,
+		})
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to connect scheduler plugin; using leastloaded")
+			return scheduler.NewLeastLoadedScheduler(reg)
+		}
+		return plugin
 	case "leastloaded", "":
 		return scheduler.NewLeastLoadedScheduler(reg)
 	default:
@@ -733,6 +756,11 @@ func (s *Server) Stop() {
 	}
 	if reg, ok := s.registry.(*registry.InMemoryRegistry); ok {
 		reg.Stop()
+	}
+	// An external scheduler plugin owns a gRPC connection and a
+	// feedback pump goroutine; both stop here.
+	if ps, ok := s.scheduler.(*scheduler.PluginScheduler); ok {
+		ps.Close()
 	}
 	if s.taskLogger != nil {
 		_ = s.taskLogger.Close()
