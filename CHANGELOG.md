@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Builder Plugins (`builderv1alpha1`)**: users add build types by dropping an `hg-exec-<id>` executable into a worker's `--builder-dir` — any language, no system code changes. Discovery + capability handshake; task JSON on stdin / result JSON on stdout / console on stderr; outputs archived back with SHA-256 and a path-escape guard. `hgbuild build -t <id> <dir> -- <args>` submits; `sdk/builder` (Go SDK) and `examples/builders/hg-exec-script` (runs the project's own build script) lower the entry point to zero plugin code. See `docs/plugins.md`
+- **Scheduler Plugins (`schedulerv1alpha1`)**: `hg-coord serve --scheduler=external --scheduler-plugin-addr=...` delegates worker selection to an external gRPC process (fleet snapshot + dispatch features per Select). Errors, timeouts, empty answers, and unknown worker ids fall back to the in-process scheduler so a broken plugin never stalls dispatch; feedback is async and lossy. Reference: `examples/schedulers/leastloaded-plugin`
+- **Event Webhooks (`eventhooksv1`)**: `--event-webhook URL` (repeatable) POSTs `task_started`/`task_completed` JSON to HTTP endpoints — non-blocking by construction (bounded queue, drop on overflow, bounded retries). See `docs/plugins.md`
+- **Dispatch backpressure for all build types**: Flutter and Unity selection now runs through the same `dispatchLoop` + bounded queue as Compile (atomic select-then-book; spare capacity is part of the match), and their task events report coordinator-side queue_ms — over-capacity bursts stretch over time instead of hard-failing
+- CI: Go 1.27.2 toolchain, golangci-lint v2.15.0
+
+### Fixed
+- Reachable `x/net` http2 advisories cleared (`x/net` v0.61.0, OpenTelemetry v1.45.0)
+
 ## [v0.5.0] - 2026-09-17
 
 ### Added
