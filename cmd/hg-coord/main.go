@@ -75,12 +75,17 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			epsilonValue, _ := cmd.Flags().GetFloat64("epsilon")
 			alphaValue, _ := cmd.Flags().GetFloat64("alpha")
 			warmStart, _ := cmd.Flags().GetInt("warm-start")
+			schedulerPluginAddr, _ := cmd.Flags().GetString("scheduler-plugin-addr")
+			schedulerPluginTimeout, _ := cmd.Flags().GetDuration("scheduler-plugin-timeout")
 			loadPenalty, _ := cmd.Flags().GetFloat64("load-penalty")
 
 			// Validate scheduler choice (fail fast rather than silent fallback).
-			validSchedulers := map[string]bool{"leastloaded": true, "simple": true, "p2c": true, "epsilon-greedy": true, "linucb": true, "hybrid-linucb": true, "heft": true, "icecc-fastest": true}
+			validSchedulers := map[string]bool{"leastloaded": true, "simple": true, "p2c": true, "epsilon-greedy": true, "linucb": true, "hybrid-linucb": true, "heft": true, "icecc-fastest": true, "external": true}
 			if !validSchedulers[schedulerType] {
-				return fmt.Errorf("invalid --scheduler %q; must be one of: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, heft, icecc-fastest", schedulerType)
+				return fmt.Errorf("invalid --scheduler %q; must be one of: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, heft, icecc-fastest, external", schedulerType)
+			}
+			if schedulerType == "external" && schedulerPluginAddr == "" {
+				return fmt.Errorf("--scheduler=external requires --scheduler-plugin-addr")
 			}
 			if epsilonValue < 0 || epsilonValue > 1 {
 				return fmt.Errorf("invalid --epsilon %v; must be in [0, 1]", epsilonValue)
@@ -175,6 +180,8 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			cfg.AlphaValue = alphaValue
 			cfg.WarmStartTasks = warmStart
 			cfg.LoadPenaltyValue = loadPenalty
+			cfg.SchedulerPluginAddr = schedulerPluginAddr
+			cfg.SchedulerPluginTimeout = schedulerPluginTimeout
 			cfg.Tracing.Enable = tracingEnable
 			cfg.Tracing.Endpoint = tracingEndpoint
 			cfg.Tracing.ServiceName = tracingServiceName
@@ -293,7 +300,9 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 	serveCmd.Flags().Int("grpc-port", 9000, "gRPC server port")
 	serveCmd.Flags().Int("http-port", 8080, "HTTP ops port (health, metrics, log-level)")
 	serveCmd.Flags().Bool("no-mdns", false, "Disable mDNS advertisement")
-	serveCmd.Flags().String("scheduler", "leastloaded", "Scheduler type: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, heft, icecc-fastest")
+	serveCmd.Flags().String("scheduler", "leastloaded", "Scheduler type: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, heft, icecc-fastest, external")
+	serveCmd.Flags().String("scheduler-plugin-addr", "", "External scheduler plugin gRPC endpoint (used with --scheduler=external)")
+	serveCmd.Flags().Duration("scheduler-plugin-timeout", 50*time.Millisecond, "Per-Select timeout for the external scheduler plugin")
 	serveCmd.Flags().String("task-log", "", "Path to per-task JSON Lines log file (default: stdout)")
 	serveCmd.Flags().Float64("epsilon", 0.1, "Exploration rate for epsilon-greedy scheduler (in [0, 1]; ignored otherwise)")
 	serveCmd.Flags().Float64("alpha", 1.0, "LinUCB exploration coefficient α (in [0, 10]; ignored for other schedulers)")
