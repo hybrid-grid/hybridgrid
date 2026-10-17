@@ -18,7 +18,7 @@ RUN npm run build
 # =============================================================================
 # Stage 1: Builder - Compiles all Go binaries
 # =============================================================================
-FROM golang:1.25-alpine AS builder
+FROM golang:1.27-alpine AS builder
 
 # Install git for version info and ca-certificates for HTTPS
 RUN apk add --no-cache git ca-certificates tzdata

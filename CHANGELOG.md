@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI: Go 1.27.2 toolchain, golangci-lint v2.15.0
 
 ### Fixed
+- Release pipeline and Docker images catch up with `go.mod` (Go 1.26+): all `golang:1.25` builder images bumped to 1.27 (the production `Dockerfile` would have failed the next tag build)
+- Release pipeline and test images build the dashboard frontend before embedding it: GoReleaser gains a `before` hook (`npm ci && npm run build`) and the e2e/stress Dockerfiles gain a Node builder stage — `hg-dashboard` embeds the gitignored `web/dist`, so a fresh checkout previously failed `go build` (next tag release and `docker compose` test stacks would have failed)
 - Reachable `x/net` http2 advisories cleared (`x/net` v0.61.0, OpenTelemetry v1.45.0)
 
 ## [v0.5.0] - 2026-09-17
