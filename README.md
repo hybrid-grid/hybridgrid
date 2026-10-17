@@ -575,6 +575,15 @@ golangci-lint run
 protoc --go_out=. --go-grpc_out=. proto/build.proto
 ```
 
+## Extending Hybridgrid (plugins)
+
+Hybridgrid is extensible at four seams — see **[docs/plugins.md](docs/plugins.md)** for contracts, versioning, and the security model:
+
+- **Builder plugins**: add a build type by dropping an `hg-exec-<id>` executable in the worker's `--builder-dir` (any language). Submit with `hgbuild build -t <id> <dir> -- <args>`.
+- **Scheduler plugins**: replace the coordinator's scheduling policy with an external gRPC process: `hg-coord serve --scheduler=external --scheduler-plugin-addr=host:port`.
+- **Event webhooks**: receive `task_started`/`task_completed` JSON at your HTTP endpoints: `hg-coord serve --event-webhook https://...`.
+- **Telemetry consumers**: any process can consume cluster telemetry over the gRPC `TelemetryService` (the bundled dashboard is just one consumer).
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.

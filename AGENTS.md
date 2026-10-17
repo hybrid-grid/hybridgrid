@@ -70,6 +70,10 @@ internal/               # Core application packages
   platform/             # Platform-specific code
   security/             # Auth (token), TLS/mTLS, input validation
   worker/               # Worker: native, Docker, and MSVC executors
+    builders/           # Plugin-builder discovery + exec contract (builderv1alpha1)
+  webhook/ (under coordinator/)  # HTTP event webhooks (eventhooksv1)
+sdk/builder/            # Go SDK for plugin-builder authors
+examples/               # Reference plugins (builders/, schedulers/)
 gen/go/                 # Generated protobuf Go code (do not edit)
 proto/                  # Protobuf definitions (.proto files)
 test/                   # Integration, load, chaos, and stress tests
