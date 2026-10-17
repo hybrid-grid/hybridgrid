@@ -101,3 +101,27 @@ OTel Collector + Terraform: chi phí thật là giữ contract ổn định — 
 contract để nhỏ nhất, version tường minh (`v1alpha1`). P0: đưa selection
 của flutter/unity vào cùng cơ chế backpressure của cpp (đỡ nợ kỹ thuật,
 events báo queue_ms thật).
+
+### P1 (builder plugin system)
+- Proto (additive): WorkerCapabilities.custom_builders=27,
+  BuildRequest.custom_builder=19 + CustomConfig oneof member 18.
+- internal/worker/builders: discovery (--builder-dir, hg-exec-*, id
+  charset [a-z0-9-], capability handshake w/ exact api match),
+  Run (task JSON stdin, result JSON stdout, console stderr, ctx kill).
+- executor: exported ExtractSourceArchive + ArchivePaths (sha256+size
+  metadata, path-escape guard for plugin-declared outputs).
+- Worker Build(): custom_builder routing -> extract -> run -> archive.
+- Coordinator: handleCustomBuild via selectBuildWorker (same
+  backpressure), no coordinator cache by design (builder owns
+  fingerprinting), events carry builder id as BuildType + queue_ms.
+- CLI: `hgbuild build -t <id> <dir> -- <args>` archives the project,
+  unpacks artifacts to hybridgrid-out/ with checksums; unknown -t
+  values route to the plugin path.
+- sdk/builder: Go SDK (Main(b Builder) speaks the protocol).
+- examples/builders/hg-exec-script: reference meta-builder — runs the
+  project's hg-build.sh/build.sh, outputs from .hg-outputs or dist/.
+- Tests: builders pkg (helper-process pattern, cross-OS), coordinator
+  routing (NoWorker/Forwards/QueuesUntilSlotFrees, testify, -race).
+- Live end-to-end verified: worker discovered hg-exec-script from
+  /tmp/builders, `hgbuild build -t script` produced artifacts +
+  checksums (see session evidence).

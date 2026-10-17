@@ -99,6 +99,13 @@ message NodeConfig {
   map<string, string> env_vars = 4;
 }
 
+// CustomConfig configures a plugin-builder build: everything the
+// hg-exec-<id> plugin needs beyond the source archive itself.
+message CustomConfig {
+  repeated string args = 1;          // passthrough args to the builder
+  map<string, string> env = 2;       // extra env for the builder process
+}
+
 // ============================================================
 // Worker Capabilities
 // ============================================================
@@ -176,6 +183,12 @@ message WorkerCapabilities {
   RustCapability rust = 24;
   GoCapability go = 25;
   NodeCapability nodejs = 26;
+
+  // Plugin builders discovered from --builder-dir (hg-exec-<id>
+  // executables that completed the builderv1alpha1 handshake). Workers
+  // advertise the builder ids here; BuildRequest.custom_builder routes
+  // a build to one.
+  repeated string custom_builders = 27;
 }
 
 // ============================================================
@@ -220,7 +233,14 @@ message BuildRequest {
     RustConfig rust_config = 14;
     GoConfig go_config = 15;
     NodeConfig node_config = 16;
+    // Plugin-builder configuration (with BuildRequest.custom_builder)
+    CustomConfig custom_config = 18;
   }
+
+  // Plugin builder id (e.g. "rust", "script"). When non-empty the
+  // request routes to that worker-side plugin builder instead of a
+  // core build type.
+  string custom_builder = 19;
 
   // Build session ID for grouping related builds (clients read
   // HG_BUILD_ID from the wrapping build tool; empty for ungrouped)
