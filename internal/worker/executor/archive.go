@@ -59,10 +59,10 @@ func ArchivePaths(root string, relPaths []string) ([]byte, []*pb.ArtifactInfo, e
 		}
 
 		infos = append(infos, &pb.ArtifactInfo{
-			Name:       filepath.ToSlash(rel),
-			Path:       filepath.ToSlash(rel),
-			SizeBytes:  size,
-			Checksum:   checksum,
+			Name:      filepath.ToSlash(rel),
+			Path:      filepath.ToSlash(rel),
+			SizeBytes: size,
+			Checksum:  checksum,
 		})
 	}
 
