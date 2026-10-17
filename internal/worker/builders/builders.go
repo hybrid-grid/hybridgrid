@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -124,7 +125,13 @@ func (r *Registry) Discover(dir string) []string {
 		}
 		path := dir + string(os.PathSeparator) + name
 		info, err := os.Stat(path)
-		if err != nil || info.IsDir() || info.Mode()&0111 == 0 {
+		if err != nil || info.IsDir() {
+			continue
+		}
+		// The executable bit does not exist on Windows; the .exe
+		// naming convention (and CreateProcess) carries executability
+		// there instead.
+		if runtime.GOOS != "windows" && info.Mode()&0111 == 0 {
 			continue
 		}
 		cap, err := probe(path)
