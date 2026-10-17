@@ -124,7 +124,7 @@ jobs:
         # an open PR. Bumping the pin is a one-line, reviewable change.
         uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.13.2
+          version: v2.15.0
           args: --timeout=5m
 
   # ============================================
