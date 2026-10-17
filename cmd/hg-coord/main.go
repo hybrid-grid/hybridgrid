@@ -15,6 +15,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/config"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/opshttp"
 	coordserver "github.com/h3nr1-d14z/hybridgrid/internal/coordinator/server"
+	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/webhook"
 	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
 	"github.com/h3nr1-d14z/hybridgrid/internal/logging"
 	observabilitymetrics "github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
@@ -76,6 +77,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			alphaValue, _ := cmd.Flags().GetFloat64("alpha")
 			warmStart, _ := cmd.Flags().GetInt("warm-start")
 			schedulerPluginAddr, _ := cmd.Flags().GetString("scheduler-plugin-addr")
+			eventWebhooks, _ := cmd.Flags().GetStringSlice("event-webhook")
 			schedulerPluginTimeout, _ := cmd.Flags().GetDuration("scheduler-plugin-timeout")
 			loadPenalty, _ := cmd.Flags().GetFloat64("load-penalty")
 
@@ -234,15 +236,31 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
+			// Event webhooks: fan task events out to HTTP endpoints
+			// alongside the telemetry notifier.
+			var eventNotifier coordserver.EventNotifier
+			if len(eventWebhooks) > 0 {
+				eventNotifier = webhook.New(webhook.Config{Endpoints: eventWebhooks})
+				defer func() {
+					if c, ok := eventNotifier.(*webhook.Notifier); ok {
+						c.Close()
+					}
+				}()
+			}
+
 			// Wire task events from the coordinator to the telemetry
 			// service; the standalone dashboard binary consumes them
 			// over gRPC StreamEvents, so the coordinator no longer
 			// needs an in-process event fan-out.
 			teleStart, teleComplete := teleSvc.CreateEventNotifier()
-			srv.SetEventNotifier(&eventNotifierWrapper{
+			notifier := coordserver.EventNotifier(&eventNotifierWrapper{
 				onStart:    teleStart,
 				onComplete: teleComplete,
 			})
+			if eventNotifier != nil {
+				notifier = &fanoutNotifier{primary: notifier, secondary: eventNotifier}
+			}
+			srv.SetEventNotifier(notifier)
 
 			errCh := make(chan error, 2)
 			go func() {
@@ -303,6 +321,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 	serveCmd.Flags().String("scheduler", "leastloaded", "Scheduler type: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, heft, icecc-fastest, external")
 	serveCmd.Flags().String("scheduler-plugin-addr", "", "External scheduler plugin gRPC endpoint (used with --scheduler=external)")
 	serveCmd.Flags().Duration("scheduler-plugin-timeout", 50*time.Millisecond, "Per-Select timeout for the external scheduler plugin")
+	serveCmd.Flags().StringSlice("event-webhook", nil, "HTTP webhook URL(s) receiving task events (repeatable)")
 	serveCmd.Flags().String("task-log", "", "Path to per-task JSON Lines log file (default: stdout)")
 	serveCmd.Flags().Float64("epsilon", 0.1, "Exploration rate for epsilon-greedy scheduler (in [0, 1]; ignored otherwise)")
 	serveCmd.Flags().Float64("alpha", 1.0, "LinUCB exploration coefficient α (in [0, 10]; ignored for other schedulers)")
@@ -348,4 +367,22 @@ func (w *eventNotifierWrapper) NotifyTaskCompleted(event *coordserver.TaskEvent)
 	if w.onComplete != nil {
 		w.onComplete(event.ID, event.BuildID, event.BuildType, event.Status, event.WorkerID, event.StartedAtMs, event.CompletedAtMs, event.DurationMs, event.QueueTimeMs, event.CompileTimeMs, event.ExitCode, event.ErrorMessage)
 	}
+}
+
+// fanoutNotifier delivers task events to two notifiers (telemetry +
+// webhooks). The secondary (webhook) notifier is non-blocking by
+// contract, so the telemetry path never waits on HTTP delivery.
+type fanoutNotifier struct {
+	primary   coordserver.EventNotifier
+	secondary coordserver.EventNotifier
+}
+
+func (f *fanoutNotifier) NotifyTaskStarted(event *coordserver.TaskEvent) {
+	f.primary.NotifyTaskStarted(event)
+	f.secondary.NotifyTaskStarted(event)
+}
+
+func (f *fanoutNotifier) NotifyTaskCompleted(event *coordserver.TaskEvent) {
+	f.primary.NotifyTaskCompleted(event)
+	f.secondary.NotifyTaskCompleted(event)
 }
