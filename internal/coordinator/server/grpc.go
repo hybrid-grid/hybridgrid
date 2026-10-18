@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"math"
@@ -430,6 +431,9 @@ type Config struct {
 	// SchedulerPluginTimeout and the in-process fallback (leastloaded)
 	// answers when it fails, times out, or returns an unknown worker.
 	SchedulerPluginAddr string
+	// SchedulerPluginTLS enables TLS/mTLS to the external scheduler
+	// plugin. Nil dials plaintext (local socket).
+	SchedulerPluginTLS *tls.Config
 	// SchedulerPluginTimeout bounds each plugin Select call. Default
 	// 50ms when zero.
 	SchedulerPluginTimeout time.Duration
@@ -503,12 +507,12 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 		})
 	case "external":
 		plugin, err := scheduler.NewPluginScheduler(scheduler.PluginConfig{
-			Address:  cfg.SchedulerPluginAddr,
-			Timeout:  cfg.SchedulerPluginTimeout,
-			Inner:    scheduler.NewLeastLoadedScheduler(reg),
-			Registry: reg,
-			Circuit:  cm,
-			Insecure: true,
+			Address:   cfg.SchedulerPluginAddr,
+			Timeout:   cfg.SchedulerPluginTimeout,
+			Inner:     scheduler.NewLeastLoadedScheduler(reg),
+			Registry:  reg,
+			Circuit:   cm,
+			TLSConfig: cfg.SchedulerPluginTLS,
 		})
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to connect scheduler plugin; using leastloaded")

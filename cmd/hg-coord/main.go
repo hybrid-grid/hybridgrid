@@ -20,6 +20,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/logging"
 	observabilitymetrics "github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
+	hgtls "github.com/h3nr1-d14z/hybridgrid/internal/security/tls"
 	"github.com/h3nr1-d14z/hybridgrid/internal/telemetry"
 )
 
@@ -79,6 +80,9 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			schedulerPluginAddr, _ := cmd.Flags().GetString("scheduler-plugin-addr")
 			eventWebhooks, _ := cmd.Flags().GetStringSlice("event-webhook")
 			schedulerPluginTimeout, _ := cmd.Flags().GetDuration("scheduler-plugin-timeout")
+			schedulerPluginCA, _ := cmd.Flags().GetString("scheduler-plugin-ca")
+			schedulerPluginCert, _ := cmd.Flags().GetString("scheduler-plugin-cert")
+			schedulerPluginKey, _ := cmd.Flags().GetString("scheduler-plugin-key")
 			loadPenalty, _ := cmd.Flags().GetFloat64("load-penalty")
 
 			// Validate scheduler choice (fail fast rather than silent fallback).
@@ -88,6 +92,12 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			}
 			if schedulerType == "external" && schedulerPluginAddr == "" {
 				return fmt.Errorf("--scheduler=external requires --scheduler-plugin-addr")
+			}
+			// Plugin mTLS is all-or-nothing: the coordinator both
+			// verifies the plugin (CA) and proves itself (cert+key).
+			pluginTLSGiven := schedulerPluginCA != "" || schedulerPluginCert != "" || schedulerPluginKey != ""
+			if pluginTLSGiven && (schedulerPluginCA == "" || schedulerPluginCert == "" || schedulerPluginKey == "") {
+				return fmt.Errorf("--scheduler-plugin-ca, --scheduler-plugin-cert and --scheduler-plugin-key must be set together")
 			}
 			if epsilonValue < 0 || epsilonValue > 1 {
 				return fmt.Errorf("invalid --epsilon %v; must be in [0, 1]", epsilonValue)
@@ -214,6 +224,22 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 				log.Debug().Msg("TLS disabled")
 			}
 
+			if pluginTLSGiven {
+				pluginTLS, err := hgtls.LoadClientTLS(hgtls.Config{
+					Enabled:  true,
+					CertFile: schedulerPluginCert,
+					KeyFile:  schedulerPluginKey,
+					ClientCA: schedulerPluginCA,
+				})
+				if err != nil {
+					return fmt.Errorf("failed to load scheduler plugin TLS config: %w", err)
+				}
+				cfg.SchedulerPluginTLS = pluginTLS
+				log.Info().
+					Str("plugin_addr", schedulerPluginAddr).
+					Msg("Scheduler plugin TLS (mTLS) enabled")
+			}
+
 			// Initialize Prometheus metrics
 			_ = observabilitymetrics.Default()
 			log.Info().Msg("Prometheus metrics initialized")
@@ -321,6 +347,9 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 	serveCmd.Flags().String("scheduler", "leastloaded", "Scheduler type: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, heft, icecc-fastest, external")
 	serveCmd.Flags().String("scheduler-plugin-addr", "", "External scheduler plugin gRPC endpoint (used with --scheduler=external)")
 	serveCmd.Flags().Duration("scheduler-plugin-timeout", 50*time.Millisecond, "Per-Select timeout for the external scheduler plugin")
+	serveCmd.Flags().String("scheduler-plugin-ca", "", "CA certificate verifying the scheduler plugin (set with cert+key for plugin mTLS)")
+	serveCmd.Flags().String("scheduler-plugin-cert", "", "Client certificate the coordinator presents to the scheduler plugin (mTLS)")
+	serveCmd.Flags().String("scheduler-plugin-key", "", "Private key for the scheduler plugin client certificate (mTLS)")
 	serveCmd.Flags().StringSlice("event-webhook", nil, "HTTP webhook URL(s) receiving task events (repeatable)")
 	serveCmd.Flags().String("task-log", "", "Path to per-task JSON Lines log file (default: stdout)")
 	serveCmd.Flags().Float64("epsilon", 0.1, "Exploration rate for epsilon-greedy scheduler (in [0, 1]; ignored otherwise)")
