@@ -21,8 +21,10 @@ import (
 	"strings"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
+	hgtls "github.com/h3nr1-d14z/hybridgrid/internal/security/tls"
 )
 
 type server struct {
@@ -79,13 +81,34 @@ func supports(buildTypes []string, want string) bool {
 
 func main() {
 	port := flag.Int("port", 50099, "listen port")
+	tlsCert := flag.String("tls-cert", "", "TLS certificate file (PEM); set with tls-key and tls-client-ca for mTLS")
+	tlsKey := flag.String("tls-key", "", "TLS private key file (PEM)")
+	tlsClientCA := flag.String("tls-client-ca", "", "CA certificate required from the coordinator (mTLS)")
 	flag.Parse()
 
 	lis, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
 	if err != nil {
 		log.Fatalf("listen: %v", err)
 	}
-	gs := grpc.NewServer()
+	var opts []grpc.ServerOption
+	if *tlsCert != "" || *tlsKey != "" || *tlsClientCA != "" {
+		if *tlsCert == "" || *tlsKey == "" || *tlsClientCA == "" {
+			log.Fatal("tls-cert, tls-key and tls-client-ca must be set together")
+		}
+		cfg, err := hgtls.LoadServerTLS(hgtls.Config{
+			Enabled:           true,
+			CertFile:          *tlsCert,
+			KeyFile:           *tlsKey,
+			ClientCA:          *tlsClientCA,
+			RequireClientCert: true,
+		})
+		if err != nil {
+			log.Fatalf("load TLS: %v", err)
+		}
+		opts = append(opts, grpc.Creds(credentials.NewTLS(cfg)))
+		log.Printf("mTLS enabled")
+	}
+	gs := grpc.NewServer(opts...)
 	pb.RegisterSchedulerPluginServer(gs, &server{})
 	log.Printf("leastloaded scheduler plugin listening on %s", lis.Addr())
 	if err := gs.Serve(lis); err != nil {

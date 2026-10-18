@@ -145,6 +145,23 @@ hg-coord serve --scheduler=external \
     --scheduler-plugin-timeout=50ms
 ```
 
+For non-local plugins, authenticate the channel with mTLS (the
+coordinator verifies the plugin with a CA and presents its own client
+certificate):
+
+```bash
+hg-coord serve --scheduler=external \
+    --scheduler-plugin-addr=plugin.cluster:50099 \
+    --scheduler-plugin-ca=ca.pem \
+    --scheduler-plugin-cert=coord.pem \
+    --scheduler-plugin-key=coord.key
+```
+
+The three flags are all-or-nothing; omit them all for a plaintext
+local socket. `examples/schedulers/leastloaded-plugin` serves the
+matching side with `-tls-cert`/`-tls-key`/`-tls-client-ca`
+(requiring a client certificate).
+
 Contract: `proto/hybridgrid/v1/scheduler_plugin.proto`.
 
 - `Select` receives the full fleet snapshot (load, health, circuit

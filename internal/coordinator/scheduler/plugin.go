@@ -6,8 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"crypto/tls"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
+
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
@@ -52,8 +55,9 @@ type PluginConfig struct {
 	// Circuit optionally reports open circuit breakers.
 	Circuit CircuitChecker
 
-	// Insecure disables TLS to the plugin (plaintext local socket).
-	Insecure bool
+	// TLSConfig enables TLS/mTLS to the plugin. Nil dials plaintext
+	// (local socket trust, the previous behavior).
+	TLSConfig *tls.Config
 }
 
 // feedbackBuffer bounds queued feedback events; overflow drops.
@@ -68,7 +72,9 @@ func NewPluginScheduler(cfg PluginConfig) (*PluginScheduler, error) {
 		cfg.Timeout = 50 * time.Millisecond
 	}
 	dialOpts := []grpc.DialOption{grpc.WithBlock()}
-	if cfg.Insecure {
+	if cfg.TLSConfig != nil {
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(cfg.TLSConfig)))
+	} else {
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
