@@ -7,6 +7,9 @@ package webhook
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -32,6 +35,11 @@ type Config struct {
 
 	// Buffer is the event queue depth. Default 256. Overflow drops.
 	Buffer int
+
+	// Secret HMAC-SHA256-signs every delivery with this shared
+	// secret; receivers verify the X-Hybridgrid-Signature header
+	// (sha256=<hex>). Empty sends unsigned POSTs.
+	Secret string
 
 	// Client overrides the HTTP client (tests).
 	Client *http.Client
@@ -127,18 +135,33 @@ func (n *Notifier) deliver(ev event) {
 		log.Error().Err(err).Msg("webhook: encode event failed")
 		return
 	}
+	sig := ""
+	if n.cfg.Secret != "" {
+		mac := hmac.New(sha256.New, []byte(n.cfg.Secret))
+		mac.Write(body)
+		sig = "sha256=" + hex.EncodeToString(mac.Sum(nil))
+	}
 	for _, url := range n.cfg.Endpoints {
-		n.post(url, body, ev)
+		n.post(url, body, sig, ev)
 	}
 }
 
-func (n *Notifier) post(url string, body []byte, ev event) {
+func (n *Notifier) post(url string, body []byte, sig string, ev event) {
 	var lastErr error
 	for attempt := 0; attempt <= n.cfg.Retries; attempt++ {
 		if attempt > 0 {
 			time.Sleep(time.Duration(attempt) * 250 * time.Millisecond)
 		}
-		resp, err := n.client.Post(url, "application/json", bytes.NewReader(body))
+		req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if sig != "" {
+			req.Header.Set("X-Hybridgrid-Signature", sig)
+		}
+		resp, err := n.client.Do(req)
 		if err != nil {
 			lastErr = err
 			continue

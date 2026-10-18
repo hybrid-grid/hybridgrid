@@ -79,6 +79,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			warmStart, _ := cmd.Flags().GetInt("warm-start")
 			schedulerPluginAddr, _ := cmd.Flags().GetString("scheduler-plugin-addr")
 			eventWebhooks, _ := cmd.Flags().GetStringSlice("event-webhook")
+			eventWebhookSecret, _ := cmd.Flags().GetString("event-webhook-secret")
 			schedulerPluginTimeout, _ := cmd.Flags().GetDuration("scheduler-plugin-timeout")
 			schedulerPluginCA, _ := cmd.Flags().GetString("scheduler-plugin-ca")
 			schedulerPluginCert, _ := cmd.Flags().GetString("scheduler-plugin-cert")
@@ -266,7 +267,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			// alongside the telemetry notifier.
 			var eventNotifier coordserver.EventNotifier
 			if len(eventWebhooks) > 0 {
-				eventNotifier = webhook.New(webhook.Config{Endpoints: eventWebhooks})
+				eventNotifier = webhook.New(webhook.Config{Endpoints: eventWebhooks, Secret: eventWebhookSecret})
 				defer func() {
 					if c, ok := eventNotifier.(*webhook.Notifier); ok {
 						c.Close()
@@ -351,6 +352,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 	serveCmd.Flags().String("scheduler-plugin-cert", "", "Client certificate the coordinator presents to the scheduler plugin (mTLS)")
 	serveCmd.Flags().String("scheduler-plugin-key", "", "Private key for the scheduler plugin client certificate (mTLS)")
 	serveCmd.Flags().StringSlice("event-webhook", nil, "HTTP webhook URL(s) receiving task events (repeatable)")
+	serveCmd.Flags().String("event-webhook-secret", "", "Shared secret HMAC-SHA256-signing every webhook delivery (X-Hybridgrid-Signature header)")
 	serveCmd.Flags().String("task-log", "", "Path to per-task JSON Lines log file (default: stdout)")
 	serveCmd.Flags().Float64("epsilon", 0.1, "Exploration rate for epsilon-greedy scheduler (in [0, 1]; ignored otherwise)")
 	serveCmd.Flags().Float64("alpha", 1.0, "LinUCB exploration coefficient α (in [0, 10]; ignored for other schedulers)")
