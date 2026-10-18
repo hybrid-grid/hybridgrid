@@ -359,6 +359,13 @@ Examples:
 					comp = detectCompiler(file)
 				}
 
+				// Preprocess locally so workers receive a self-contained
+				// translation unit (mirrors the Service path in
+				// internal/cli/build). Falls back to raw source.
+				if prep := preprocessLocal(file, comp, compArgs); prep != nil {
+					source = prep
+				}
+
 				// Generate task ID
 				taskID := taskid.NewTaskID()
 
@@ -1542,4 +1549,22 @@ func newClientConfig(address string, requestTimeout time.Duration) client.Config
 	}
 
 	return clientCfg
+}
+
+// preprocessLocal expands #include directives with the local toolchain
+// so the worker compiles a self-contained unit. Returns nil on failure;
+// the caller then falls back to sending raw source.
+func preprocessLocal(file, comp string, compArgs []string) []byte {
+	parsed := compiler.Parse(append([]string{comp}, compArgs...))
+	if parsed == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	res, err := compiler.NewPreprocessor(compiler.DefaultPreprocessorConfig()).Preprocess(ctx, parsed, file)
+	if err != nil {
+		fmt.Printf(" (local preprocess failed: %v; sending raw source)", err)
+		return nil
+	}
+	return res.PreprocessedSource
 }
