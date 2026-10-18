@@ -39,15 +39,19 @@ export function buildWavePoints(seed: string, points = 48, intensity = 0.4): num
   return values
 }
 
-export function toSvgPath(values: number[], width: number, height: number): string {
+/**
+ * Draws one period of the trace across `width`, closing back on the
+ * first sample at x = width so copies tiled side by side join into one
+ * continuous line instead of jumping at every seam.
+ */
+export function toPeriodicSvgPath(values: number[], width: number, height: number): string {
   if (values.length === 0) return ''
   const midY = height / 2
-  const step = width / (values.length - 1)
-  return values
+  const step = width / values.length
+  return [...values, values[0]]
     .map((v, i) => {
-      const x = i * step
       const y = midY - v * (height / 2 - 2)
-      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
+      return `${i === 0 ? 'M' : 'L'}${(i * step).toFixed(1)},${y.toFixed(1)}`
     })
     .join(' ')
 }

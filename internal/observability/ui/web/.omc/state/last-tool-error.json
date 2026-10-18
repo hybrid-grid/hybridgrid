@@ -1,7 +1,7 @@
 {
   "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"cd /Users/n0x/WebStorm/hybridgrid && docker buildx build --builder multiarch --platform linux/arm64 --target hg-dashboard --build-arg VERSION=dev --build-arg \\\"COMMIT=$(git rev-parse --sho...",
-  "error": "Exit code 125\n#30 DONE 0.0s\n#32 DONE 0.1s\n#31 DONE 0.5s\nUnable to find image 'hybridgrid-dashboard:dev' locally\ndocker: Error response from daemon: pull access denied for hybridgrid-dashboard, repository does not exist or may require 'docker login': denied: requested access to the resource is denied.\nSee 'docker run --help'.",
-  "timestamp": "2026-10-11T14:03:33.724Z",
-  "retry_count": 1
+  "tool_input_preview": "{\"command\":\"curl -s -i localhost:8081/api/v1/workers | head -20; docker ps --format '{{.Names}} {{.Status}}'\",\"description\":\"Inspect dashboard API response\"}",
+  "error": "Exit code 1\nCannot connect to the Docker daemon at unix:///Users/n0x/.docker/run/docker.sock. Is the docker daemon running?",
+  "timestamp": "2026-10-18T12:30:25.271Z",
+  "retry_count": 2
 }
