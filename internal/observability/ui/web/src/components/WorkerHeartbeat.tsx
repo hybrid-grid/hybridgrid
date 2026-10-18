@@ -1,9 +1,12 @@
 import { useMemo } from 'react'
-import { buildWavePoints, toSvgPath } from '@/lib/seededWave'
+import { buildWavePoints, toPeriodicSvgPath } from '@/lib/seededWave'
 import { cn } from '@/lib/utils'
 
 const WIDTH = 240
 const HEIGHT = 40
+// The viewport shows two periods and scrolls by one, so a third copy
+// must already sit off-screen right to keep the trace unbroken.
+const TILE_OFFSETS = [0, WIDTH, WIDTH * 2]
 
 const CIRCUIT_COLOR: Record<string, string> = {
   CLOSED: 'var(--color-circuit-closed)',
@@ -31,7 +34,7 @@ export function WorkerHeartbeat({ workerId, circuitState, loadRatio, className }
 
   const path = useMemo(() => {
     const points = buildWavePoints(workerId, 40, intensity)
-    return toSvgPath(points, WIDTH, HEIGHT)
+    return toPeriodicSvgPath(points, WIDTH, HEIGHT)
   }, [workerId, intensity])
 
   const duration = isOpen ? 0 : 5.5 - intensity * 3.2
@@ -45,6 +48,7 @@ export function WorkerHeartbeat({ workerId, circuitState, loadRatio, className }
         aria-hidden
       >
         <g
+          opacity={0.9}
           style={
             isOpen
               ? undefined
@@ -53,19 +57,22 @@ export function WorkerHeartbeat({ workerId, circuitState, loadRatio, className }
                 }
           }
         >
-          <path d={path} fill="none" stroke={color} strokeWidth={1.4} strokeLinecap="round" opacity={0.9} />
-          <path
-            d={path}
-            fill="none"
-            stroke={color}
-            strokeWidth={1.4}
-            strokeLinecap="round"
-            opacity={0.9}
-            transform={`translate(${WIDTH}, 0)`}
-          />
+          {TILE_OFFSETS.map((offset) => (
+            <path
+              key={offset}
+              d={path}
+              transform={offset ? `translate(${offset}, 0)` : undefined}
+              fill="none"
+              stroke={color}
+              strokeWidth={1.4}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
         </g>
         {isOpen && (
-          <line x1={0} y1={HEIGHT / 2} x2={WIDTH * 2} y2={HEIGHT / 2} stroke={color} strokeWidth={1.4} opacity={0.6} />
+          <line x1={0} y1={HEIGHT / 2} x2={WIDTH * 2} y2={HEIGHT / 2} stroke={color} strokeWidth={1.4} vectorEffect="non-scaling-stroke" opacity={0.6} />
         )}
       </svg>
       <style>{`
