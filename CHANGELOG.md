@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Webhook signing**: `--event-webhook-secret` HMAC-SHA256-signs every event webhook delivery (`X-Hybridgrid-Signature: sha256=<hex>` over the raw body) so receivers can authenticate the coordinator
 - **Event Webhooks (`eventhooksv1`)**: `--event-webhook URL` (repeatable) POSTs `task_started`/`task_completed` JSON to HTTP endpoints — non-blocking by construction (bounded queue, drop on overflow, bounded retries). See `docs/plugins.md`
 - **Dispatch backpressure for all build types**: Flutter and Unity selection now runs through the same `dispatchLoop` + bounded queue as Compile (atomic select-then-book; spare capacity is part of the match), and their task events report coordinator-side queue_ms — over-capacity bursts stretch over time instead of hard-failing
-- CI: Go 1.27.2 toolchain, golangci-lint v2.15.0
+- CI: Go 1.27.2 toolchain, golangci-lint v2.15.0, GoReleaser `archives.formats` (v2.6+ syntax; `goreleaser check` passes clean)
 
 ### Fixed
 - Release pipeline and Docker images catch up with `go.mod` (Go 1.26+): all `golang:1.25` builder images bumped to 1.27 (the production `Dockerfile` would have failed the next tag build)
