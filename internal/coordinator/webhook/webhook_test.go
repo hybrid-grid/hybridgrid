@@ -1,7 +1,11 @@
 package webhook
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -126,5 +130,88 @@ func TestWebhook_OverflowDropsWithoutBlocking(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Fatalf("enqueue of 1000 events over a full buffer blocked: %v", elapsed)
+	}
+}
+
+func TestWebhook_SignsDeliveries(t *testing.T) {
+	const secret = "s3cret"
+	var mu sync.Mutex
+	var sigs []string
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		sigs = append(sigs, r.Header.Get("X-Hybridgrid-Signature"))
+		bodies = append(bodies, string(b))
+		mu.Unlock()
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	n := New(Config{Endpoints: []string{srv.URL}, Retries: 0, Buffer: 8, Secret: secret})
+	defer n.Close()
+
+	n.NotifyTaskStarted(&server.TaskEvent{ID: "t9", BuildType: "cpp", Status: "running"})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		count := len(sigs)
+		mu.Unlock()
+		if count == 1 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sigs) != 1 {
+		t.Fatalf("expected 1 signed delivery, got %d", len(sigs))
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(bodies[0]))
+	want := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+	if sigs[0] != want {
+		t.Fatalf("signature mismatch: got %q want %q", sigs[0], want)
+	}
+}
+
+func TestWebhook_NoSignatureHeaderWithoutSecret(t *testing.T) {
+	var mu sync.Mutex
+	var got string
+	var count int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		got = r.Header.Get("X-Hybridgrid-Signature")
+		count++
+		mu.Unlock()
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	n := New(Config{Endpoints: []string{srv.URL}, Retries: 0, Buffer: 8})
+	defer n.Close()
+
+	n.NotifyTaskStarted(&server.TaskEvent{ID: "t10", BuildType: "cpp", Status: "running"})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		c := count
+		mu.Unlock()
+		if c == 1 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if count != 1 {
+		t.Fatalf("expected 1 delivery, got %d", count)
+	}
+	if got != "" {
+		t.Fatalf("expected no signature header without secret, got %q", got)
 	}
 }

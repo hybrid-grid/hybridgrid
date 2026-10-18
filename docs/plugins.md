@@ -209,6 +209,19 @@ Every task event is POSTed (JSON) to each endpoint:
 
 ---
 
+Deliveries can be authenticated: pass `--event-webhook-secret` and
+every POST carries `X-Hybridgrid-Signature: sha256=<hex>` — the
+HMAC-SHA256 of the raw body under that secret. A receiver verifies:
+
+```python
+digest = hmac.new(secret, body, hashlib.sha256).hexdigest()
+hmac.compare_digest("sha256=" + digest,
+                    request.headers["X-Hybridgrid-Signature"])
+```
+
+The signature covers content integrity, not replay — pair with TLS
+and endpoint-side dedup if replays matter.
+
 ## 4. UI / consumer seam
 
 Pre-existing (the dashboard split): any process can consume cluster
