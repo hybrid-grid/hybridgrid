@@ -254,8 +254,9 @@ seam — the reference for "plugin UIs".
   which is removed after the task.
 - Scheduler plugins and webhooks are coordinator-side: plugin
   endpoints should not be exposed publicly; webhook URLs may carry
-  bearer tokens in the query/headers your receiver requires — the
-  coordinator sends plain POSTs and never signs them (v1).
+  bearer tokens in the query/headers your receiver requires — with
+  `--event-webhook-secret` set, each POST carries
+  `X-Hybridgrid-Signature: sha256=<hex>` (HMAC-SHA256 of the body).
 - No plugin tier can bypass task auth (workers/clients still
   authenticate to the coordinator as always).
 

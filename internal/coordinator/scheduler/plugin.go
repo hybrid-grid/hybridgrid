@@ -132,7 +132,18 @@ func (s *PluginScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb
 		return w, DispatchInfo{}, ferr
 	}
 	if w, ok := byID[resp.GetWorkerId()]; ok && w != nil {
-		return w, DispatchInfo{}, nil
+		// Re-validate the plugin's pick: a plugin may answer with a worker
+		// that cannot serve the task (e.g. wrong architecture). The
+		// registry rules are the source of truth.
+		if registry.MatchesCapability(w.Capabilities, buildType, arch) {
+			return w, DispatchInfo{}, nil
+		}
+		log.Debug().
+			Str("worker_id", resp.GetWorkerId()).
+			Str("requested_arch", arch.String()).
+			Msg("scheduler plugin answered with a worker that cannot serve the task; falling back")
+		w, ferr := s.inner.Select(buildType, arch, clientOS)
+		return w, DispatchInfo{}, ferr
 	}
 	log.Debug().Str("worker_id", resp.GetWorkerId()).
 		Msg("scheduler plugin answered with an unknown worker; falling back")

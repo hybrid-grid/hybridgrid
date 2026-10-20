@@ -43,6 +43,9 @@ func (s *server) Select(ctx context.Context, req *pb.SelectRequest) (*pb.SelectR
 		if !supports(w.GetBuildTypes(), req.GetBuildType()) {
 			continue
 		}
+		if !supportsArch(w.GetNativeArch(), req.GetTargetArch()) {
+			continue
+		}
 		maxParallel := float64(w.GetMaxParallel())
 		if maxParallel <= 0 {
 			maxParallel = 1
@@ -68,6 +71,17 @@ func (s *server) Feedback(ctx context.Context, req *pb.FeedbackRequest) (*pb.Fee
 	log.Printf("feedback: worker=%s success=%v duration=%.1fms",
 		req.GetWorkerId(), req.GetSuccess(), req.GetDurationMs())
 	return &pb.FeedbackResponse{}, nil
+}
+
+// supportsArch reports whether a worker's native architecture can serve the
+// requested target arch. Both sides use pb.Architecture String() values
+// ("ARCH_X86_64", "ARCH_ARM64", ...); an unspecified target accepts any
+// worker. Cross-compiling workers are not visible in the snapshot, so the
+// conservative native-only match is the right default for a reference plugin.
+func supportsArch(nativeArch, targetArch string) bool {
+	return targetArch == "" ||
+		targetArch == "ARCH_UNSPECIFIED" ||
+		nativeArch == targetArch
 }
 
 func supports(buildTypes []string, want string) bool {

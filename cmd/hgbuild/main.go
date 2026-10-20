@@ -359,10 +359,23 @@ Examples:
 					comp = detectCompiler(file)
 				}
 
-				// Preprocess locally so workers receive a self-contained
-				// translation unit (mirrors the Service path in
-				// internal/cli/build). Falls back to raw source.
-				if prep := preprocessLocal(file, comp, compArgs); prep != nil {
+				// Parse target architecture
+				arch := parseArch(targetArch)
+
+				// Cross-arch: local preprocessing would bake this machine's
+				// headers into the .i — silently wrong on the other arch
+				// (jmp_buf/bits macros resolve for the wrong target). Send raw
+				// source plus project includes; the worker's own toolchain
+				// preprocesses with arch-correct headers.
+				rawCrossArch := arch != pb.Architecture_ARCH_UNSPECIFIED && arch != clientArch()
+
+				var includeFiles map[string][]byte
+				if rawCrossArch {
+					includeFiles = collectCrossArchIncludes(compArgs)
+				} else if prep := preprocessLocal(file, comp, compArgs); prep != nil {
+					// Same-arch: preprocess locally so workers receive a
+					// self-contained translation unit (mirrors the Service
+					// path in internal/cli/build). Falls back to raw source.
 					source = prep
 				}
 
@@ -375,9 +388,6 @@ Examples:
 					outFile = strings.TrimSuffix(file, filepath.Ext(file)) + ".o"
 				}
 
-				// Parse target architecture
-				arch := parseArch(targetArch)
-
 				if verbose {
 					fmt.Printf("Compiling %s → %s (compiler: %s)\n", file, outFile, comp)
 				} else {
@@ -388,13 +398,21 @@ Examples:
 
 				// Create compile request
 				req := &pb.CompileRequest{
-					TaskId:             taskID,
-					BuildId:            buildID,
-					Compiler:           comp,
-					CompilerArgs:       compArgs,
-					PreprocessedSource: source,
-					TargetArch:         arch,
-					TimeoutSeconds:     300,
+					TaskId:         taskID,
+					BuildId:        buildID,
+					Compiler:       comp,
+					CompilerArgs:   compArgs,
+					TargetArch:     arch,
+					TimeoutSeconds: 300,
+				}
+				if rawCrossArch {
+					req.RawSource = source
+					req.SourceFilename = filepath.Base(file)
+					req.IncludeFiles = includeFiles
+					req.ClientOs = runtime.GOOS
+					req.ClientArch = clientArch()
+				} else {
+					req.PreprocessedSource = source
 				}
 
 				// Send to coordinator
@@ -1567,4 +1585,36 @@ func preprocessLocal(file, comp string, compArgs []string) []byte {
 		return nil
 	}
 	return res.PreprocessedSource
+}
+
+// clientArch returns the machine architecture as the protobuf enum.
+func clientArch() pb.Architecture {
+	switch runtime.GOARCH {
+	case "amd64":
+		return pb.Architecture_ARCH_X86_64
+	case "arm64":
+		return pb.Architecture_ARCH_ARM64
+	case "arm":
+		return pb.Architecture_ARCH_ARMV7
+	default:
+		return pb.Architecture_ARCH_UNSPECIFIED
+	}
+}
+
+// collectCrossArchIncludes bundles project-local headers (-I paths) so a
+// raw-source cross-arch request can carry them. The worker's own toolchain
+// supplies system headers for its architecture. Returns nil on failure —
+// the build proceeds without project includes and likely fails loudly at
+// the worker rather than silently miscompiling.
+func collectCrossArchIncludes(compArgs []string) map[string][]byte {
+	parsed := compiler.Parse(append([]string{"cc"}, compArgs...))
+	if parsed == nil {
+		return nil
+	}
+	incs, err := build.CollectIncludeFiles(parsed)
+	if err != nil {
+		log.Warn().Err(err).Msg("collecting include files for cross-arch build; continuing without them")
+		return nil
+	}
+	return incs
 }
