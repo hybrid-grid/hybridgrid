@@ -17,8 +17,8 @@ import (
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.CacheMaxSize != 10*1024*1024*1024 {
-		t.Errorf("expected 10GB cache size, got %d", cfg.CacheMaxSize)
+	if cfg.CacheMaxSize != 10*1024 {
+		t.Errorf("expected 10240 MB (10GB) cache size, got %d", cfg.CacheMaxSize)
 	}
 	if cfg.CacheTTLHours != 168 {
 		t.Errorf("expected 168 hours TTL, got %d", cfg.CacheTTLHours)
