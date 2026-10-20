@@ -495,7 +495,7 @@ func (s *Store) readIndex() ([]*Entry, error) {
 func (s *Store) acquireIndexLock() (func(), error) {
 	lockPath := filepath.Join(s.dir, "index.lock")
 	for i := 0; i < 200; i++ {
-		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 		if err == nil {
 			_ = f.Close()
 			return func() { _ = os.Remove(lockPath) }, nil
