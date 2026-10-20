@@ -98,6 +98,11 @@ func (s *Service) SetClient(c *client.Client) {
 
 // Close closes the build service.
 func (s *Service) Close() error {
+	// Persist hit counters: this process exits right after one compile, so
+	// without a flush the cache stats would never see its hits.
+	if s.cache != nil {
+		_ = s.cache.Close()
+	}
 	if s.client != nil {
 		return s.client.Close()
 	}
