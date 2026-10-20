@@ -443,7 +443,11 @@ func (s *Store) saveIndex() error {
 	merged := make(map[string]*Entry)
 	if existing, err := s.readIndex(); err == nil {
 		for _, e := range existing {
-			merged[e.Key] = e
+			// A concurrent Clear or Delete removed the blob but this index
+			// snapshot still lists it; never resurrect a file that is gone.
+			if _, statErr := os.Stat(s.keyPath(e.Key)); statErr == nil {
+				merged[e.Key] = e
+			}
 		}
 	}
 	for _, e := range entries {
