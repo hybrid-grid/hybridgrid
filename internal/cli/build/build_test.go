@@ -630,12 +630,12 @@ func TestCollectIncludeFiles(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			files, err := svc.collectIncludeFiles(tt.args)
+			files, err := CollectIncludeFiles(tt.args)
 			if err != nil {
-				t.Fatalf("collectIncludeFiles failed: %v", err)
+				t.Fatalf("CollectIncludeFiles failed: %v", err)
 			}
 			if len(files) != tt.wantFiles {
-				t.Errorf("collectIncludeFiles() collected %d files, want %d", len(files), tt.wantFiles)
+				t.Errorf("CollectIncludeFiles() collected %d files, want %d", len(files), tt.wantFiles)
 			}
 		})
 	}

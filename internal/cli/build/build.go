@@ -144,7 +144,7 @@ func (s *Service) Build(ctx context.Context, req *Request) (*Result, error) {
 	}
 
 	// Collect project include files from -I paths
-	includeFiles, err := s.collectIncludeFiles(req.Args)
+	includeFiles, err := CollectIncludeFiles(req.Args)
 	if err != nil {
 		log.Warn().Err(err).Msg("Failed to collect include files, continuing without them")
 		includeFiles = nil
@@ -543,22 +543,25 @@ func (s *Service) buildRemoteArgsForRaw(args *compiler.ParsedArgs) []string {
 	return remoteArgs
 }
 
-// collectIncludeFiles collects header files from project -I paths.
-// Only includes project-local headers, not system headers.
-func (s *Service) collectIncludeFiles(args *compiler.ParsedArgs) (map[string][]byte, error) {
+// CollectIncludeFiles gathers project-local headers referenced via -I paths so
+// raw-source (cross-arch) requests can carry them. Package-level: the hgbuild
+// CLI reuses it for its cross-arch path. System paths (/usr, /opt, ...) are
+// skipped — the worker's own toolchain provides system headers.
+func CollectIncludeFiles(args *compiler.ParsedArgs) (map[string][]byte, error) {
 	includeFiles := make(map[string][]byte)
 
+	// Include paths arrive in two forms: bare "-I<dir>" flags kept in
+	// Flags, and dirs the parser already split into IncludeDirs (both
+	// "-I<dir>" and "-I <dir>"). Union both so every -I form is bundled.
+	includePaths := make([]string, 0, len(args.Flags)+len(args.IncludeDirs))
 	for _, flag := range args.Flags {
-		if !strings.HasPrefix(flag, "-I") {
-			continue
+		if strings.HasPrefix(flag, "-I") && flag != "-I" {
+			includePaths = append(includePaths, strings.TrimPrefix(flag, "-I"))
 		}
+	}
+	includePaths = append(includePaths, args.IncludeDirs...)
 
-		var includePath string
-		if flag == "-I" {
-			continue // Skip if path is separate (we'd need to track next arg)
-		}
-		includePath = strings.TrimPrefix(flag, "-I")
-
+	for _, includePath := range includePaths {
 		// Skip system paths
 		if strings.HasPrefix(includePath, "/usr") ||
 			strings.HasPrefix(includePath, "/opt") ||

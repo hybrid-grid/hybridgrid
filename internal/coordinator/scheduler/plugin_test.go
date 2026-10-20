@@ -193,6 +193,50 @@ func TestPluginScheduler_FallsBackOnUnknownWorker(t *testing.T) {
 	}
 }
 
+func TestPluginScheduler_RevalidatesArch(t *testing.T) {
+	// worker-x86 is idle (the plugin's greedy pick), worker-arm is busy —
+	// but worker-x86 cannot serve an arm64 task, so the coordinator must
+	// reject the plugin's answer and fall back to the inner scheduler.
+	reg := registry.NewInMemoryRegistry(30 * time.Second)
+	if err := reg.Add(&registry.WorkerInfo{
+		ID: "worker-x86", Address: "127.0.0.1:1",
+		Capabilities: &pb.WorkerCapabilities{NativeArch: pb.Architecture_ARCH_X86_64, Cpp: &pb.CppCapability{Compilers: []string{"gcc"}}},
+		MaxParallel:  4, ActiveTasks: 0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Add(&registry.WorkerInfo{
+		ID: "worker-arm", Address: "127.0.0.1:2",
+		Capabilities: &pb.WorkerCapabilities{NativeArch: pb.Architecture_ARCH_ARM64, Cpp: &pb.CppCapability{Compilers: []string{"gcc"}}},
+		MaxParallel:  4, ActiveTasks: 3,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	addr, stop := startPlugin(t, &fakePlugin{
+		selectFn: func(ctx context.Context, req *pb.SelectRequest) (*pb.SelectResponse, error) {
+			return &pb.SelectResponse{WorkerId: "worker-x86"}, nil
+		},
+	})
+	defer stop()
+
+	s, err := NewPluginScheduler(PluginConfig{
+		Address: addr, Inner: NewLeastLoadedScheduler(reg), Registry: reg,
+	})
+	if err != nil {
+		t.Fatalf("NewPluginScheduler: %v", err)
+	}
+	defer s.Close()
+
+	w, err := s.Select(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_ARM64, "")
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if w.ID != "worker-arm" {
+		t.Fatalf("plugin answered worker-x86 for an arm64 task; expected fallback to worker-arm, got %s", w.ID)
+	}
+}
+
 func TestPluginScheduler_FeedbackNeverBlocks(t *testing.T) {
 	reg := registry.NewInMemoryRegistry(30 * time.Second)
 	release := make(chan struct{})
