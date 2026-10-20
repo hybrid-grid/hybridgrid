@@ -411,7 +411,7 @@ Examples:
 				// network entirely. Report it so the dashboard counts it.
 				if cacheKey != "" && cacheStore != nil {
 					if obj, ok := cacheStore.GetBytes(cacheKey); ok {
-						if err := os.WriteFile(outFile, obj, 0644); err != nil {
+						if err := os.WriteFile(outFile, obj, 0644); err != nil { // #nosec G703 -- outFile is the compiler's own -o argument, exactly like gcc writing it
 							fmt.Printf(" FAILED (write error: %v)\n", err)
 							failCount++
 							continue
