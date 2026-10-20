@@ -618,14 +618,21 @@ func CollectIncludeFiles(args *compiler.ParsedArgs) (map[string][]byte, error) {
 	return includeFiles, nil
 }
 
-// generateCacheKeyRaw generates a cache key from raw source.
-func (s *Service) generateCacheKeyRaw(req *Request, rawSource []byte) string {
+// CacheKeyRaw builds the client-side cache key for one compilation from
+// its raw source. Exported so the CLI compile loop shares the Service's
+// key space instead of inventing a second hashing convention.
+func CacheKeyRaw(args *compiler.ParsedArgs, arch pb.Architecture, rawSource []byte) string {
 	key := &cache.CompilationKey{
-		Compiler:   req.Args.Compiler,
-		TargetArch: req.TargetArch.String(),
-		Flags:      req.Args.Flags,
-		Defines:    req.Args.Defines,
+		Compiler:   args.Compiler,
+		TargetArch: arch.String(),
+		Flags:      args.Flags,
+		Defines:    args.Defines,
 		SourceHash: cache.HashBytes(rawSource),
 	}
 	return key.Build()
+}
+
+// generateCacheKeyRaw generates a cache key from raw source.
+func (s *Service) generateCacheKeyRaw(req *Request, rawSource []byte) string {
+	return CacheKeyRaw(req.Args, req.TargetArch, rawSource)
 }

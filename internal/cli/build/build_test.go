@@ -988,3 +988,30 @@ func TestRemoteCompileRequests_CarryBuildID(t *testing.T) {
 		})
 	}
 }
+
+func TestCacheKeyRaw_DistinguishesInputs(t *testing.T) {
+	args := &compiler.ParsedArgs{Compiler: "gcc", Flags: []string{"-O2"}, Defines: []string{"A=1"}}
+	src := []byte("int f(void){return 1;}")
+
+	base := CacheKeyRaw(args, pb.Architecture_ARCH_X86_64, src)
+	if base == "" {
+		t.Fatal("empty cache key")
+	}
+	if again := CacheKeyRaw(args, pb.Architecture_ARCH_X86_64, src); again != base {
+		t.Fatalf("key not deterministic: %q != %q", base, again)
+	}
+
+	// A wrong-arch or wrong-source hit would silently deliver a bad object,
+	// so neither may collide with the base key.
+	if arm := CacheKeyRaw(args, pb.Architecture_ARCH_ARM64, src); arm == base {
+		t.Fatal("cache key must differ by target arch")
+	}
+	other := []byte("int f(void){return 2;}")
+	if k := CacheKeyRaw(args, pb.Architecture_ARCH_X86_64, other); k == base {
+		t.Fatal("cache key must differ by source")
+	}
+	flags := &compiler.ParsedArgs{Compiler: "gcc", Flags: []string{"-O0"}, Defines: []string{"A=1"}}
+	if k := CacheKeyRaw(flags, pb.Architecture_ARCH_X86_64, src); k == base {
+		t.Fatal("cache key must differ by flags")
+	}
+}

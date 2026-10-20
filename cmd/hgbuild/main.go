@@ -332,6 +332,14 @@ Examples:
 			}
 			defer c.Close()
 
+			// Client cache: same store and key space the Service path uses.
+			// A cache failure only disables reuse; the build still runs.
+			buildCfg := build.DefaultConfig()
+			cacheStore, err := cache.NewStore(buildCfg.CacheDir, buildCfg.CacheMaxSize, buildCfg.CacheTTLHours)
+			if err != nil {
+				log.Warn().Err(err).Msg("Client cache disabled")
+			}
+
 			// One build session per invocation: all files submitted below
 			// share it, and the wrapping make's HG_BUILD_ID groups the
 			// per-TU invocations of one logical build (see taskid).
@@ -343,6 +351,7 @@ Examples:
 			// Process each file
 			successCount := 0
 			failCount := 0
+			var cacheHits int32
 
 			for _, file := range args {
 				// Read source file
@@ -361,6 +370,10 @@ Examples:
 
 				// Parse target architecture
 				arch := parseArch(targetArch)
+
+				// Cache key covers raw source, compiler, flags and target
+				// arch — the same bytes the Service path would hash.
+				cacheKey := cacheKeyFor(comp, compArgs, arch, source)
 
 				// Cross-arch: local preprocessing would bake this machine's
 				// headers into the .i — silently wrong on the other arch
@@ -392,6 +405,22 @@ Examples:
 					fmt.Printf("Compiling %s → %s (compiler: %s)\n", file, outFile, comp)
 				} else {
 					fmt.Printf("Compiling %s...", file)
+				}
+
+				// Cache hit: the object bytes are already local, so skip the
+				// network entirely. Report it so the dashboard counts it.
+				if cacheKey != "" && cacheStore != nil {
+					if obj, ok := cacheStore.GetBytes(cacheKey); ok {
+						if err := os.WriteFile(outFile, obj, 0644); err != nil { // #nosec G703 -- outFile is the compiler's own -o argument, exactly like gcc writing it
+							fmt.Printf(" FAILED (write error: %v)\n", err)
+							failCount++
+							continue
+						}
+						fmt.Printf(" OK (cached)\n")
+						cacheHits++
+						successCount++
+						continue
+					}
 				}
 
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -434,6 +463,14 @@ Examples:
 						continue
 					}
 
+					// Store only successful objects; a cache write failure
+					// must never fail the build.
+					if cacheKey != "" && cacheStore != nil && len(resp.ObjectFile) > 0 {
+						if err := cacheStore.PutBytes(cacheKey, resp.ObjectFile); err != nil && verbose {
+							fmt.Printf("  [cache] store failed: %v\n", err)
+						}
+					}
+
 					duration := time.Since(start)
 					if verbose {
 						fmt.Printf(" OK (%.2fs, %d bytes, queue: %dms, compile: %dms)\n",
@@ -450,6 +487,12 @@ Examples:
 					}
 					failCount++
 				}
+			}
+
+			// One report per invocation: a per-file RPC costs a full RTT each
+			// and would defeat the point of a local cache hit.
+			if cacheHits > 0 {
+				_ = c.ReportCacheHit(context.Background(), cacheHits)
 			}
 
 			// Summary
@@ -1585,6 +1628,17 @@ func preprocessLocal(file, comp string, compArgs []string) []byte {
 		return nil
 	}
 	return res.PreprocessedSource
+}
+
+// cacheKeyFor builds the client-side cache key for one translation unit.
+// Package-level because the compile command shadows the compiler package
+// name with its --compiler flag variable.
+func cacheKeyFor(comp string, compArgs []string, arch pb.Architecture, source []byte) string {
+	parsed := compiler.Parse(append([]string{comp}, compArgs...))
+	if parsed == nil {
+		return ""
+	}
+	return build.CacheKeyRaw(parsed, arch, source)
 }
 
 // clientArch returns the machine architecture as the protobuf enum.
