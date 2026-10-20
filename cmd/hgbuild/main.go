@@ -351,6 +351,7 @@ Examples:
 			// Process each file
 			successCount := 0
 			failCount := 0
+			var cacheHits int32
 
 			for _, file := range args {
 				// Read source file
@@ -416,7 +417,7 @@ Examples:
 							continue
 						}
 						fmt.Printf(" OK (cached)\n")
-						_ = c.ReportCacheHit(context.Background(), 1)
+						cacheHits++
 						successCount++
 						continue
 					}
@@ -486,6 +487,12 @@ Examples:
 					}
 					failCount++
 				}
+			}
+
+			// One report per invocation: a per-file RPC costs a full RTT each
+			// and would defeat the point of a local cache hit.
+			if cacheHits > 0 {
+				_ = c.ReportCacheHit(context.Background(), cacheHits)
 			}
 
 			// Summary
