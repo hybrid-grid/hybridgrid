@@ -105,41 +105,70 @@ func NewStore(dir string, maxSizeMB int64, ttlHours int) (*Store, error) {
 // Get retrieves a cached item.
 func (s *Store) Get(key string) (io.ReadCloser, bool) {
 	m := metrics.Default()
+
 	s.mu.RLock()
 	entry, ok := s.entries[key]
-	if !ok {
-		s.mu.RUnlock()
-		m.RecordCacheMiss()
-		return nil, false
-	}
-
-	// Check TTL
-	if time.Since(entry.CreatedAt) > s.ttl {
-		s.mu.RUnlock()
-		s.Delete(key)
-		m.RecordCacheMiss()
-		return nil, false
-	}
-
-	path := s.keyPath(key)
-	f, err := os.Open(path)
 	s.mu.RUnlock()
+
+	if ok {
+		if time.Since(entry.CreatedAt) > s.ttl {
+			_ = s.Delete(key)
+			m.RecordCacheMiss()
+			return nil, false
+		}
+		f, err := os.Open(s.keyPath(key))
+		if err == nil {
+			s.recordHit(key)
+			m.RecordCacheHit()
+			return f, true
+		}
+		_ = s.Delete(key)
+	}
+
+	// The in-memory index can be stale: every `hgbuild cc` invocation is a
+	// separate process, and parallel make workers load the index before
+	// their siblings save theirs. The blob on disk is the source of truth,
+	// so fall back to it and adopt the entry for this process.
+	f, err := os.Open(s.keyPath(key))
 	if err != nil {
-		s.Delete(key)
+		m.RecordCacheMiss()
+		return nil, false
+	}
+	info, err := f.Stat()
+	if err != nil || time.Since(info.ModTime()) > s.ttl {
+		_ = f.Close()
+		_ = s.Delete(key)
 		m.RecordCacheMiss()
 		return nil, false
 	}
 
-	// Update access time and hits
 	s.mu.Lock()
-	if current, exists := s.entries[key]; exists {
-		current.AccessedAt = time.Now()
-		current.Hits++
+	if _, exists := s.entries[key]; !exists {
+		s.entries[key] = &Entry{
+			Key:        key,
+			Size:       info.Size(),
+			CreatedAt:  info.ModTime(),
+			AccessedAt: time.Now(),
+			Hits:       1,
+		}
+		s.totalSize += info.Size()
+	} else {
+		s.entries[key].Hits++
+		s.entries[key].AccessedAt = time.Now()
 	}
 	s.mu.Unlock()
 
 	m.RecordCacheHit()
 	return f, true
+}
+
+func (s *Store) recordHit(key string) {
+	s.mu.Lock()
+	if e, ok := s.entries[key]; ok {
+		e.AccessedAt = time.Now()
+		e.Hits++
+	}
+	s.mu.Unlock()
 }
 
 // Put stores an item in the cache.
@@ -289,6 +318,12 @@ func (s *Store) Clear() error {
 	return s.saveIndex()
 }
 
+// Close persists index state (notably hit counters, which Get updates in
+// memory) so short-lived processes do not lose their stats on exit.
+func (s *Store) Close() error {
+	return s.saveIndex()
+}
+
 // Stats returns cache statistics.
 type Stats struct {
 	Entries   int   `json:"entries"`
@@ -397,11 +432,82 @@ func (s *Store) saveIndex() error {
 	}
 	s.mu.RUnlock()
 
-	data, err := json.MarshalIndent(entries, "", "  ")
+	release, err := s.acquireIndexLock()
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	// Merge with the on-disk index instead of overwriting it: sibling
+	// processes (parallel make) each save only the entries they know about.
+	merged := make(map[string]*Entry)
+	if existing, err := s.readIndex(); err == nil {
+		for _, e := range existing {
+			merged[e.Key] = e
+		}
+	}
+	for _, e := range entries {
+		if old, ok := merged[e.Key]; ok {
+			if old.Hits > e.Hits {
+				e.Hits = old.Hits
+			}
+			if old.AccessedAt.After(e.AccessedAt) {
+				e.AccessedAt = old.AccessedAt
+			}
+		}
+		merged[e.Key] = e
+	}
+
+	out := make([]*Entry, 0, len(merged))
+	for _, e := range merged {
+		out = append(out, e)
+	}
+
+	data, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
 		return err
 	}
 
 	path := filepath.Join(s.dir, "index.json")
-	return os.WriteFile(path, data, 0644)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// readIndex reads the current on-disk index without touching in-memory state.
+func (s *Store) readIndex() ([]*Entry, error) {
+	data, err := os.ReadFile(filepath.Join(s.dir, "index.json"))
+	if err != nil {
+		return nil, err
+	}
+	var entries []*Entry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+// acquireIndexLock serializes index writes across processes with a lock
+// file. Stale locks older than five seconds are reclaimed so a crashed
+// writer cannot wedge the cache forever.
+func (s *Store) acquireIndexLock() (func(), error) {
+	lockPath := filepath.Join(s.dir, "index.lock")
+	for i := 0; i < 200; i++ {
+		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+		if err == nil {
+			_ = f.Close()
+			return func() { _ = os.Remove(lockPath) }, nil
+		}
+		if !os.IsExist(err) {
+			return nil, err
+		}
+		if info, statErr := os.Stat(lockPath); statErr == nil && time.Since(info.ModTime()) > 5*time.Second {
+			_ = os.Remove(lockPath)
+			continue
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	return nil, fmt.Errorf("timed out waiting for cache index lock")
 }

@@ -338,6 +338,9 @@ Examples:
 			cacheStore, err := cache.NewStore(buildCfg.CacheDir, buildCfg.CacheMaxSize, buildCfg.CacheTTLHours)
 			if err != nil {
 				log.Warn().Err(err).Msg("Client cache disabled")
+			} else {
+				// Persist hit counters for `hgbuild cache stats`.
+				defer cacheStore.Close()
 			}
 
 			// One build session per invocation: all files submitted below
