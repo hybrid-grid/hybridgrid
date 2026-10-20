@@ -739,3 +739,50 @@ func TestStore_SaveIndexMergesConcurrentWriters(t *testing.T) {
 		t.Fatalf("index lost an entry: got %d entries, want 2", got)
 	}
 }
+
+func TestStore_ClearDropsIndexEntries(t *testing.T) {
+	dir := t.TempDir()
+	a, err := NewStore(dir, 10, 1)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	if err := a.PutBytes("clear-key", []byte("data")); err != nil {
+		t.Fatalf("PutBytes: %v", err)
+	}
+	if err := a.Clear(); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+
+	b, err := NewStore(dir, 10, 1)
+	if err != nil {
+		t.Fatalf("NewStore after clear: %v", err)
+	}
+	if got := b.Stats().Entries; got != 0 {
+		t.Fatalf("Clear left %d entries in the index, want 0", got)
+	}
+	if _, ok := b.GetBytes("clear-key"); ok {
+		t.Fatal("cleared entry is still readable")
+	}
+}
+
+func TestStore_DeleteDoesNotResurrect(t *testing.T) {
+	dir := t.TempDir()
+	a, err := NewStore(dir, 10, 1)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	if err := a.PutBytes("del-key", []byte("data")); err != nil {
+		t.Fatalf("PutBytes: %v", err)
+	}
+	if err := a.Delete("del-key"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	b, err := NewStore(dir, 10, 1)
+	if err != nil {
+		t.Fatalf("NewStore after delete: %v", err)
+	}
+	if got := b.Stats().Entries; got != 0 {
+		t.Fatalf("Delete left %d entries in the index, want 0", got)
+	}
+}
