@@ -1,0 +1,12 @@
+/d/bench-work/bin/python3
+D:\bench-work\venv\Scripts\python.exe
+3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]
+0b471133e110cfb53a061cad528ce8e517d7b9ac41a0a396c39ad795a487fc14 */d/bench-work/venv/Scripts/python.exe
+41367b878486bbe5ea75ec64c4b618506a6465e6a950e0553102e35a77854bbc */d/bench-work/venv/pyvenv.cfg
+numpy==2.4.6
+pandas==2.3.3
+python-dateutil==2.9.0.post0
+pytz==2026.5
+scipy==1.17.1
+six==1.17.0
+tzdata==2026.5

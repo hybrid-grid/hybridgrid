@@ -1,0 +1,112 @@
+{
+  "ARMS": "leastloaded sed hybrid-linucb hybrid-linucb-l0 hybrid-linucb-l025 hybrid-linucb-l100 hybrid-linucb-d-g098 hybrid-linucb-d-g098-l0 hybrid-linucb-d-g098-l025 hybrid-linucb-d-g098-l100",
+  "REPS": "20",
+  "ROUND_START": "1",
+  "OUT_DIR": "D:/bench-work/out/official/E2-lambda",
+  "JOBS": "8",
+  "CLIENTS": "1",
+  "BUILDER_CPUS": "2.0",
+  "SESSION_BUILDS": "2",
+  "CONFIGURE_FLAGS": "--disable-test-modules --disable-perf-trampoline",
+  "CPYTHON_VERSION": "v3.14.0",
+  "COOLDOWN": "8",
+  "SEED_BASE": "1000",
+  "ALPHA": "0.5",
+  "EPSILON": "0.1",
+  "WARM_START": "100",
+  "DRIFT": "permanent",
+  "DRIFT_AT": "120",
+  "DRIFT_TARGET": "worker-5",
+  "DRIFT_CPU": "1",
+  "DRIFT_DURATION": "30",
+  "DRIFT_ON": "10",
+  "DRIFT_OFF": "10",
+  "MIN_TASKS": "590",
+  "DRY_RUN": "0",
+  "EST_CELL_S": "60",
+  "git_commit": "1b8339d8f2be1e3e707272e2eefab752e355a137",
+  "git_dirty": false,
+  "image_ids": {
+    "coordinator": "sha256:c7f2f8744689ac509a7f413ef7cba3fc9bbf548cc672075319f46c2b6f814de0",
+    "worker-1": "sha256:a16a58752dba57255d2ec5244ba672755e4d9133c69a9528901950d01c8cb1d4",
+    "worker-2": "sha256:be04d9ec6fa6055b4d36f0edb0a046e70c199d956c18fac3e161acec57b82017",
+    "worker-3": "sha256:e85f54e46e3b270adf4f178eca870f7e35c80eee4edf238ec76677c24ec3bd0e",
+    "worker-4": "sha256:37bf4d14f9d13f4b755bdb603c66c1fb54ea5eeb3d9d4938a9ccedd1e5eea120",
+    "worker-5": "sha256:d363ae61dff0dde5e87599fda4d81caa9de0283f64423b9db8584aed581c1095",
+    "builder": "sha256:b7f6c0603a5efdba2fdbf81b677fc30d25d905e98711fa9ffc73b93934d9d882"
+  },
+  "host": {
+    "nproc": 36,
+    "docker_NCPU": 72,
+    "docker_MemTotal": 33591300096
+  },
+  "resolved_arms": [
+    {
+      "label": "leastloaded",
+      "flags": "--scheduler=leastloaded --alpha=0.5 --epsilon=0.1 --warm-start=100 --load-penalty=0.5 --task-log=/tmp/tasks.jsonl"
+    },
+    {
+      "label": "sed",
+      "flags": "--scheduler=sed --alpha=0.5 --epsilon=0.1 --warm-start=100 --load-penalty=0.5 --task-log=/tmp/tasks.jsonl"
+    },
+    {
+      "label": "hybrid-linucb",
+      "flags": "--scheduler=hybrid-linucb --alpha=0.5 --epsilon=0.1 --warm-start=100 --load-penalty=0.5 --task-log=/tmp/tasks.jsonl"
+    },
+    {
+      "label": "hybrid-linucb-l0",
+      "flags": "--scheduler=hybrid-linucb --alpha=0.5 --epsilon=0.1 --warm-start=100 --load-penalty=0.00 --task-log=/tmp/tasks.jsonl"
+    },
+    {
+      "label": "hybrid-linucb-l025",
+      "flags": "--scheduler=hybrid-linucb --alpha=0.5 --epsilon=0.1 --warm-start=100 --load-penalty=0.25 --task-log=/tmp/tasks.jsonl"
+    },
+    {
+      "label": "hybrid-linucb-l100",
+      "flags": "--scheduler=hybrid-linucb --alpha=0.5 --epsilon=0.1 --warm-start=100 --load-penalty=1.00 --task-log=/tmp/tasks.jsonl"
+    },
+    {
+      "label": "hybrid-linucb-d-g098",
+      "flags": "--scheduler=hybrid-linucb-d --alpha=0.5 --epsilon=0.1 --warm-start=100 --load-penalty=0.5 --discount=0.98 --discount-mode=global --task-log=/tmp/tasks.jsonl"
+    },
+    {
+      "label": "hybrid-linucb-d-g098-l0",
+      "flags": "--scheduler=hybrid-linucb-d --alpha=0.5 --epsilon=0.1 --warm-start=100 --load-penalty=0.00 --discount=0.98 --discount-mode=global --task-log=/tmp/tasks.jsonl"
+    },
+    {
+      "label": "hybrid-linucb-d-g098-l025",
+      "flags": "--scheduler=hybrid-linucb-d --alpha=0.5 --epsilon=0.1 --warm-start=100 --load-penalty=0.25 --discount=0.98 --discount-mode=global --task-log=/tmp/tasks.jsonl"
+    },
+    {
+      "label": "hybrid-linucb-d-g098-l100",
+      "flags": "--scheduler=hybrid-linucb-d --alpha=0.5 --epsilon=0.1 --warm-start=100 --load-penalty=1.00 --discount=0.98 --discount-mode=global --task-log=/tmp/tasks.jsonl"
+    }
+  ],
+  "workers": [
+    {
+      "worker": "worker-1",
+      "cpu_max": "50000 100000",
+      "nproc": "72"
+    },
+    {
+      "worker": "worker-2",
+      "cpu_max": "60000 100000",
+      "nproc": "72"
+    },
+    {
+      "worker": "worker-3",
+      "cpu_max": "80000 100000",
+      "nproc": "72"
+    },
+    {
+      "worker": "worker-4",
+      "cpu_max": "100000 100000",
+      "nproc": "72"
+    },
+    {
+      "worker": "worker-5",
+      "cpu_max": "110000 100000",
+      "nproc": "72"
+    }
+  ]
+}

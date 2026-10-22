@@ -1,0 +1,15 @@
+{
+  "analyzer_sha256": "b0a18daae2afb7667a03d7f563be4bb19e003c3ba7ae19054871e7d485ed945c",
+  "argv": {
+    "analysis": "--strict"
+  },
+  "families": [
+    "analysis"
+  ],
+  "files": {
+    "analysis.log": "d980b8f5d3930758430440d77c06e5046716628d75f6815384686ab7b589da59",
+    "analysis/cells.csv": "c177ecab4944479ea9c32570cd87af12f361d1338d8455c035619fff1bfe7a49",
+    "analysis/pairs.csv": "2a137346e0134880f69fe70ec47600e2ba98076702a0b9dee02a959215a0e5e6",
+    "analysis/summary.md": "7a34fc3e5bdee1c700ff512173771b2a9b9d20335a5f2dcc6a36505abbfbb0d4"
+  }
+}

@@ -1,0 +1,24 @@
+preflight 2026-10-10T15:56:35+07:00  STRICT=1  EXPECT_COMMIT=1b8339d
+OK    python3 -> /d/bench-work/bin/python3
+OK    pandas/scipy/numpy/python: 2.3.3 1.17.1 2.4.6 3.12.10
+INFO  repo HEAD: 1b8339d8f2be1e3e707272e2eefab752e355a137  docs(thesis): freeze pre-registration of Experiments 1 and 2
+OK    commit matches EXPECT_COMMIT
+OK    branch feat/exp-readiness
+OK    repo working tree clean
+OK    core.autocrlf=false
+OK    no CRLF in scripts/ and test/stress/
+INFO  docker NCPU=72 Mem=31 GiB (reference host: 72 CPU / 31 GiB)
+OK    docker VM matches the reference host
+OK    no running containers
+OK    docker compose available
+OK    C: free 22 GB
+OK    D: free 80 GB
+INFO  host: Microsoft Windows 10 Pro N | Intel(R) Xeon(R) CPU E5-2686 v4 @ 2.30GHz x2
+OK    no known noisy apps running
+INFO  power plan: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (High performance)
+OK    power plan is a performance plan
+OK    STANDBYIDLE on AC: never
+OK    HIBERNATEIDLE on AC: never
+INFO  not checked by this script: Windows Update restarts (pause updates / set active hours), antivirus scanning of D:\bench-work and Docker data (add an exclusion), clock sync
+
+preflight: no FAIL

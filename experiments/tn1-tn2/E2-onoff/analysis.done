@@ -1,0 +1,21 @@
+{
+  "analyzer_sha256": "b0a18daae2afb7667a03d7f563be4bb19e003c3ba7ae19054871e7d485ed945c",
+  "argv": {
+    "analysis": "--strict",
+    "analysis_d_vs_hg": "--strict --treatments hybrid-linucb-d-g095 hybrid-linucb-d-g098 hybrid-linucb-d-g099 hybrid-linucb-d-arm-g098 --baselines hybrid-linucb --out analysis_d_vs_hg"
+  },
+  "families": [
+    "analysis",
+    "analysis_d_vs_hg"
+  ],
+  "files": {
+    "analysis.log": "f10289f6830681f0d13a99290928bae43b7750e83e60f5b8c0dda5699fbb5e9b",
+    "analysis/cells.csv": "c9ed95dd6c234ba659c038fe49c76925692daf48bd46359e3089b496be3a051e",
+    "analysis/pairs.csv": "56939f64edfeea5580576fc5d63650981fb73572bd67c068262f272585bbb815",
+    "analysis/summary.md": "405f1f5113c2ddebd4d2bde6185ff0a689f80a2c76b155183f0c7622b6c5c84b",
+    "analysis_d_vs_hg.log": "e82875359e43a9f11540f5f163dd98bcbd5f81cdf81cf2037e3ca602091f6b58",
+    "analysis_d_vs_hg/cells.csv": "c9ed95dd6c234ba659c038fe49c76925692daf48bd46359e3089b496be3a051e",
+    "analysis_d_vs_hg/pairs.csv": "edaf0b75cc7eddf448727b284f95907a487194fee0776932d39a274d3a55c798",
+    "analysis_d_vs_hg/summary.md": "c0498f26ec69ac8ef57c7f6f5f0d0976c2251daf9067b476a66adff49ae728f0"
+  }
+}
