@@ -84,12 +84,21 @@ type LearningScheduler interface {
 	RecordOutcome(workerID string, reward float64, success bool, ctx TaskContext)
 }
 
-// SelectWith dispatches to LearningScheduler when available, falling
-// back to the base Scheduler.Select for non-learning schedulers. The
-// returned DispatchInfo is zero-valued in the fallback case.
+// ContextScheduler selects with task features without receiving outcome feedback.
+type ContextScheduler interface {
+	Scheduler
+	SelectWithContext(buildType pb.BuildType, arch pb.Architecture, clientOS string, ctx TaskContext) (*registry.WorkerInfo, error)
+}
+
+// SelectWith preserves the learner path, then routes context-aware baselines.
+// DispatchInfo is zero-valued for non-learning schedulers.
 func SelectWith(s Scheduler, buildType pb.BuildType, arch pb.Architecture, clientOS string, ctx TaskContext) (*registry.WorkerInfo, DispatchInfo, error) {
 	if learner, ok := s.(LearningScheduler); ok {
 		return learner.SelectWithDispatchInfo(buildType, arch, clientOS, ctx)
+	}
+	if contextual, ok := s.(ContextScheduler); ok {
+		w, err := contextual.SelectWithContext(buildType, arch, clientOS, ctx)
+		return w, DispatchInfo{}, err
 	}
 	w, err := s.Select(buildType, arch, clientOS)
 	return w, DispatchInfo{}, err

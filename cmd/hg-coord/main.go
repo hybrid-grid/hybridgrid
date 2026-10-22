@@ -70,8 +70,10 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			token, _ := cmd.Flags().GetString("token")
 			noMdns, _ := cmd.Flags().GetBool("no-mdns")
 			schedulerType, _ := cmd.Flags().GetString("scheduler")
+			sizeThreshold, _ := cmd.Flags().GetInt("size-threshold")
 			taskLogPath, _ := cmd.Flags().GetString("task-log")
 			dispatchQueueTimeout, _ := cmd.Flags().GetDuration("dispatch-queue-timeout")
+			requestTimeout, _ := cmd.Flags().GetDuration("request-timeout")
 			epsilonValue, _ := cmd.Flags().GetFloat64("epsilon")
 			alphaValue, _ := cmd.Flags().GetFloat64("alpha")
 			warmStart, _ := cmd.Flags().GetInt("warm-start")
@@ -80,9 +82,15 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			discountMode, _ := cmd.Flags().GetString("discount-mode")
 
 			// Validate scheduler choice (fail fast rather than silent fallback).
-			validSchedulers := map[string]bool{"leastloaded": true, "simple": true, "p2c": true, "epsilon-greedy": true, "linucb": true, "hybrid-linucb": true, "hybrid-linucb-d": true, "heft": true, "icecc-fastest": true, "sed": true}
+			validSchedulers := map[string]bool{"leastloaded": true, "simple": true, "p2c": true, "epsilon-greedy": true, "linucb": true, "hybrid-linucb": true, "hybrid-linucb-d": true, "heft": true, "icecc-fastest": true, "sed": true, "p90": true, "sed-p90": true}
 			if !validSchedulers[schedulerType] {
-				return fmt.Errorf("invalid --scheduler %q; must be one of: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, hybrid-linucb-d, heft, icecc-fastest, sed", schedulerType)
+				return fmt.Errorf("invalid --scheduler %q; must be one of: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, hybrid-linucb-d, heft, icecc-fastest, sed, p90, sed-p90", schedulerType)
+			}
+			if err := validateSizeThreshold(schedulerType, sizeThreshold); err != nil {
+				return err
+			}
+			if requestTimeout <= 0 {
+				return fmt.Errorf("invalid --request-timeout %v; must be positive", requestTimeout)
 			}
 			if epsilonValue < 0 || epsilonValue > 1 {
 				return fmt.Errorf("invalid --epsilon %v; must be in [0, 1]", epsilonValue)
@@ -172,9 +180,10 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			cfg.Port = grpcPort
 			cfg.AuthToken = token
 			cfg.HeartbeatTTL = 60 * time.Second
-			cfg.RequestTimeout = 120 * time.Second
+			cfg.RequestTimeout = requestTimeout
 			cfg.EnableRequestID = true
 			cfg.SchedulerType = schedulerType
+			cfg.SizeThreshold = sizeThreshold
 			cfg.TaskLogPath = taskLogPath
 			cfg.DispatchQueueTimeout = dispatchQueueTimeout
 			cfg.EpsilonValue = epsilonValue
@@ -301,7 +310,8 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 	serveCmd.Flags().Int("grpc-port", 9000, "gRPC server port")
 	serveCmd.Flags().Int("http-port", 8080, "HTTP ops port (health, metrics, log-level)")
 	serveCmd.Flags().Bool("no-mdns", false, "Disable mDNS advertisement")
-	serveCmd.Flags().String("scheduler", "leastloaded", "Scheduler type: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, hybrid-linucb-d, heft, icecc-fastest, sed")
+	serveCmd.Flags().String("scheduler", "leastloaded", "Scheduler type: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, hybrid-linucb-d, heft, icecc-fastest, sed, p90, sed-p90")
+	serveCmd.Flags().Int("size-threshold", 0, "Source size cutoff in bytes (> 0 for p90 and sed-p90; ignored otherwise)")
 	serveCmd.Flags().String("task-log", "", "Path to per-task JSON Lines log file (default: stdout)")
 	serveCmd.Flags().Float64("epsilon", 0.1, "Exploration rate for epsilon-greedy scheduler (in [0, 1]; ignored otherwise)")
 	serveCmd.Flags().Float64("alpha", 1.0, "LinUCB exploration coefficient α (in [0, 10]; ignored for other schedulers)")
@@ -309,6 +319,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 	serveCmd.Flags().Float64("load-penalty", 0.5, "Hybrid-LinUCB load penalty λ (in [0, 5]; ignored for other schedulers)")
 	serveCmd.Flags().Float64("discount", 0.98, "HG-LinUCB-D discount gamma in (0, 1]; ignored unless --scheduler=hybrid-linucb-d")
 	serveCmd.Flags().String("discount-mode", "global", "global (every worker ages with the dispatch clock) or arm (only the worker that returns an outcome ages); ignored unless --scheduler=hybrid-linucb-d")
+	serveCmd.Flags().Duration("request-timeout", 120*time.Second, "Deadline for the worker RPC of one compile (queueing is bounded by --dispatch-queue-timeout)")
 	serveCmd.Flags().Duration("dispatch-queue-timeout", 30*time.Second, "How long an over-capacity compile waits in the dispatch queue before failing (0 disables queueing)")
 	serveCmd.Flags().String("tls-cert", "", "Path to TLS certificate file (PEM format)")
 	serveCmd.Flags().String("tls-key", "", "Path to TLS private key file (PEM format)")
@@ -339,6 +350,13 @@ func validateDiscountFlags(schedulerType string, discount float64, mode string) 
 	}
 	if mode != "global" && mode != "arm" {
 		return fmt.Errorf("invalid --discount-mode %q; must be global or arm", mode)
+	}
+	return nil
+}
+
+func validateSizeThreshold(schedulerType string, threshold int) error {
+	if (schedulerType == "p90" || schedulerType == "sed-p90") && threshold <= 0 {
+		return fmt.Errorf("invalid --size-threshold %d; must be > 0 for --scheduler=%s", threshold, schedulerType)
 	}
 	return nil
 }

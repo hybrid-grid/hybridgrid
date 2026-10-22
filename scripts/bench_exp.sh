@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Randomized complete-block CPython experiments. No containers are started in DRY_RUN.
+# Randomized complete-block build experiments. No containers are started in DRY_RUN.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -13,14 +13,30 @@ OUT_DIR="${OUT_DIR:-/tmp/bench_exp_$(date +%Y%m%d_%H%M%S)}"
 JOBS="${JOBS:-8}"
 CLIENTS="${CLIENTS:-1}"
 BUILDER_CPUS="${BUILDER_CPUS:-1.0}"
+BUILDER_MEM="${BUILDER_MEM:-1G}"
 SESSION_BUILDS="${SESSION_BUILDS:-1}"
 CONFIGURE_FLAGS="${CONFIGURE_FLAGS:---disable-test-modules --disable-perf-trampoline}"
 CPYTHON_VERSION="${CPYTHON_VERSION:-v3.14.0}"
+WORKLOAD="${WORKLOAD:-cpython}"
+ABSL_REF="${ABSL_REF:-20250512.1}"
+ABSL_COMMIT="${ABSL_COMMIT:-76bb24329e8bf5f39704eb10d21b9a80befa7c81}"
+SYN_SEED="${SYN_SEED:-3001}"
+SYN_FILES="${SYN_FILES:-300}"
+SYN_C_FRACTION="${SYN_C_FRACTION:-0.3}"
+SYN_ALPHA="${SYN_ALPHA:-1.5}"
+SYN_MEDIAN_UNITS="${SYN_MEDIAN_UNITS:-40}"
+SYN_MAX_UNITS="${SYN_MAX_UNITS:-1500}"
+SYN_HIDDEN="${SYN_HIDDEN:-0.0}"
+SYN_MANIFEST_SHA256=
 COOLDOWN="${COOLDOWN:-8}"
 SEED_BASE="${SEED_BASE:-1000}"
 ALPHA="${ALPHA:-0.5}"
 EPSILON="${EPSILON:-0.1}"
 WARM_START="${WARM_START:-100}"
+P90_THRESHOLD="${P90_THRESHOLD:-}"
+# Coordinator per-compile deadline (e.g. 600s). Empty keeps the built-in 120s
+# and passes no flag, so Experiments 1-2 commands are unchanged.
+REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-}"
 DRIFT="${DRIFT:-none}"
 DRIFT_AT="${DRIFT_AT:-120}"
 DRIFT_TARGET="${DRIFT_TARGET:-worker-5}"
@@ -49,6 +65,15 @@ nonnegative_int COOLDOWN "$COOLDOWN"; positive_int DRIFT_AT "$DRIFT_AT"
 (( ROUND_START <= REPS )) || die 'ROUND_START must not exceed REPS'
 [[ $CLIENTS == 1 || $CLIENTS == 2 ]] || die 'CLIENTS must be 1 or 2'
 [[ $DRIFT == none || $DRIFT == permanent || $DRIFT == transient || $DRIFT == onoff ]] || die 'DRIFT must be none, permanent, transient, or onoff'
+[[ -z $REQUEST_TIMEOUT || $REQUEST_TIMEOUT =~ ^[1-9][0-9]*(s|m)$ ]] || die 'REQUEST_TIMEOUT must look like 600s or 10m'
+# The client-side compile deadline (HG_TIMEOUT for hgcc/hgcxx) must outlast the
+# coordinator deadline; otherwise the client cancels and retries long compiles
+# while the worker is still running them (pilot 2026-10-22).
+HG_TIMEOUT_ENV=()
+if [[ -n $REQUEST_TIMEOUT ]]; then
+    case $REQUEST_TIMEOUT in *m) rt_s=$(( ${REQUEST_TIMEOUT%m} * 60 )) ;; *) rt_s=${REQUEST_TIMEOUT%s} ;; esac
+    HG_TIMEOUT_ENV=("HG_TIMEOUT=$(( rt_s + 60 ))s")
+fi
 [[ $DRIFT_TARGET =~ ^worker-[1-5]$ ]] || die 'DRIFT_TARGET must be worker-1..worker-5'
 [[ $DRY_RUN == 0 || $DRY_RUN == 1 ]] || die 'DRY_RUN must be 0 or 1'
 decimal ALPHA "$ALPHA"; decimal EPSILON "$EPSILON"; decimal BUILDER_CPUS "$BUILDER_CPUS"
@@ -58,16 +83,29 @@ python3 -c 'import sys; sys.exit(float(sys.argv[1]) <= 0)' "$BUILDER_CPUS" || di
 [[ $SEED_BASE =~ ^-?[0-9]+$ ]] || die 'SEED_BASE must be an integer'
 [[ $CPYTHON_VERSION =~ ^[a-zA-Z0-9._-]+$ ]] || die 'invalid CPYTHON_VERSION'
 [[ $CONFIGURE_FLAGS =~ ^[-a-zA-Z0-9_=./\ ]+$ ]] || die 'CONFIGURE_FLAGS contains unsupported characters'
+[[ $WORKLOAD == cpython || $WORKLOAD == absl || $WORKLOAD == syn ]] || die 'WORKLOAD must be cpython, absl, or syn'
+[[ $ABSL_REF =~ ^[a-zA-Z0-9._-]+$ ]] || die 'invalid ABSL_REF'
+[[ $ABSL_COMMIT =~ ^[a-fA-F0-9]{40}$ ]] || die 'ABSL_COMMIT must be a 40-character hex commit'
+[[ $BUILDER_MEM =~ ^[1-9][0-9]*([kKmMgG][bB]?)?$ ]] || die 'invalid BUILDER_MEM'
+nonnegative_int SYN_SEED "$SYN_SEED"; positive_int SYN_FILES "$SYN_FILES"
+positive_int SYN_MEDIAN_UNITS "$SYN_MEDIAN_UNITS"; positive_int SYN_MAX_UNITS "$SYN_MAX_UNITS"
+decimal SYN_C_FRACTION "$SYN_C_FRACTION"; decimal SYN_ALPHA "$SYN_ALPHA"; decimal SYN_HIDDEN "$SYN_HIDDEN"
+python3 -c 'import math,sys; c,a,h=map(float,sys.argv[1:]); sys.exit(not (0 <= c <= 1 and math.isfinite(a) and a > 0 and 0 <= h <= 1))' "$SYN_C_FRACTION" "$SYN_ALPHA" "$SYN_HIDDEN" || die 'SYN_C_FRACTION and SYN_HIDDEN must be in [0, 1], SYN_ALPHA must be > 0'
+(( 10#$SYN_MAX_UNITS >= 10#$SYN_MEDIAN_UNITS )) || die 'SYN_MAX_UNITS must be >= SYN_MEDIAN_UNITS'
 
 declare -a arm_list=() arm_bases=() arm_flags=()
 declare -A seen=()
 read -r -a requested_arms <<< "$ARMS"
 (( ${#requested_arms[@]} > 0 )) || die 'ARMS is empty'
 for label in "${requested_arms[@]}"; do
-    if [[ ! $label =~ ^(leastloaded|simple|p2c|epsilon-greedy|linucb|hybrid-linucb-d|hybrid-linucb|heft|icecc-fastest|sed)(-arm)?(-g[0-9]{3})?(-l(0|[0-9]{3}))?$ ]]; then
+    if [[ ! $label =~ ^(leastloaded|simple|p2c|epsilon-greedy|linucb|hybrid-linucb-d|hybrid-linucb|heft|icecc-fastest|sed-p90|sed|p90)(-arm)?(-g[0-9]{3})?(-l(0|[0-9]{3}))?$ ]]; then
         die "invalid arm '$label': expected <base>[-arm][-g<ddd>][-l<ddd>]"
     fi
     base=${BASH_REMATCH[1]}; mode=${BASH_REMATCH[2]}; gamma=${BASH_REMATCH[3]}; penalty=${BASH_REMATCH[4]}
+    if [[ $base == p90 || $base == sed-p90 ]]; then
+        [[ -n $P90_THRESHOLD ]] || die "P90_THRESHOLD is required for arm '$label'"
+        positive_int P90_THRESHOLD "$P90_THRESHOLD"
+    fi
     [[ -z ${seen[$label]+x} ]] || die "duplicate arm '$label'"
     seen[$label]=1
     if [[ -n $mode || -n $gamma ]] && [[ $base != hybrid-linucb-d ]]; then
@@ -87,7 +125,9 @@ for label in "${requested_arms[@]}"; do
         load_penalty=$(printf '%d.%02d' "$((10#$digits / 100))" "$((10#$digits % 100))")
     fi
     flags="--scheduler=$base --alpha=$ALPHA --epsilon=$EPSILON --warm-start=$WARM_START --load-penalty=$load_penalty"
+    [[ $base != p90 && $base != sed-p90 ]] || flags+=" --size-threshold=$P90_THRESHOLD"
     [[ $base != hybrid-linucb-d ]] || flags+=" --discount=$discount --discount-mode=$discount_mode"
+    [[ -z $REQUEST_TIMEOUT ]] || flags+=" --request-timeout=$REQUEST_TIMEOUT"
     flags+=' --task-log=/tmp/tasks.jsonl'
     arm_list+=("$label"); arm_bases+=("$base"); arm_flags+=("$flags")
 done
@@ -167,7 +207,7 @@ EOF
       resources:
         limits:
           cpus: '$BUILDER_CPUS'
-          memory: 1G
+          memory: $BUILDER_MEM
 EOF
         done
         printf 'networks:\n  hgnet:\n    driver: bridge\nvolumes:\n  task-logs:\n  build-cache:\n  cpython-src:\n  gate:\n'
@@ -188,6 +228,22 @@ if [[ $DRY_RUN == 1 ]]; then
     done
     cells=$(( (REPS - ROUND_START + 1) * ${#arm_list[@]} + (ROUND_START == 1 ? 1 : 0) ))
     printf 'estimated wall time: %d s (%d cells x %d builds x %d s, plus cooldown; excludes setup)\n' "$((cells * (EST_CELL_S * SESSION_BUILDS + COOLDOWN)))" "$cells" "$SESSION_BUILDS" "$EST_CELL_S"
+    case $WORKLOAD in
+        cpython)
+            printf 'configure: cd /workspace/cpython && ./configure %s\n' "$CONFIGURE_FLAGS"
+            printf 'build: cd /workspace/cpython && hgbuild make -j"$1"\n'
+            ;;
+        absl)
+            printf 'configure: HG_COORDINATOR=127.0.0.1:1 CC=hgcc CXX=hgcxx cmake -S /workspace/abseil-cpp -B /workspace/abseil-cpp-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 -DABSL_BUILD_TESTING=OFF -DABSL_PROPAGATE_CXX_STD=ON\n'
+            printf 'build: cd /workspace/abseil-cpp-build && hgbuild ninja --no-fallback -j"$1"\n'
+            ;;
+        syn)
+            printf 'generate: python3 scripts/gen_synthetic_cpp.py --out DIR --seed %s --files %s --c-fraction %s --pareto-alpha %s --median-units %s --max-units %s --hidden-cost-fraction %s (host)\n' "$SYN_SEED" "$SYN_FILES" "$SYN_C_FRACTION" "$SYN_ALPHA" "$SYN_MEDIAN_UNITS" "$SYN_MAX_UNITS" "$SYN_HIDDEN"
+            printf 'configure: HG_COORDINATOR=127.0.0.1:1 CC=hgcc CXX=hgcxx cmake -S /workspace/syn -B /workspace/syn-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17\n'
+            printf 'build: cd /workspace/syn-build && hgbuild ninja --no-fallback -j"$1"\n'
+            ;;
+    esac
+    printf 'meta keys: WORKLOAD ABSL_REF ABSL_COMMIT SYN_SEED SYN_FILES SYN_C_FRACTION SYN_ALPHA SYN_MEDIAN_UNITS SYN_MAX_UNITS SYN_HIDDEN SYN_MANIFEST_SHA256 BUILDER_MEM P90_THRESHOLD\n'
     exit 0
 fi
 
@@ -196,11 +252,38 @@ command -v curl >/dev/null || die 'curl is required'
 mkdir -p "$OUT_DIR"
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 if (( ROUND_START == 1 )); then
-    printf 'arm,round,order_pos,build_idx,client,elapsed_s,cell_makespan_s\n' > "$OUT_DIR/results.csv"
+    printf 'arm,round,order_pos,build_idx,client,elapsed_s,cell_makespan_s,start_ts,end_ts\n' > "$OUT_DIR/results.csv"
     printf 'round,order\n' > "$OUT_DIR/order_log.csv"
     printf 'arm,round,attempt,reason\n' > "$OUT_DIR/failures.csv"
 else
     [[ -f $OUT_DIR/results.csv && -f $OUT_DIR/order_log.csv && -f $OUT_DIR/meta.json ]] || die 'resume requires results.csv, order_log.csv, and meta.json'
+    # Never mix configurations in one directory: every setting that defines the
+    # experiment must match meta.json. Keys absent from an older meta.json
+    # (written before WORKLOAD existed) must still have their default value.
+    python3 - "$OUT_DIR/meta.json" \
+        "ARMS=$ARMS" "JOBS=$JOBS" "CLIENTS=$CLIENTS" "SESSION_BUILDS=$SESSION_BUILDS" "BUILDER_CPUS=$BUILDER_CPUS" \
+        "DRIFT=$DRIFT" "DRIFT_AT=$DRIFT_AT" "DRIFT_TARGET=$DRIFT_TARGET" "SEED_BASE=$SEED_BASE" "WARM_START=$WARM_START" \
+        "WORKLOAD=$WORKLOAD" "BUILDER_MEM=$BUILDER_MEM" "ABSL_REF=$ABSL_REF" "ABSL_COMMIT=$ABSL_COMMIT" \
+        "SYN_SEED=$SYN_SEED" "SYN_FILES=$SYN_FILES" "SYN_C_FRACTION=$SYN_C_FRACTION" "SYN_ALPHA=$SYN_ALPHA" \
+        "SYN_MEDIAN_UNITS=$SYN_MEDIAN_UNITS" "SYN_MAX_UNITS=$SYN_MAX_UNITS" "SYN_HIDDEN=$SYN_HIDDEN" \
+        "P90_THRESHOLD=$P90_THRESHOLD" "REQUEST_TIMEOUT=$REQUEST_TIMEOUT" "ALPHA=$ALPHA" "EPSILON=$EPSILON" "CPYTHON_VERSION=$CPYTHON_VERSION" \
+        "CONFIGURE_FLAGS=$CONFIGURE_FLAGS" "COOLDOWN=$COOLDOWN" "DRIFT_CPU=$DRIFT_CPU" \
+        "DRIFT_DURATION=$DRIFT_DURATION" "DRIFT_ON=$DRIFT_ON" "DRIFT_OFF=$DRIFT_OFF" <<'PY' || die 'resume configuration differs from meta.json'
+import json, sys
+meta = json.load(open(sys.argv[1]))
+defaults = {"WORKLOAD": "cpython", "BUILDER_MEM": "1G", "P90_THRESHOLD": ""}
+bad = []
+for item in sys.argv[2:]:
+    key, value = item.split("=", 1)
+    if key in meta:
+        if str(meta[key]) != value:
+            bad.append(f"{key}: meta.json={meta[key]!r}, now={value!r}")
+    elif key in defaults and value != defaults[key]:
+        bad.append(f"{key}: absent from meta.json (default {defaults[key]!r}), now={value!r}")
+if bad:
+    print("resume mismatch:\n  " + "\n  ".join(bad), file=sys.stderr)
+    sys.exit(1)
+PY
     if [[ -z $MIN_TASKS ]]; then MIN_TASKS=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["MIN_TASKS"])' "$OUT_DIR/meta.json"); fi
     # A crashed round may have some successful cells already. Rerun the whole block.
     python3 - "$OUT_DIR/results.csv" "$OUT_DIR/order_log.csv" "$ROUND_START" <<'PY'
@@ -215,7 +298,7 @@ for path in sys.argv[1:3]:
 PY
 fi
 
-injector_pid=; stats_pid=; cell_marker=; events_file=
+injector_pid=; stats_pid=; cell_marker=; events_file=; syn_host_dir=; SYN_MARKER=
 stop_stress() {
     local running=0 stopped=0 count
     if compose exec -T "$DRIFT_TARGET" pgrep -x stress-ng >/dev/null 2>&1; then
@@ -237,7 +320,11 @@ stop_background() {
     if [[ -n $stats_pid ]]; then kill "$stats_pid" 2>/dev/null || true; wait "$stats_pid" 2>/dev/null || true; stats_pid=; fi
     stop_stress || true
 }
-cleanup() { stop_background; compose down >/dev/null 2>&1 || true; }
+cleanup() {
+    stop_background
+    compose down >/dev/null 2>&1 || true
+    [[ -z $syn_host_dir ]] || rm -rf "$syn_host_dir"
+}
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
@@ -371,6 +458,67 @@ if [[ ! -f Makefile || $want != "$have" ]]; then
 fi
 SH
 }
+prepare_absl_builder() {
+    local service=$1
+    compose exec -T "$service" bash -s -- "$ABSL_REF" "$ABSL_COMMIT" <<'SH'
+set -euo pipefail
+ref=$1; expected=$2
+source=/workspace/abseil-cpp
+marker="$ref $expected"
+if [[ -d $source ]] && { [[ $(cat "$source/.hg-bench-source" 2>/dev/null || true) != "$marker" ]] || [[ $(git -C "$source" rev-parse HEAD 2>/dev/null || true) != "$expected" ]]; }; then
+    rm -rf "$source" /workspace/abseil-cpp-build
+fi
+if [[ ! -d $source ]]; then
+    git clone --depth=1 --branch="$ref" https://github.com/abseil/abseil-cpp.git "$source"
+    actual=$(git -C "$source" rev-parse HEAD)
+    [[ $actual == "$expected" ]] || { printf 'Abseil commit mismatch: expected %s, got %s\n' "$expected" "$actual" >&2; exit 1; }
+    printf '%s\n' "$marker" > "$source/.hg-bench-source"
+fi
+SH
+    configure_cmake "$service" abseil-cpp -DABSL_BUILD_TESTING=OFF -DABSL_PROPAGATE_CXX_STD=ON
+}
+prepare_syn_builder() {
+    local service=$1 have
+    # Trust the marker only if the tree it describes is actually present (an
+    # interrupted copy must not leave a valid-looking marker behind).
+    have=$(compose exec -T "$service" sh -c 'test -f /workspace/syn/CMakeLists.txt && test -f /workspace/syn/manifest.json && cat /workspace/syn/.hg-bench-source 2>/dev/null || true') || return 1
+    if [[ $have != "$SYN_MARKER" ]]; then
+        compose exec -T "$service" sh -c 'rm -rf /workspace/syn /workspace/syn-build && mkdir -p /workspace/syn' || return 1
+        # Stream the tree with tar: `docker compose cp` cannot tell a Windows
+        # host path (C:\...) from SERVICE:PATH and fails with "unknown copy direction".
+        tar -C "$syn_host_dir/syn" -cf - . | compose exec -T "$service" sh -c 'tar -C /workspace/syn -xf -' || return 1
+        compose exec -T "$service" sh -c 'test -f /workspace/syn/CMakeLists.txt' || return 1
+        compose exec -T "$service" sh -c 'printf "%s\n" "$1" > /workspace/syn/.hg-bench-source' _ "$SYN_MARKER" || return 1
+    fi
+    configure_cmake "$service" syn
+}
+# Pass the source directory name relative to /workspace: Git Bash rewrites
+# arguments that start with "/" before they reach docker compose exec.
+configure_cmake() {
+    local service=$1 source=$2
+    shift 2
+    compose exec -T "$service" bash -s -- "$source" "$@" <<'SH'
+set -euo pipefail
+source=/workspace/$1; shift
+build="${source}-build"
+want=$(cat "$source/.hg-bench-source")
+have=$(cat "$build/.hg-bench-configured-source" 2>/dev/null || true)
+if [[ ! -f $build/build.ninja || $want != "$have" ]]; then
+    # Compiler probes during configure must not reach the measured coordinator
+    # (they would train the scheduler and advance the dispatch counter), so
+    # point hgcc at an unreachable address: the probes fall back to local gcc.
+    HG_COORDINATOR=127.0.0.1:1 CC=hgcc CXX=hgcxx cmake -S "$source" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 "$@" > /tmp/hg-configure.log 2>&1 || { tail -30 /tmp/hg-configure.log; exit 1; }
+    printf '%s\n' "$want" > "$build/.hg-bench-configured-source"
+fi
+SH
+}
+prepare_workload_builder() {
+    case $WORKLOAD in
+        cpython) prepare_builder "$1" ;;
+        absl) prepare_absl_builder "$1" ;;
+        syn) prepare_syn_builder "$1" ;;
+    esac
+}
 wait_registration() {
     local n waited
     for (( waited=0; waited<=90; waited+=2 )); do
@@ -385,7 +533,14 @@ clean_builders() {
     local service
     for service in builder builder2; do
         [[ $service != builder2 || $CLIENTS == 2 ]] || continue
-        compose exec -T "$service" bash -c 'cd /workspace/cpython && make clean >/dev/null 2>&1 && rm -rf /root/.hybridgrid/cache/*' || return 1
+        if [[ $WORKLOAD == cpython ]]; then
+            compose exec -T "$service" bash -c 'cd /workspace/cpython && make clean >/dev/null 2>&1 && rm -rf /root/.hybridgrid/cache/*' || return 1
+        else
+            # Relative to /workspace: Git Bash would rewrite a leading "/".
+            local build=abseil-cpp-build
+            [[ $WORKLOAD != syn ]] || build=syn-build
+            compose exec -T "$service" bash -c 'ninja -C "/workspace/$1" clean >/dev/null 2>&1 && rm -rf /root/.hybridgrid/cache/*' _ "$build" || return 1
+        fi
     done
 }
 collect_worker_limits() {
@@ -409,12 +564,13 @@ write_meta() {
     [[ -z $(git -C "$ROOT" status --porcelain) ]] || git_dirty=true
     host_nproc=$(nproc)
     export ARMS REPS ROUND_START OUT_DIR JOBS CLIENTS BUILDER_CPUS SESSION_BUILDS CONFIGURE_FLAGS CPYTHON_VERSION COOLDOWN SEED_BASE ALPHA EPSILON WARM_START DRIFT DRIFT_AT DRIFT_TARGET DRIFT_CPU DRIFT_DURATION DRIFT_ON DRIFT_OFF MIN_TASKS DRY_RUN EST_CELL_S
+    export WORKLOAD ABSL_REF ABSL_COMMIT SYN_SEED SYN_FILES SYN_C_FRACTION SYN_ALPHA SYN_MEDIAN_UNITS SYN_MAX_UNITS SYN_HIDDEN SYN_MANIFEST_SHA256 BUILDER_MEM P90_THRESHOLD REQUEST_TIMEOUT
     META_IMAGES="$image_ids" META_DOCKER="$docker_info" META_COMMIT="$git_commit" META_DIRTY="$git_dirty" META_NPROC="$host_nproc" \
         META_LABELS="$(printf '%s|' "${arm_list[@]}")" META_FLAGS="$(printf '%s|' "${arm_flags[@]}")" \
         python3 - "$OUT_DIR/.worker_limits.csv" "$OUT_DIR/meta.json" <<'PY'
 import csv, json, os, sys
 e = os.environ
-keys = 'ARMS REPS ROUND_START OUT_DIR JOBS CLIENTS BUILDER_CPUS SESSION_BUILDS CONFIGURE_FLAGS CPYTHON_VERSION COOLDOWN SEED_BASE ALPHA EPSILON WARM_START DRIFT DRIFT_AT DRIFT_TARGET DRIFT_CPU DRIFT_DURATION DRIFT_ON DRIFT_OFF MIN_TASKS DRY_RUN EST_CELL_S'.split()
+keys = 'ARMS REPS ROUND_START OUT_DIR JOBS CLIENTS BUILDER_CPUS SESSION_BUILDS CONFIGURE_FLAGS CPYTHON_VERSION COOLDOWN SEED_BASE ALPHA EPSILON WARM_START DRIFT DRIFT_AT DRIFT_TARGET DRIFT_CPU DRIFT_DURATION DRIFT_ON DRIFT_OFF MIN_TASKS DRY_RUN EST_CELL_S WORKLOAD ABSL_REF ABSL_COMMIT SYN_SEED SYN_FILES SYN_C_FRACTION SYN_ALPHA SYN_MEDIAN_UNITS SYN_MAX_UNITS SYN_HIDDEN SYN_MANIFEST_SHA256 BUILDER_MEM P90_THRESHOLD REQUEST_TIMEOUT'.split()
 meta = {key: e[key] for key in keys}
 labels = e['META_LABELS'].rstrip('|').split('|')
 flags = e['META_FLAGS'].rstrip('|').split('|')
@@ -439,11 +595,17 @@ run_cell() {
     if (( CLIENTS == 2 )); then services+=(builder2); fi
     if ! compose up -d "${services[@]}"; then FAIL_REASON='compose up failed'; return 1; fi
     compose exec -T coordinator sh -c 'truncate -s 0 /tmp/tasks.jsonl' || { FAIL_REASON='task log truncate failed'; return 1; }
+    if [[ $WORKLOAD != cpython ]]; then wait_registration || return 1; fi
     for i in $(seq 1 "$CLIENTS"); do
         service=builder; (( i == 1 )) || service=builder2
-        prepare_builder "$service" || { FAIL_REASON="prepare $service failed"; return 1; }
+        prepare_workload_builder "$service" || { FAIL_REASON="prepare $service failed"; return 1; }
     done
-    wait_registration || return 1
+    if [[ $WORKLOAD == cpython ]]; then
+        wait_registration || return 1
+    else
+        # CMake's compiler probes use hgcc, so discard them before the cell.
+        compose exec -T coordinator sh -c 'truncate -s 0 /tmp/tasks.jsonl' || { FAIL_REASON='task log truncate failed'; return 1; }
+    fi
     if [[ ! -f $OUT_DIR/.worker_limits.csv ]]; then collect_worker_limits || { FAIL_REASON='worker limits failed'; return 1; }; fi
     printf 'cell %s round %s attempt %s: all 5 workers registered\n' "$arm" "$round" "$attempt"
     sleep "$COOLDOWN"
@@ -466,7 +628,7 @@ run_cell() {
             log="$OUT_DIR/build_${arm}_round${round}_b${build_idx}_c${client}.log"
             (
                 set +e
-                compose exec -T "$service" env "HG_BUILD_ID=$id" bash -c '
+                compose exec -T "$service" env "HG_BUILD_ID=$id" "${HG_TIMEOUT_ENV[@]}" bash -c '
                     token=$2; client=$3
                     touch "/gate/ready-c${client}-${token}" || exit 1
                     deadline=$((SECONDS + 120))
@@ -475,14 +637,22 @@ run_cell() {
                         sleep 0.01
                     done
                     [[ -e /gate/go-${token} ]] || { printf "gate timeout\n" >&2; exit 1; }
-                    cd /workspace/cpython || exit 1
+                    if [[ $4 == cpython ]]; then
+                        cd /workspace/cpython || exit 1
+                    elif [[ $4 == absl ]]; then
+                        cd /workspace/abseil-cpp-build || exit 1
+                    else
+                        cd /workspace/syn-build || exit 1
+                    fi
                     start=$(date +%s.%N)
-                    hgbuild make -j"$1"
+                    # CMake workloads must never compile a measured TU locally:
+                    # --no-fallback makes a failed remote compile fail the build.
+                    if [[ $4 == cpython ]]; then hgbuild make -j"$1"; else hgbuild ninja --no-fallback -j"$1"; fi
                     result=$?
                     end=$(date +%s.%N)
                     printf "HGTIME %s %s %s %s\n" "$start" "$end" "$result" "$(hostname)"
                     exit "$result"
-                ' _ "$JOBS" "$token" "$client" > "$log" 2>&1
+                ' _ "$JOBS" "$token" "$client" "$WORKLOAD" > "$log" 2>&1
                 status=$?
                 printf '%s\n' "$status" > "$log.status"
             ) &
@@ -531,6 +701,9 @@ run_cell() {
             [[ -f $log.status ]] || { FAIL_REASON="client $client missing exit status"; return 1; }
             status=$(cat "$log.status")
             [[ $status == 0 ]] || { FAIL_REASON="client $client build exit $status (see $log)"; return 1; }
+            if [[ $WORKLOAD != cpython ]] && grep -Fq 'FAILED:' "$log"; then
+                FAIL_REASON="client $client ninja reported FAILED: (see $log)"; return 1
+            fi
             read -r time_tag start end build_status hostname extra <<< "$(tail -n 1 "$log")"
             [[ $time_tag == HGTIME && $build_status == 0 && -n $hostname && -z ${extra:-} && $start =~ ^[0-9]+([.][0-9]+)?$ && $end =~ ^[0-9]+([.][0-9]+)?$ ]] || {
                 FAIL_REASON="client $client missing or failed HGTIME for build $build_idx (see $log)"; return 1;
@@ -540,7 +713,7 @@ run_cell() {
             if [[ -z $min_start ]]; then min_start=$start; max_end=$end; else
                 read -r min_start max_end <<< "$(python3 -c 'import sys; a,b,c,d=map(float,sys.argv[1:]); print(min(a,c),max(b,d))' "$min_start" "$max_end" "$start" "$end")"
             fi
-            printf '%s,%s,%s,%s,%s,%s,PLACEHOLDER\n' "$arm" "$round" "$pos" "$build_idx" "$client" "$elapsed" >> "$build_rows"
+            printf '%s,%s,%s,%s,%s,%s,PLACEHOLDER,%s,%s\n' "$arm" "$round" "$pos" "$build_idx" "$client" "$elapsed" "$start" "$end" >> "$build_rows"
         done
         if (( CLIENTS == 2 )) && [[ ${hostnames[0]} == "${hostnames[1]}" ]]; then
             FAIL_REASON="build $build_idx clients share HGTIME hostname ${hostnames[0]}"; return 1
@@ -592,6 +765,18 @@ PY
     return 0
 }
 
+if [[ $WORKLOAD == syn ]]; then
+    # The builder image has no Python. Generate once on the host, then copy the
+    # project into each persistent builder volume when its marker differs.
+    syn_host_dir=$(mktemp -d)
+    python3 "$ROOT/scripts/gen_synthetic_cpp.py" --out "$syn_host_dir/syn" --seed "$SYN_SEED" --files "$SYN_FILES" \
+        --c-fraction "$SYN_C_FRACTION" --pareto-alpha "$SYN_ALPHA" --median-units "$SYN_MEDIAN_UNITS" \
+        --max-units "$SYN_MAX_UNITS" --hidden-cost-fraction "$SYN_HIDDEN" || die 'synthetic project generation failed'
+    SYN_MANIFEST_SHA256=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["manifest_sha256"])' "$syn_host_dir/syn/manifest.json") || die 'synthetic manifest is missing manifest_sha256'
+    [[ $SYN_MANIFEST_SHA256 =~ ^[a-fA-F0-9]{64}$ ]] || die 'invalid synthetic manifest_sha256'
+    SYN_MARKER="$SYN_MANIFEST_SHA256 $SYN_SEED $SYN_FILES $SYN_C_FRACTION $SYN_ALPHA $SYN_MEDIAN_UNITS $SYN_MAX_UNITS $SYN_HIDDEN"
+fi
+
 # Build the common image once, before the discarded warm-up and measured cells.
 generate_compose "${arm_flags[0]}"
 compose build
@@ -600,6 +785,7 @@ if (( ROUND_START == 1 )); then
     for attempt in 1 2; do
         if run_cell "${arm_list[0]}" 0 0 0 "${arm_flags[0]}" "$attempt"; then break; fi
         stop_background
+        compose logs --no-color --timestamps > "$OUT_DIR/compose_${arm_list[0]}_round0_a${attempt}.log" 2>&1 || true
         printf '%s,0,%s,%s\n' "${arm_list[0]}" "$attempt" "${FAIL_REASON//,/;}" >> "$OUT_DIR/failures.csv"
         (( attempt < 2 )) || die "warm-up failed twice: $FAIL_REASON"
     done
@@ -620,6 +806,9 @@ for (( round=ROUND_START; round<=REPS; round++ )); do
                 break
             fi
             stop_background
+            # Keep the cluster logs of a failed cell for diagnosis; the containers
+            # are only removed when the next cell starts.
+            compose logs --no-color --timestamps > "$OUT_DIR/compose_${arm}_round${round}_a${attempt}.log" 2>&1 || true
             printf '%s,%s,%s,%s\n' "$arm" "$round" "$attempt" "${FAIL_REASON//,/;}" >> "$OUT_DIR/failures.csv"
             printf 'cell failed: %s (attempt %s): %s\n' "$arm" "$attempt" "$FAIL_REASON" >&2
             (( attempt < 2 )) || die "cell $arm round $round failed twice; resume with ROUND_START=$round"

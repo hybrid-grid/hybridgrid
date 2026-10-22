@@ -19,6 +19,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     make \
+    cmake \
+    ninja-build \
     autoconf \
     automake \
     libtool \
@@ -46,6 +48,7 @@ COPY --from=builder /bin/hg-coord /usr/local/bin/
 COPY --from=builder /bin/hg-worker /usr/local/bin/
 COPY --from=builder /bin/hgbuild /usr/local/bin/
 COPY --from=builder /bin/hg-dashboard /usr/local/bin/
+RUN hgbuild install-wrappers /usr/local/bin
 
 # Create cache directory
 RUN mkdir -p /root/.hybridgrid/cache

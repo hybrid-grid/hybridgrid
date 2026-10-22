@@ -52,6 +52,9 @@ const (
 	wrapperCCEnv  = "HG_WRAP_CC_MODE"
 	wrapperCXXEnv = "HG_WRAP_CXX_MODE"
 	noFallbackEnv = "HG_NO_FALLBACK"
+	// timeoutEnv sets the per-compile RPC deadline for compiler wrappers that
+	// a build system invokes without flags (hgcc/hgcxx under Ninja or Make).
+	timeoutEnv = "HG_TIMEOUT"
 )
 
 func main() {
@@ -187,6 +190,7 @@ Environment:
 		// Compiler wrappers
 		newCCCmd(),
 		newCXXCmd(),
+		newInstallWrappersCmd(),
 		// Build wrappers
 		newMakeCmd(),
 		newNinjaCmd(),
@@ -745,6 +749,34 @@ Examples:
 // Compiler Wrappers (cc, c++)
 // =============================================================================
 
+func newInstallWrappersCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "install-wrappers DIR",
+		Short: "Install persistent hgcc and hgcxx compiler wrappers",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return installWrappers(args[0])
+		},
+	}
+}
+
+func installWrappers(dir string) error {
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to find hgbuild executable: %w", err)
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create wrapper directory: %w", err)
+	}
+	if _, err := createCompilerWrapper(dir, "hgcc", self, wrapperCCEnv); err != nil {
+		return err
+	}
+	if _, err := createCompilerWrapper(dir, "hgcxx", self, wrapperCXXEnv); err != nil {
+		return err
+	}
+	return nil
+}
+
 func newCCCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "cc [flags] [files...]",
@@ -886,7 +918,7 @@ func runCompiler(defaultCompiler, envVar string, args []string) error {
 	defer svc.Close()
 
 	// Connect to coordinator
-	clientCfg := newClientConfig(coordAddr, timeout)
+	clientCfg := newClientConfig(coordAddr, compileTimeout())
 	c, err := client.New(clientCfg)
 	if err != nil {
 		if !fallbackEnabled() {
@@ -918,7 +950,7 @@ func runCompiler(defaultCompiler, envVar string, args []string) error {
 		OutputFile: outputFile,
 		Args:       parsed,
 		TargetArch: parseArch(parsed.TargetArch),
-		Timeout:    5 * time.Minute,
+		Timeout:    workerTimeout(),
 	}
 
 	ctx := context.Background()
@@ -1294,7 +1326,8 @@ func injectWrappedCompilerMode() {
 
 func createCompilerWrapper(dir, name, self, modeEnv string) (string, error) {
 	path := filepath.Join(dir, name)
-	content := fmt.Sprintf("#!/bin/sh\nexport %s=1\nexec %q \"$@\"\n", modeEnv, self)
+	quotedSelf := "'" + strings.ReplaceAll(self, "'", "'\"'\"'") + "'"
+	content := fmt.Sprintf("#!/bin/sh\nexport %s=1\nexec %s \"$@\"\n", modeEnv, quotedSelf)
 	if err := os.WriteFile(path, []byte(content), 0755); err != nil {
 		return "", fmt.Errorf("failed to write compiler wrapper %s: %w", name, err)
 	}
@@ -1312,6 +1345,36 @@ func setEnv(env []string, key, value string) []string {
 		}
 	}
 	return append(env, prefix+value)
+}
+
+// compileTimeout returns the per-compile RPC deadline: HG_TIMEOUT when it is a
+// valid positive duration, otherwise the --timeout flag. The deadline must
+// exceed the coordinator's request timeout, or long compiles are cancelled and
+// retried by the client while the worker is still running the first attempt.
+func compileTimeout() time.Duration {
+	value := strings.TrimSpace(os.Getenv(timeoutEnv))
+	if value == "" {
+		return timeout
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil || d <= 0 {
+		log.Warn().Str("value", value).Msg("Ignoring invalid HG_TIMEOUT")
+		return timeout
+	}
+	return d
+}
+
+// workerTimeout is the execution deadline sent to the worker with each compile.
+// It stays at the historical 5 minutes unless HG_TIMEOUT asks for longer.
+func workerTimeout() time.Duration {
+	const defaultWorkerTimeout = 5 * time.Minute
+	if strings.TrimSpace(os.Getenv(timeoutEnv)) == "" {
+		return defaultWorkerTimeout
+	}
+	if d := compileTimeout(); d > defaultWorkerTimeout {
+		return d
+	}
+	return defaultWorkerTimeout
 }
 
 func fallbackEnabled() bool {

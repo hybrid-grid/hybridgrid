@@ -33,6 +33,19 @@ import (
 
 const maxGRPCMessageSize = 512 * 1024 * 1024
 
+// rewardNormalizationMs scales the learners' reward −log1p(ms)/log1p(scale).
+// It equals the historical 120 s RequestTimeout used in Experiments 1-2 and is
+// deliberately independent of the configurable timeout.
+const rewardNormalizationMs = 120000.0
+
+// failureReward scores a failed compile as if it had run for the whole request
+// timeout (at least 120 s), so no successful compile can score worse than a
+// failure. With the 120 s default it is exactly -1, as in Experiments 1-2.
+func failureReward(requestTimeout time.Duration) float64 {
+	ms := math.Max(rewardNormalizationMs, float64(requestTimeout.Milliseconds()))
+	return -math.Log1p(ms) / math.Log1p(rewardNormalizationMs)
+}
+
 // dispatchQueueSize bounds how many pending selection requests may queue
 // up behind the single dispatchLoop goroutine before Compile() callers
 // block trying to submit one. Generously sized relative to any burst
@@ -358,9 +371,11 @@ type Config struct {
 	Tracing         tracing.Config
 	EnableRequestID bool
 	// SchedulerType selects the scheduler implementation.
-	// Valid: "leastloaded" (default), "sed", "simple", "p2c",
+	// Valid: "leastloaded" (default), "sed", "p90", "sed-p90", "simple", "p2c",
 	// "epsilon-greedy", "linucb", "hybrid-linucb", "hybrid-linucb-d", "heft", "icecc-fastest".
 	SchedulerType string
+	// SizeThreshold is the TaskContext.SourceSizeBytes cutoff in bytes for p90 arms.
+	SizeThreshold int
 	// EpsilonValue is the exploration rate for epsilon-greedy. Ignored
 	// for other schedulers. Default 0.1 (Sutton & Barto §2.3 baseline).
 	EpsilonValue float64
@@ -477,6 +492,13 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 			Registry:       reg,
 			CircuitChecker: cm,
 		})
+	case "p90":
+		return scheduler.NewP90Scheduler(reg, cfg.SizeThreshold)
+	case "sed-p90":
+		return scheduler.NewSEDP90Scheduler(scheduler.SEDConfig{
+			Registry:       reg,
+			CircuitChecker: cm,
+		}, cfg.SizeThreshold)
 	case "icecc-fastest":
 		return scheduler.NewIceccFastestScheduler(scheduler.IceccConfig{
 			Registry:       reg,
@@ -1116,16 +1138,15 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	// see docs/thesis/theory-notes.md §4.3 for the empirical-choice
 	// rationale (this is NOT the Decima reward function).
 	if learner, ok := s.scheduler.(scheduler.LearningScheduler); ok {
-		timeoutMs := float64(s.config.RequestTimeout.Milliseconds())
-		if timeoutMs <= 0 {
-			timeoutMs = 120000 // 2-minute fallback
-		}
-		denom := math.Log1p(timeoutMs)
+		// The reward scale is fixed at the 2-minute default instead of
+		// following RequestTimeout: raising the timeout (e.g. for long
+		// C++ compiles) must not silently change what the learner sees.
+		denom := math.Log1p(rewardNormalizationMs)
 		var reward float64
 		if success && resp != nil {
 			reward = -math.Log1p(float64(resp.CompilationTimeMs)) / denom
 		} else {
-			reward = -1.0
+			reward = failureReward(s.config.RequestTimeout)
 		}
 		learner.RecordOutcome(worker.ID, reward, success, taskCtx)
 	}

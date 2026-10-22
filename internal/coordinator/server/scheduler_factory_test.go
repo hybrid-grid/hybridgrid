@@ -28,6 +28,8 @@ func TestNewScheduler_KnownTypes(t *testing.T) {
 		"heft":            (*scheduler.HEFTScheduler)(nil),
 		"icecc-fastest":   (*scheduler.IceccFastestScheduler)(nil),
 		"sed":             (*scheduler.SEDScheduler)(nil),
+		"p90":             (*scheduler.P90Scheduler)(nil),
+		"sed-p90":         (*scheduler.SEDP90Scheduler)(nil),
 	}
 
 	for typ, want := range cases {

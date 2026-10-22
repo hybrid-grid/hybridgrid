@@ -44,6 +44,38 @@ class StatisticsTests(unittest.TestCase):
 
 
 class MetricTests(unittest.TestCase):
+    def test_exp3_top5_ceiling_ties_strength_and_last_finisher(self):
+        candidates = [
+            {"address": "w1", "active": 0, "max_parallel": 1, "cpu_millis": 600},
+            {"address": "w2", "active": 0, "max_parallel": 1, "cpu_millis": 1100},
+            {"address": "w3", "active": 0, "max_parallel": 1, "cpu_millis": 1000},
+        ]
+        records = []
+        for sequence in range(1, 22):
+            address = "w2" if sequence == 1 else "w3" if sequence == 2 else "w1"
+            snapshot = candidates if sequence != 2 else [dict(candidates[0], active=1),
+                                                            dict(candidates[1], active=1),
+                                                            candidates[2]]
+            record = task(address, sequence, snapshot,
+                          "2026-01-01T00:02:10Z" if sequence == 3
+                          else "2026-01-01T00:02:00Z")
+            record.update(preprocessed_size_bytes=1000 if sequence <= 3 else 1,
+                          worker_cpu_millis={"w1": 600, "w2": 1100, "w3": 1000}[address],
+                          dispatch_ts="2026-01-01T00:01:45Z" if sequence == 21
+                          else "2026-01-01T00:01:40Z")
+            records.append(record)
+        rows = analyze.pd.DataFrame([{"start_ts": 1767225700, "end_ts": 1767225718},
+                                     {"start_ts": 1767225700, "end_ts": 1767225720}])
+        metrics = analyze.exp3_build_metrics(records, rows)
+        self.assertEqual(metrics["top5_strong_share"], 1)
+        self.assertEqual(metrics["top5_mean_cpu_millis"], 1050)
+        self.assertEqual(metrics["top5_multi_choice_share"], 0.5)
+        self.assertEqual(metrics["tail_s"], 15)
+        self.assertEqual(metrics["last_finisher_size_bytes"], 1000)
+        self.assertAlmostEqual(metrics["last_finisher_rank_pct"], 100 * 20 / 21)
+        self.assertTrue(math.isnan(analyze.exp3_build_metrics(
+            records, rows.drop(columns=["start_ts"]))["tail_s"]))
+
     def test_idle_skip_strongest_and_free_slot(self):
         first = [
             {"address": "w1", "active": 1, "max_parallel": 2, "cpu_millis": 600},
@@ -233,6 +265,69 @@ class MetricTests(unittest.TestCase):
 
 
 class InputTests(unittest.TestCase):
+    def test_exp3_multi_build_clients_and_default_baselines(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            arms = ("leastloaded", "sed", "p90", "sed-p90", "hybrid-linucb")
+            (root / "meta.json").write_text(json.dumps({"ARMS": list(arms), "REPS": 1,
+                "CLIENTS": 2, "SESSION_BUILDS": 2}), encoding="utf-8")
+            with (root / "results.csv").open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["arm", "round", "build_idx", "client", "elapsed_s",
+                                 "cell_makespan_s", "start_ts", "end_ts"])
+                for arm in arms:
+                    for build_idx, start in ((1, 1767225600), (2, 1767225700)):
+                        for client, end in ((1, start + 18), (2, start + 20)):
+                            writer.writerow([arm, 1, build_idx, client, 20, 20, start, end])
+                    records = []
+                    for build_idx, size, address, cpu, finish, dispatch in (
+                            (1, 100, "w1", 600, "2026-01-01T00:00:15Z",
+                             "2026-01-01T00:00:05Z"),
+                            (1, 200, "w2", 1100, "2026-01-01T00:00:10Z",
+                             "2026-01-01T00:00:04Z"),
+                            (2, 50, "w1", 600, "2026-01-01T00:02:10Z",
+                             "2026-01-01T00:01:45Z"),
+                            (2, 300, "w2", 1100, "2026-01-01T00:02:00Z",
+                             "2026-01-01T00:01:40Z")):
+                        sequence = len(records) + 1
+                        candidates = [
+                            {"address": "w1", "active": 0, "max_parallel": 1,
+                             "cpu_millis": 600},
+                            {"address": "w2", "active": 0, "max_parallel": 1,
+                             "cpu_millis": 1100},
+                            {"address": "w3", "active": 0, "max_parallel": 1,
+                             "cpu_millis": 1000},
+                        ]
+                        record = task(address, sequence, candidates, finish)
+                        record.update(build_id=f"{arm}-r1-b{build_idx}-c{1 if sequence % 2 else 2}",
+                                      preprocessed_size_bytes=size,
+                                      worker_cpu_millis=cpu, dispatch_ts=dispatch)
+                        records.append(record)
+                    (root / f"tasks_{arm}_round1.jsonl").write_text(
+                        "\n".join(json.dumps(record) for record in records) + "\n",
+                        encoding="utf-8")
+            cells, dropped, _ = analyze.load_cells(root)
+            self.assertFalse(dropped)
+            row = cells[cells["arm"] == "p90"].iloc[0]
+            self.assertEqual(row["build_1_top5_mean_cpu_millis"], 1100)
+            self.assertEqual(row["build_1_last_finisher_size_bytes"], 100)
+            self.assertEqual(row["build_1_tail_s"], 15)
+            self.assertEqual(row["build_2_tail_s"], 15)
+            self.assertEqual(row["tail_s"], 15)
+            self.assertEqual(row["top5_mean_cpu_millis"], 1100)
+            self.assertEqual(row["last_finisher_size_bytes"], 50)
+            self.assertEqual(row["last_finisher_rank_pct"], 50)
+            pairs = analyze.compare(cells, None, None)
+            baseline_pairs = pairs[pairs["metric"] == "tail_s"]
+            self.assertEqual(set(baseline_pairs["baseline"]), set(arms[:-1]))
+            summary = root / "summary.md"
+            analyze.write_summary(summary, cells, pairs, [], [], 20, 0.5,
+                                  "pre_all", None)
+            self.assertIn("cell-level metrics report the last build",
+                          summary.read_text(encoding="utf-8"))
+            self.assertIn("leastloaded, sed, p90, and sed-p90",
+                          summary.read_text(encoding="utf-8"))
+
     def make_directory(self, root):
         with (root / "results.csv").open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=["arm", "round", "order_pos",
@@ -291,6 +386,73 @@ class InputTests(unittest.TestCase):
             self.assertTrue(math.isnan(cells.iloc[0]["time_to_adapt_rank"]))
             self.assertTrue(math.isnan(cells.iloc[0]["excess_target_share_post"]))
             self.assertTrue(notes)
+
+    def test_legacy_csv_columns_and_values_remain_unchanged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "results.csv").write_text(
+                "arm,round,elapsed_s\nleastloaded,1,10\nhybrid-linucb,1,8\n",
+                encoding="utf-8")
+            for arm in ("leastloaded", "hybrid-linucb"):
+                (root / f"tasks_{arm}_round1.jsonl").write_text(json.dumps({
+                    "event": "task_completed", "success": True,
+                    "ts": "2026-01-01T00:00:01Z", "worker_address": "w1",
+                    "worker_cpu_millis": 1100, "dispatch_seq": 1}) + "\n",
+                    encoding="utf-8")
+            self.assertEqual(analyze.main([str(root), "--out", str(root / "analysis")]), 0)
+            with (root / "analysis" / "cells.csv").open(newline="", encoding="utf-8") as handle:
+                reader = csv.DictReader(handle)
+                expected_columns = [
+                    "round", "arm", "n_tasks", "makespan_s",
+                    "skip_idle_all", "skip_idle_given_idle", "strongest_idle",
+                    "free_slot_skip_all", "free_slot_skip_given_free", "strongest_free_slot",
+                    "had_idle_share", "had_free_share", "drift_pre_share",
+                    "drift_pre_all_share", "drift_post_share", "drift_pre_n",
+                    "drift_pre_all_n", "drift_post_n", "drift_post_early_share",
+                    "drift_post_late_share", "excess_target_share_pre",
+                    "excess_target_share_post", "time_to_adapt", "time_to_adapt_rank",
+                    "time_to_adapt_censored", "target_after_recovery_share",
+                    "target_after_recovery_tasks", "drift_on_phases_share",
+                    "drift_on_phases_n", "drift_on_phases_target_n",
+                    "drift_off_phases_share", "drift_off_phases_n",
+                    "drift_off_phases_target_n", "drift_build_boundary_phases",
+                    "drift_window_flag", "last_finisher_address",
+                    "last_finisher_cpu_millis",
+                ]
+                self.assertEqual(reader.fieldnames, expected_columns)
+                rows = list(reader)
+            self.assertEqual(len(rows), 2)
+            for row in rows:
+                expected = dict.fromkeys(expected_columns, "NA")
+                expected.update(round="1", arm=row["arm"], n_tasks="1",
+                                makespan_s="8.0" if row["arm"] == "hybrid-linucb" else "10.0",
+                                drift_pre_n="0", drift_pre_all_n="0", drift_post_n="0",
+                                time_to_adapt="NA", time_to_adapt_censored="False",
+                                drift_build_boundary_phases="", drift_window_flag="",
+                                last_finisher_address="w1", last_finisher_cpu_millis="1100")
+                self.assertEqual(row, expected)
+            with (root / "analysis" / "pairs.csv").open(newline="", encoding="utf-8") as handle:
+                reader = csv.DictReader(handle)
+                self.assertEqual(reader.fieldnames, [
+                    "metric", "treatment", "baseline", "n", "treatment_median",
+                    "baseline_median", "median_diff", "ci_lo", "ci_hi", "p_raw",
+                    "r_rb", "n_zero", "p_holm"])
+                pair_rows = list(reader)
+            self.assertEqual([row["metric"] for row in pair_rows], [
+                "makespan_s", "drift_pre_n", "drift_pre_all_n", "drift_post_n"])
+            for row in pair_rows:
+                expected = {"metric": row["metric"], "treatment": "hybrid-linucb",
+                            "baseline": "leastloaded", "n": "1", "p_raw": "1.0",
+                            "p_holm": "1.0"}
+                if row["metric"] == "makespan_s":
+                    expected.update(treatment_median="8.0", baseline_median="10.0",
+                                    median_diff="-2.0", ci_lo="-2.0", ci_hi="-2.0",
+                                    r_rb="-1.0", n_zero="0")
+                else:
+                    expected.update(treatment_median="0.0", baseline_median="0.0",
+                                    median_diff="0.0", ci_lo="0.0", ci_hi="0.0",
+                                    r_rb="0.0", n_zero="1")
+                self.assertEqual(row, expected)
 
     def test_session_build_and_client_makespans(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -432,8 +594,12 @@ class InputTests(unittest.TestCase):
         self.assertEqual(parsed["discount"], 0.98)
         self.assertEqual(parsed["load_penalty"], 1.0)
         self.assertEqual(analyze.parse_arm("hybrid-linucb-l0")["load_penalty"], 0)
+        for label in ("p90", "sed-p90"):
+            self.assertEqual(analyze.parse_arm(label)["base"], label)
         for bad in ("sed-g095", "leastloaded-l025", "hybrid-linucb-d-l025-g095",
-                    "hybrid-linucb-d-g999", "hybrid-linucb-d-unknown"):
+                    "hybrid-linucb-d-g999", "hybrid-linucb-d-unknown",
+                    "p90-arm", "p90-g095", "p90-l025", "sed-p90-arm",
+                    "sed-p90-g095", "sed-p90-l025"):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 analyze.parse_arm(bad)
 

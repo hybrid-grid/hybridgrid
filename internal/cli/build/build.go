@@ -160,6 +160,11 @@ func (s *Service) Build(ctx context.Context, req *Request) (*Result, error) {
 	cacheKey := s.generateCacheKeyRaw(req, rawSource)
 	if s.cache != nil {
 		if cached, ok := s.cache.GetBytes(cacheKey); ok {
+			if req.Args.GeneratesDependencies() {
+				if _, err := s.preprocessor.Preprocess(ctx, req.Args, req.SourceFile); err != nil {
+					return nil, fmt.Errorf("failed to generate dependencies for cached object: %w", err)
+				}
+			}
 			result.ObjectFile = cached
 			result.CacheHit = true
 			result.ExitCode = 0
@@ -315,13 +320,14 @@ func (s *Service) buildRemoteArgs(args *compiler.ParsedArgs) []string {
 	// Add compile-only flag
 	remoteArgs = append(remoteArgs, "-c")
 
-	// Add optimization and other flags (but not -I, -D since source is preprocessed)
-	for _, flag := range args.Flags {
-		// Skip flags that were only needed for preprocessing
-		if strings.HasPrefix(flag, "-I") || strings.HasPrefix(flag, "-D") {
-			continue
-		}
-		remoteArgs = append(remoteArgs, flag)
+	// Keep code generation flags; include paths and dependency output belong to
+	// the client's preprocessing step.
+	remoteArgs = append(remoteArgs, args.CompileFlags()...)
+	switch args.Language {
+	case "c":
+		remoteArgs = append(remoteArgs, "-x", "cpp-output")
+	case "c++":
+		remoteArgs = append(remoteArgs, "-x", "c++-cpp-output")
 	}
 
 	// Add standard if specified
@@ -521,7 +527,10 @@ func (s *Service) buildRemoteArgsForRaw(args *compiler.ParsedArgs) []string {
 	remoteArgs = append(remoteArgs, "-c")
 
 	// Keep all flags including -I and -D (needed for raw source compilation)
-	remoteArgs = append(remoteArgs, args.Flags...)
+	remoteArgs = append(remoteArgs, args.RawCompileFlags()...)
+	if args.Language != "" {
+		remoteArgs = append(remoteArgs, "-x", args.Language)
+	}
 
 	// Add standard if specified
 	if args.Standard != "" {
@@ -605,12 +614,15 @@ func (s *Service) collectIncludeFiles(args *compiler.ParsedArgs) (map[string][]b
 
 // generateCacheKeyRaw generates a cache key from raw source.
 func (s *Service) generateCacheKeyRaw(req *Request, rawSource []byte) string {
+	// CompilationKey sorts Flags and Defines. Hash the ordered preprocessing
+	// stream separately so -D FOO -U FOO cannot reuse -U FOO -D FOO.
+	preprocessHash := cache.HashStrings(req.Args.PreprocessFlags...)
 	key := &cache.CompilationKey{
 		Compiler:   req.Args.Compiler,
 		TargetArch: req.TargetArch.String(),
 		Flags:      req.Args.Flags,
 		Defines:    req.Args.Defines,
-		SourceHash: cache.HashBytes(rawSource),
+		SourceHash: cache.HashStrings(cache.HashBytes(rawSource), preprocessHash),
 	}
 	return key.Build()
 }

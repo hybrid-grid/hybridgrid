@@ -43,3 +43,31 @@ func TestValidateDiscountFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateSizeThreshold(t *testing.T) {
+	tests := []struct {
+		name      string
+		scheduler string
+		threshold int
+		wantError bool
+	}{
+		{"p90 missing", "p90", 0, true},
+		{"sed-p90 negative", "sed-p90", -1, true},
+		{"p90 positive", "p90", 1, false},
+		{"sed-p90 positive", "sed-p90", 1024, false},
+		{"leastloaded ignores negative", "leastloaded", -1, false},
+		{"sed ignores zero", "sed", 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateSizeThreshold(tt.scheduler, tt.threshold)
+			if tt.wantError {
+				if err == nil || !strings.Contains(err.Error(), "--size-threshold") {
+					t.Fatalf("validateSizeThreshold() = %v, want --size-threshold error", err)
+				}
+			} else if err != nil {
+				t.Fatalf("validateSizeThreshold() = %v, want nil", err)
+			}
+		})
+	}
+}

@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -592,6 +594,92 @@ func TestBuildRemoteArgsForRaw(t *testing.T) {
 	}
 }
 
+func TestService_Build_CacheHitRegeneratesDepfile(t *testing.T) {
+	if _, err := exec.LookPath("gcc"); err != nil {
+		t.Skip("gcc not available")
+	}
+	tests := []struct {
+		name           string
+		dependencyArgs func(string) []string
+	}{
+		{"direct", func(string) []string { return []string{"-MD"} }},
+		{"wp md", func(depfile string) []string { return []string{"-Wp,-MD," + depfile} }},
+		{"wp mmd", func(depfile string) []string { return []string{"-Wp,-MMD," + depfile} }},
+		{"xpreprocessor", func(depfile string) []string {
+			return []string{"-Xpreprocessor", "-MD", "-Xpreprocessor", "-MF", "-Xpreprocessor", depfile}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			source := filepath.Join(dir, "cached.c")
+			object := filepath.Join(dir, "cached.o")
+			depfile := filepath.Join(dir, "cached.d")
+			if err := os.WriteFile(source, []byte("int cached(void) { return 1; }\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			cfg := DefaultConfig()
+			cfg.CacheDir = filepath.Join(dir, "cache")
+			svc, err := New(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer svc.Close()
+			if svc.cache == nil {
+				t.Skip("cache unavailable")
+			}
+			command := append([]string{"gcc", "-c"}, tt.dependencyArgs(depfile)...)
+			command = append(command, "-o", object, source)
+			args := compiler.Parse(command)
+			req := &Request{TaskID: "dep-cache-1", SourceFile: source, OutputFile: object, Args: args, TargetArch: pb.Architecture_ARCH_X86_64, Timeout: 30 * time.Second}
+			first, err := svc.Build(context.Background(), req)
+			if err != nil {
+				t.Fatalf("first build failed: %v", err)
+			}
+			if first.ExitCode != 0 {
+				t.Fatalf("first build exited with %d: %s", first.ExitCode, first.Stderr)
+			}
+			if err := os.Remove(depfile); err != nil {
+				t.Fatalf("first build did not create depfile: %v", err)
+			}
+			req.TaskID = "dep-cache-2"
+			result, err := svc.Build(context.Background(), req)
+			if err != nil {
+				t.Fatalf("cached build failed: %v", err)
+			}
+			if !result.CacheHit {
+				t.Error("second build should use cache")
+			}
+			if _, err := os.Stat(depfile); err != nil {
+				t.Errorf("cached build did not regenerate depfile: %v", err)
+			}
+		})
+	}
+}
+
+func TestBuildRemoteArgs_CMakeDependenciesStayLocal(t *testing.T) {
+	parsed := compiler.Parse([]string{"g++", "-I/src/x", "-isystem", "/usr/include/y", "-O2", "-std=c++17", "-MD", "-MT", "obj/file.cc.o", "-MF", "obj/file.cc.o.d", "-c", "file.cc", "-o", "obj/file.cc.o"})
+	svc := &Service{}
+	want := []string{"-c", "-O2", "-x", "c++-cpp-output", "-std=c++17"}
+	got := svc.buildRemoteArgs(parsed)
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("remote args = %v, want %v", got, want)
+	}
+	for _, arg := range svc.buildRemoteArgsForRaw(parsed) {
+		if arg == "-MD" || arg == "-MMD" || arg == "-MF" || arg == "-MT" || arg == "-MQ" || arg == "-MP" {
+			t.Errorf("raw remote args contain dependency flag %q", arg)
+		}
+	}
+}
+
+func TestBuildRemoteArgs_CPythonRegression(t *testing.T) {
+	parsed := compiler.Parse([]string{"gcc", "-c", "-o", "build/python.o", "-IInclude", "-DPy_BUILD_CORE", "-std=c11", "-O3", "-march=x86-64", "-x", "c", "Python/python.c"})
+	want := []string{"-c", "-O3", "-march=x86-64", "-x", "cpp-output", "-std=c11"}
+	if got := (&Service{}).buildRemoteArgs(parsed); !reflect.DeepEqual(got, want) {
+		t.Errorf("remote args = %v, want %v", got, want)
+	}
+}
+
 func TestGetClientOS(t *testing.T) {
 	os := getClientOS()
 	if os == "" {
@@ -733,6 +821,15 @@ func TestGenerateCacheKeyRaw(t *testing.T) {
 
 	if key1 == "" {
 		t.Error("cache key should not be empty")
+	}
+
+	first := compiler.Parse([]string{"gcc", "-c", "-D", "FOO", "-U", "FOO", "source.c"})
+	second := compiler.Parse([]string{"gcc", "-c", "-U", "FOO", "-D", "FOO", "source.c"})
+	req.Args = first
+	firstKey := svc.generateCacheKeyRaw(req, []byte("int result;"))
+	req.Args = second
+	if firstKey == svc.generateCacheKeyRaw(req, []byte("int result;")) {
+		t.Error("different preprocessing order must produce different cache keys")
 	}
 }
 

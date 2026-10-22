@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -113,10 +114,11 @@ int main() {
 
 	p := NewPreprocessor(DefaultPreprocessorConfig())
 	args := &ParsedArgs{
-		Compiler:      "gcc",
-		IsCompileOnly: true,
-		InputFiles:    []string{srcFile},
-		IncludeDirs:   []string{incDir},
+		Compiler:        "gcc",
+		IsCompileOnly:   true,
+		InputFiles:      []string{srcFile},
+		IncludeDirs:     []string{incDir},
+		PreprocessFlags: []string{"-I" + incDir},
 	}
 
 	ctx := context.Background()
@@ -164,10 +166,11 @@ int value = VALUE;
 
 	p := NewPreprocessor(DefaultPreprocessorConfig())
 	args := &ParsedArgs{
-		Compiler:      "gcc",
-		IsCompileOnly: true,
-		InputFiles:    []string{srcFile},
-		Defines:       []string{"DEBUG", "VALUE=100"},
+		Compiler:        "gcc",
+		IsCompileOnly:   true,
+		InputFiles:      []string{srcFile},
+		Defines:         []string{"DEBUG", "VALUE=100"},
+		PreprocessFlags: []string{"-DDEBUG", "-DVALUE=100"},
 	}
 
 	ctx := context.Background()
@@ -325,12 +328,13 @@ func TestBuildPreprocessArgs(t *testing.T) {
 	p := NewPreprocessor(DefaultPreprocessorConfig())
 
 	args := &ParsedArgs{
-		Compiler:    "gcc",
-		IncludeDirs: []string{"/usr/include", "/opt/include"},
-		Defines:     []string{"DEBUG", "VERSION=1"},
-		Standard:    "c11",
-		Language:    "c",
-		Flags:       []string{"-Wall", "-nostdinc"},
+		Compiler:        "gcc",
+		IncludeDirs:     []string{"/usr/include", "/opt/include"},
+		Defines:         []string{"DEBUG", "VERSION=1"},
+		PreprocessFlags: []string{"-I/usr/include", "-I/opt/include", "-DDEBUG", "-DVERSION=1", "-nostdinc"},
+		Standard:        "c11",
+		Language:        "c",
+		Flags:           []string{"-Wall", "-nostdinc"},
 	}
 
 	result := p.buildPreprocessArgs(args, "test.c")
@@ -457,4 +461,160 @@ test.c:3:1: warning: implicit declaration`
 	if strings.Contains(warnings, "error:") {
 		t.Error("should not contain errors")
 	}
+}
+
+func TestBuildPreprocessArgs_DependencyPaths(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{
+			name: "cmake target and depfile",
+			args: []string{"g++", "-isystem", "/usr/include/y", "-MD", "-MT", "obj/cycleclock.cc.o", "-MF", "obj/cycleclock.cc.o.d", "-o", "obj/cycleclock.cc.o", "-c", "cycleclock.cc"},
+			want: []string{"-E", "-isystem", "/usr/include/y", "-x", "c++", "-MD", "-MT", "obj/cycleclock.cc.o", "-MF", "obj/cycleclock.cc.o.d", "cycleclock.cc"},
+		},
+		{
+			name: "derive object depfile",
+			args: []string{"gcc", "-c", "-MMD", "-MP", "-o", "obj/test.o", "test.c"},
+			want: []string{"-E", "-x", "c", "-MMD", "-MP", "-MQ", "obj/test.o", "-MF", "obj/test.d", "test.c"},
+		},
+		{
+			name: "preserve explicit quoted target",
+			args: []string{"gcc", "-c", "-MD", "-MQ", "obj/unit space$.o", "-MF", "obj/unit.d", "test.c"},
+			want: []string{"-E", "-x", "c", "-MD", "-MQ", "obj/unit space$.o", "-MF", "obj/unit.d", "test.c"},
+		},
+		{
+			name: "joined forced includes",
+			args: []string{"gcc", "-c", "-include", "config.h", "-imacrosmacros.h", "-MFdeps.d", "-MD", "test.c"},
+			want: []string{"-E", "-include", "config.h", "-imacrosmacros.h", "-x", "c", "-MFdeps.d", "-MD", "-MQ", "test.o", "test.c"},
+		},
+	}
+	prep := NewPreprocessor(DefaultPreprocessorConfig())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parsed := Parse(tt.args)
+			got := prep.buildPreprocessArgs(parsed, parsed.InputFiles[0])
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("preprocess args = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPreprocessor_WritesDependencyFileBesideObject(t *testing.T) {
+	if _, err := exec.LookPath("gcc"); err != nil {
+		t.Skip("gcc not available")
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "unit.c")
+	header := filepath.Join(dir, "unit.h")
+	object := filepath.Join(dir, "unit.o")
+	if err := os.WriteFile(header, []byte("#define VALUE 7\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("#include \"unit.h\"\nint unit = VALUE;\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	parsed := Parse([]string{"gcc", "-c", "-MD", "-o", object, source})
+	prep := NewPreprocessor(DefaultPreprocessorConfig())
+	if _, err := prep.Preprocess(context.Background(), parsed, source); err != nil {
+		t.Fatalf("Preprocess failed: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "unit.d"))
+	if err != nil {
+		t.Fatalf("dependency file missing: %v", err)
+	}
+	if !strings.Contains(string(data), object+":") || !strings.Contains(string(data), header) {
+		t.Errorf("dependency file has unexpected contents: %s", data)
+	}
+}
+
+func TestPreprocessor_MacroOrder(t *testing.T) {
+	if _, err := exec.LookPath("gcc"); err != nil {
+		t.Skip("gcc not available")
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "macro.c")
+	if err := os.WriteFile(source, []byte("#ifdef FOO\nint result = 1;\n#else\nint result = 0;\n#endif\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name    string
+		options []string
+		want    string
+	}{
+		{"undefine then define", []string{"-U", "FOO", "-D", "FOO"}, "int result = 1;"},
+		{"define then undefine", []string{"-D", "FOO", "-U", "FOO"}, "int result = 0;"},
+	}
+	prep := NewPreprocessor(DefaultPreprocessorConfig())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := append([]string{"gcc", "-c"}, tt.options...)
+			args = append(args, source)
+			parsed := Parse(args)
+			gotArgs := prep.buildPreprocessArgs(parsed, source)
+			if !reflect.DeepEqual(gotArgs[1:1+len(tt.options)], tt.options) {
+				t.Errorf("preprocessing order = %v, want %v", gotArgs, tt.options)
+			}
+			result, err := prep.Preprocess(context.Background(), parsed, source)
+			if err != nil {
+				t.Fatalf("Preprocess failed: %v", err)
+			}
+			if !strings.Contains(string(result.PreprocessedSource), tt.want) {
+				t.Errorf("preprocessed source = %s, want %q", result.PreprocessedSource, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildPreprocessArgs_CPythonRegression(t *testing.T) {
+	parsed := Parse([]string{"gcc", "-c", "-o", "build/python.o", "-IInclude", "-DPy_BUILD_CORE", "-std=c11", "-O3", "-march=x86-64", "-x", "c", "Python/python.c"})
+	prep := NewPreprocessor(DefaultPreprocessorConfig())
+	want := []string{"-E", "-IInclude", "-DPy_BUILD_CORE", "-std=c11", "-x", "c", "Python/python.c"}
+	if got := prep.buildPreprocessArgs(parsed, "Python/python.c"); !reflect.DeepEqual(got, want) {
+		t.Errorf("preprocess args = %v, want %v", got, want)
+	}
+	wantFlags := []string{"-O3", "-march=x86-64"}
+	if got := parsed.CompileFlags(); !reflect.DeepEqual(got, wantFlags) {
+		t.Errorf("remote compile flags = %v, want %v", got, wantFlags)
+	}
+}
+
+func TestPreprocessor_MakeQuotedDependencyTarget(t *testing.T) {
+	if _, err := exec.LookPath("gcc"); err != nil {
+		t.Skip("gcc not available")
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "unit.c")
+	object := filepath.Join(dir, "unit space$.o")
+	if err := os.WriteFile(source, []byte("int unit = 1;\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	parsed := Parse([]string{"gcc", "-c", "-MD", "-o", object, source})
+	prep := NewPreprocessor(DefaultPreprocessorConfig())
+	args := prep.buildPreprocessArgs(parsed, source)
+	if !hasAdjacentArgs(args, "-MQ", object) {
+		t.Errorf("preprocess args do not quote target: %v", args)
+	}
+	if _, err := prep.Preprocess(context.Background(), parsed, source); err != nil {
+		t.Fatalf("Preprocess failed: %v", err)
+	}
+	depfile := filepath.Join(dir, "unit space$.d")
+	data, err := os.ReadFile(depfile)
+	if err != nil {
+		t.Fatalf("dependency file missing: %v", err)
+	}
+	if !strings.Contains(string(data), "unit\\ space$$.o:") {
+		t.Errorf("target was not Make-quoted: %s", data)
+	}
+}
+
+func hasAdjacentArgs(args []string, first, second string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == first && args[i+1] == second {
+			return true
+		}
+	}
+	return false
 }

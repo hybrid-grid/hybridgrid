@@ -18,7 +18,8 @@ from scipy.stats import rankdata, wilcoxon
 SUFFIX = re.compile(r"^(?P<base>.+?)(?P<arm>-arm)?(?P<gamma>-g\d{3})?(?P<penalty>-l(?:0|\d{3}))?$")
 TASK_NAME = re.compile(r"^tasks_(.+)_round(\d+)\.jsonl$")
 BASES = {"leastloaded", "simple", "p2c", "epsilon-greedy", "linucb",
-         "hybrid-linucb", "hybrid-linucb-d", "heft", "icecc-fastest", "sed"}
+         "hybrid-linucb", "hybrid-linucb-d", "heft", "icecc-fastest", "sed",
+         "p90", "sed-p90"}
 DEFAULT_TARGET = "worker-5:50051"
 BOOT_SEED = 20260709
 BOOT_N = 10000
@@ -33,7 +34,11 @@ METRICS = (
     "target_after_recovery_share", "target_after_recovery_tasks",
     "drift_on_phases_share", "drift_on_phases_n", "drift_on_phases_target_n",
     "drift_off_phases_share", "drift_off_phases_n", "drift_off_phases_target_n",
+    "top5_strong_share", "top5_mean_cpu_millis", "top5_multi_choice_share",
+    "tail_s", "last_finisher_size_bytes", "last_finisher_rank_pct",
 )
+EXP3_METRICS = METRICS[-6:]
+BUILD_ID = re.compile(r"-b(?P<build>\d+)-c[^-]+$")
 
 
 def parse_arm(label):
@@ -169,6 +174,97 @@ def candidate_metrics(tasks):
             "strongest_free_slot": strongest_free / free_n if free_n else math.nan,
             "had_idle_share": idle_n / count,
             "had_free_share": free_n / count}
+
+
+def _epoch(value):
+    """Parse an ISO timestamp as UTC seconds; return None for missing data."""
+    try:
+        timestamp = pd.Timestamp(value)
+        if pd.isna(timestamp):
+            return None
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.tz_localize("UTC")
+        return float(timestamp.timestamp())
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def exp3_build_metrics(tasks, rows):
+    """One observation per build, pooled across all clients in that build."""
+    result = dict.fromkeys(EXP3_METRICS, math.nan)
+    successful = [task for task in tasks if task.get("success") is True]
+    if not successful:
+        return result
+
+    sizes = [_number(task.get("preprocessed_size_bytes")) for task in successful]
+    if all(size is not None for size in sizes):
+        count = max(1, math.ceil(0.05 * len(successful)))
+        ranked = sorted(zip(successful, sizes),
+                        key=lambda item: (-item[1],
+                                          _number(item[0].get("dispatch_seq"))
+                                          if _number(item[0].get("dispatch_seq")) is not None
+                                          else math.inf))
+        largest = [task for task, _ in ranked[:count]]
+        cpus = [_number(task.get("worker_cpu_millis")) for task in largest]
+        if all(cpu is not None for cpu in cpus):
+            result["top5_mean_cpu_millis"] = sum(cpus) / count
+
+        strengths = {}
+        snapshots_valid = True
+        for task in successful:
+            candidates = task.get("candidates")
+            if not isinstance(candidates, list) or not candidates:
+                snapshots_valid = False
+                break
+            for candidate in candidates:
+                if not isinstance(candidate, dict) or not candidate.get("address") or _number(
+                        candidate.get("cpu_millis")) is None:
+                    snapshots_valid = False
+                    break
+                address = candidate["address"]
+                strengths[address] = max(strengths.get(address, -math.inf),
+                                         _number(candidate["cpu_millis"]))
+            if not snapshots_valid:
+                break
+        if snapshots_valid:
+            strongest = {address for address, _ in sorted(
+                strengths.items(), key=lambda item: (-item[1], item[0]))[:2]}
+            if all(task.get("worker_address") for task in largest):
+                result["top5_strong_share"] = sum(
+                    task["worker_address"] in strongest for task in largest) / count
+
+        free_counts = []
+        for task in largest:
+            candidates = task.get("candidates")
+            if not isinstance(candidates, list) or not candidates or any(
+                    not isinstance(candidate, dict) or
+                    _number(candidate.get("active")) is None or
+                    _number(candidate.get("max_parallel")) is None
+                    for candidate in candidates):
+                break
+            free_counts.append(sum(_number(candidate["active"]) <
+                                   _number(candidate["max_parallel"])
+                                   for candidate in candidates))
+        if len(free_counts) == count:
+            result["top5_multi_choice_share"] = sum(n >= 2 for n in free_counts) / count
+
+        finished = [(_epoch(task.get("ts")), task, size)
+                    for task, size in zip(successful, sizes)]
+        if all(epoch is not None for epoch, _, _ in finished):
+            _, _, last_size = max(finished, key=lambda item: (item[0],
+                _number(item[1].get("dispatch_seq")) or 0))
+            result["last_finisher_size_bytes"] = last_size
+            result["last_finisher_rank_pct"] = 100 * float(
+                rankdata(sizes, method="average")[sizes.index(last_size)]) / len(sizes)
+
+    if {"start_ts", "end_ts"}.issubset(rows.columns):
+        starts = [_number(value) for value in rows["start_ts"]]
+        ends = [_number(value) for value in rows["end_ts"]]
+        dispatches = [_epoch(task.get("dispatch_ts")) for task in successful]
+        if (all(value is not None for value in starts + ends) and
+                all(value is not None for value in dispatches)):
+            result["tail_s"] = max(ends) - max(dispatches)
+    return result
 
 
 def time_to_adapt(post, target, reference_share, window=20, factor=0.5,
@@ -352,6 +448,7 @@ def load_cells(out_dir, window=20, factor=0.5, tta_ref="pre_all", tta_fixed=None
             rounds = list(range(min(rounds), max(rounds) + 1))
     multi_clients = "client" in results and results["client"].nunique() > 1
     multi_builds = "build_idx" in results and results["build_idx"].nunique() > 1
+    exp3_results = {"start_ts", "end_ts"}.issubset(results.columns)
     expected_clients = int(meta.get("CLIENTS", meta.get("clients", 0)) or 0)
     expected_builds = int(meta.get("SESSION_BUILDS", meta.get("session_builds", 0)) or 0)
     if "client" in results and not expected_clients:
@@ -471,6 +568,27 @@ def load_cells(out_dir, window=20, factor=0.5, tta_ref="pre_all", tta_fixed=None
             last = max(finishers, key=lambda t: pd.Timestamp(t["ts"])) if finishers else {}
             row["last_finisher_address"] = last.get("worker_address") or "NA"
             row["last_finisher_cpu_millis"] = last.get("worker_cpu_millis", math.nan)
+            if exp3_results:
+                build_tasks = {idx: [] for idx in range(1, expected_builds + 1)}
+                ungrouped = False
+                for task in tasks:
+                    if task.get("success") is not True:
+                        continue
+                    match = BUILD_ID.search(str(task.get("build_id", "")))
+                    if match is None or int(match["build"]) not in build_tasks:
+                        ungrouped = True
+                        continue
+                    build_tasks[int(match["build"])].append(task)
+                for idx in range(1, expected_builds + 1):
+                    build_rows = (rows[pd.to_numeric(rows["build_idx"], errors="coerce") == idx]
+                                  if "build_idx" in rows else rows)
+                    metrics = (exp3_build_metrics(build_tasks[idx], build_rows)
+                               if not ungrouped else dict.fromkeys(EXP3_METRICS, math.nan))
+                    if multi_builds:
+                        row.update({f"build_{idx}_{name}": value
+                                    for name, value in metrics.items()})
+                    if idx == expected_builds:
+                        row.update(metrics)
             if math.isnan(row["skip_idle_all"]):
                 notes.add("Candidate snapshot metrics unavailable for some cells (old-format task logs).")
             if math.isnan(row["drift_pre_share"]):
@@ -490,7 +608,7 @@ def compare(cells, treatments, baselines):
     treatments = treatments or [arm for arm in available if parse_arm(arm)["base"] in
                                 ("hybrid-linucb", "hybrid-linucb-d")]
     baselines = baselines or [arm for arm in available if parse_arm(arm)["base"] in
-                              ("leastloaded", "sed")]
+                              ("leastloaded", "sed", "p90", "sed-p90")]
     extra_metrics = tuple(sorted(c for c in cells if c.startswith(("build_", "client_", "drift_phase_"))))
     for metric in METRICS + extra_metrics:
         if metric not in cells:
@@ -534,6 +652,19 @@ def write_summary(path, cells, pairs, drops, notes, window, factor, tta_ref,
              "cell_end cleanup is excluded. Counts are decision and target-decision totals.",
              "Holm family: every treatment x baseline pair for one metric in this directory; "
              "gamma/lambda sweep arms enlarge the family.", ""]
+    if not cells.empty and any(parse_arm(arm)["base"] in ("p90", "sed-p90")
+                               for arm in cells["arm"].unique()):
+        lines.insert(-1, "Default baselines are leastloaded, sed, p90, and sed-p90 when present.")
+    if any(metric in cells for metric in EXP3_METRICS):
+        lines += ["Experiment 3 metrics pool successful tasks across clients within each build. "
+                  "build_<k>_<metric> reports each build; cell-level metrics report the last "
+                  "build (the measured TN3 build).",
+                  "Top 5% uses ceil(0.05 x successful tasks), ordered by size descending "
+                  "then dispatch_seq ascending. Strong share uses the two highest registered "
+                  "candidate CPU strengths; multi-choice requires two free-slot candidates. "
+                  "Last-finisher rank uses average ranks for tied sizes, as percent of build tasks. "
+                  "tail_s uses the latest client end_ts minus the latest successful dispatch_ts; "
+                  "it is NA without build timestamps.", ""]
     if drops:
         lines += ["## Dropped blocks", ""] + [f"- {x}" for x in drops] + [""]
     if notes:

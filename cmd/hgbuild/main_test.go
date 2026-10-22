@@ -2,7 +2,10 @@ package main
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestFallbackEnabled_Default(t *testing.T) {
@@ -138,4 +141,66 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	noFallback = false
 	os.Exit(code)
+}
+
+func TestInstallWrappers(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "bin")
+	if err := installWrappers(dir); err != nil {
+		t.Fatalf("installWrappers failed: %v", err)
+	}
+	for _, tt := range []struct {
+		name string
+		mode string
+	}{
+		{"hgcc", wrapperCCEnv},
+		{"hgcxx", wrapperCXXEnv},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(dir, tt.name)
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatalf("wrapper missing: %v", err)
+			}
+			if info.Mode().Perm()&0111 == 0 {
+				t.Errorf("wrapper %s is not executable", path)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read wrapper: %v", err)
+			}
+			if !strings.Contains(string(data), "export "+tt.mode+"=1") || !strings.Contains(string(data), "exec ") {
+				t.Errorf("wrapper does not select compiler mode: %s", data)
+			}
+		})
+	}
+}
+
+func TestCompileTimeout_EnvOverride(t *testing.T) {
+	saved := timeout
+	defer func() { timeout = saved }()
+	timeout = 2 * time.Minute
+
+	tests := []struct {
+		name        string
+		env         string
+		wantCompile time.Duration
+		wantWorker  time.Duration
+	}{
+		{name: "unset keeps flag and 5m worker deadline", env: "", wantCompile: 2 * time.Minute, wantWorker: 5 * time.Minute},
+		{name: "longer value raises both", env: "660s", wantCompile: 660 * time.Second, wantWorker: 660 * time.Second},
+		{name: "shorter value keeps 5m worker floor", env: "3m", wantCompile: 3 * time.Minute, wantWorker: 5 * time.Minute},
+		{name: "invalid falls back to flag", env: "soon", wantCompile: 2 * time.Minute, wantWorker: 5 * time.Minute},
+		{name: "non-positive falls back to flag", env: "0s", wantCompile: 2 * time.Minute, wantWorker: 5 * time.Minute},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(timeoutEnv, tt.env)
+			if got := compileTimeout(); got != tt.wantCompile {
+				t.Errorf("compileTimeout() = %v, want %v", got, tt.wantCompile)
+			}
+			if got := workerTimeout(); got != tt.wantWorker {
+				t.Errorf("workerTimeout() = %v, want %v", got, tt.wantWorker)
+			}
+		})
+	}
 }
