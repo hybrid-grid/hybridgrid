@@ -1,0 +1,36 @@
+# TN3 smoke cluster (pilot only, never official). Build context = main repo (feat/exp3 working tree).
+x-img: &img
+  build:
+    context: "D:/Đồ án tốt nghiệp/hybridgrid"
+    dockerfile: test/stress/Dockerfile.base
+  image: hg3smoke-base
+  networks: [hgnet]
+services:
+  coordinator:
+    <<: *img
+    command: hg-coord serve --grpc-port=9000 --http-port=8080 --scheduler=leastloaded --task-log=/tmp/tasks.jsonl
+  worker-1:
+    <<: *img
+    command: hg-worker serve --coordinator=coordinator:9000 --port=50051 --advertise-address=worker-1:50051 --max-parallel=2
+    depends_on: [coordinator]
+    deploy: {resources: {limits: {cpus: '1.0', memory: 1024M}}}
+  worker-2:
+    <<: *img
+    command: hg-worker serve --coordinator=coordinator:9000 --port=50051 --advertise-address=worker-2:50051 --max-parallel=2
+    depends_on: [coordinator]
+    deploy: {resources: {limits: {cpus: '1.0', memory: 1024M}}}
+  worker-3:
+    <<: *img
+    command: hg-worker serve --coordinator=coordinator:9000 --port=50051 --advertise-address=worker-3:50051 --max-parallel=2
+    depends_on: [coordinator]
+    deploy: {resources: {limits: {cpus: '1.0', memory: 1024M}}}
+  builder:
+    <<: *img
+    command: sleep infinity
+    environment: {HG_COORDINATOR: "coordinator:9000"}
+    depends_on: [coordinator]
+    volumes:
+      - "D:/Đồ án tốt nghiệp/hybridgrid/test/stress:/smoke:ro"
+      - "D:/bench-work/pilot-src/abseil-cpp:/src/abseil-cpp:ro"
+    deploy: {resources: {limits: {cpus: '2.0', memory: 2048M}}}
+networks: {hgnet: {driver: bridge}}

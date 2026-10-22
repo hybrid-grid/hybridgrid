@@ -1,0 +1,7 @@
+- [Appendix 9.1](<D:/Đồ án tốt nghiệp/hybridgrid/docs/thesis/bao-cao-tn2-261021.md:268>) still incompletely addresses correction 6. The E2-trans/E2-onoff tables omit `drift_pre_share`, early/late shares, and excess share; E2-lambda has no complete descriptive table. `TTA (kđ)` reports counts, not censoring rates. Correct rates: E2-perm D γ=0.95 = **5%**; E2-onoff HG-LinUCB = **5%**; every other arm = **0%**.
+
+- Exact text: “mỗi phiên có median 240 quyết định trong pha bật và 221 trong pha tắt; mọi cell có ít nhất một pha bắc qua ranh giới hai build” does not provide the mandated per-event dispatch counts, per-phase task counts, or boundary phase. Correct median event dispatch counts are **129, 176, 237, 289, 327, 358, 392, 444.5, 499, 550**; event 11 occurs in **98/140** cells with median **590**. Corresponding median phase-task counts are **47, 59, 53, 40, 32, 34, 54, 52, 52, 40, 0**. **Phase 4** crosses the build boundary in **140/140** cells.
+
+- [Section 8](<D:/Đồ án tốt nghiệp/hybridgrid/docs/thesis/bao-cao-tn2-261021.md:231>) retains equivalence-style wording: “bản này không chậm hơn HG-LinUCB một cách có ý nghĩa.” Correct: “không phát hiện khác biệt có ý nghĩa so với HG-LinUCB; không có kiểm định tương đương/non-inferiority.”
+
+NEEDS CORRECTIONS

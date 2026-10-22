@@ -1,0 +1,22 @@
+Found 1 blocker, 4 majors, and 1 minor.
+
+- **BLOCKER — preprocessing option order can silently change compiled code.** [`parser.go:152`](<D:/Đồ án tốt nghiệp/hybridgrid/internal/compiler/parser.go:152>) stores `-D` separately, while [`preprocess.go:108`](<D:/Đồ án tốt nghiệp/hybridgrid/internal/compiler/preprocess.go:108>) always emits definitions before `-U`. Thus `gcc -U FOO -D FOO ...` becomes `-D FOO -U FOO`, reversing its meaning. GCC explicitly processes `-D`/`-U` in command-line order. [GCC documentation](https://gcc.gnu.org/onlinedocs/gcc/Preprocessor-Options.html). Fix: retain an ordered preprocessing-token stream, with paired operands adjacent; add both `-U FOO -D FOO` and inverse-order behavioral tests.
+
+- **MAJOR — synthesized dependency targets are not Make-quoted.** [`preprocess.go:148`](<D:/Đồ án tốt nghiệp/hybridgrid/internal/compiler/preprocess.go:148>) adds `-MT object`; GCC’s implicit target is quoted as though supplied through `-MQ`. Paths containing `$`, `#`, spaces, or other Make-special characters therefore produce a different/broken depfile. [GCC documents the default `-MQ` behavior](https://gcc.gnu.org/onlinedocs/gcc/Preprocessor-Options.html). Fix: synthesize `-MQ object`, while preserving explicit `-MT`/`-MQ`; test a special-character output path.
+
+- **MAJOR — cache hits miss dependency generation carried through `-Wp,` or `-Xpreprocessor`.** [`parser.go:321`](<D:/Đồ án tốt nghiệp/hybridgrid/internal/compiler/parser.go:321>) recognizes only top-level `-MD`/`-MMD`, so [`build.go:163`](<D:/Đồ án tốt nghiệp/hybridgrid/internal/cli/build/build.go:163>) skips preprocessing on cache hits for forms such as `-Wp,-MMD,foo.d` or `-Xpreprocessor -MD ...`. Cache misses create the depfile; hits do not. Fix: normalize indirect dependency options into parsed dependency metadata and add cache-hit tests for both carriers.
+
+- **MAJOR — blanket prefix matching corrupts valid Clang options.** [`parser.go:74`](<D:/Đồ án tốt nghiệp/hybridgrid/internal/compiler/parser.go:74>) assumes every table entry accepts arbitrary joined forms. For example, `-include-pch foo.pch` is misread as joined `-include`; preprocessing forwards `-include-pch` but drops `foo.pch`. Clang also has unmodeled `-isystem-after`, `-iframeworkwithsysroot`, and related `-i*` options. [Clang option reference](https://clang.llvm.org/docs/ClangCommandLineReference.html). Fix: encode permitted forms per option—separate, joined, `=`, or comma—and add Clang PCH/include-family tests.
+
+- **MAJOR — valid side-output options are silently discarded.** [`parser.go:65`](<D:/Đồ án tốt nghiệp/hybridgrid/internal/compiler/parser.go:65>) marks `-aux-info`, `-dumpbase`, and `-dumpdir` local-only, then [`parser.go:305`](<D:/Đồ án tốt nghiệp/hybridgrid/internal/compiler/parser.go:305>) removes them from remote compilation, but preprocessing cannot produce their compilation outputs. Fix: mark commands requesting auxiliary/dump outputs non-distributable unless the protocol returns those artifacts; test `IsDistributable`.
+
+- **MINOR — the smoke script is misleading when reused.** [`cmake-smoke.sh:6`](<D:/Đồ án tốt nghiệp/hybridgrid/test/stress/cmake-smoke.sh:6>) reuses an existing build directory: a second run can execute zero compile tasks while still printing seven entries from `compile_commands.json`. Fix: default to a fresh temporary build directory or clean Ninja outputs before building.
+
+Focused checks:
+
+- Normal `-MD/-MMD`, absent `-MF`, explicit `-MT/-MQ`, and `-MP` handling is otherwise structurally correct, including the tested direct cache-hit path.
+- For the supplied CPython-style command, `-x cpp-output` is semantically equivalent to compiling the worker’s existing `.i` input; removing duplicate `-c`/`-std` and irrelevant include flags should not change results. Builds using dependency flags will do extra local depfile work, especially on cache hits, so their timing can change.
+- GCC 12 accepts `-x c++-cpp-output`; retaining `-std=c++17` is correct and necessary for parsing semantics. [GCC language documentation](https://gcc.gnu.org/onlinedocs/gcc/Overall-Options.html).
+- The persistent wrapper implementation, shell quoting, and Dockerfile package/wrapper installation look correct. The real smoke results support that assessment.
+
+NO-GO
