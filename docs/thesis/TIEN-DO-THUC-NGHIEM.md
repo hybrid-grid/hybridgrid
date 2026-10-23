@@ -70,6 +70,10 @@ metric mới trong `scripts/analyze_exp.py`.
 
 ## 5. Việc tiếp theo
 
+0. **Cập nhật 2026-10-23.** Phân tích dư địa cho thấy ở -j8 cụm bão hoà, nên TN3 như thiết kế khó phân biệt
+   các scheduler. Pilot trên máy tham chiếu tìm được kịch bản HG-LinUCB thắng cả LL lẫn SED (3/3 lần): absl,
+   -j3, worker-5 bị chiếm ngầm. Pilot lặp lại trên máy khác: `ke-hoach-pilot-hg-loi-the.md`. Kế hoạch TN3 bên
+   dưới đang chờ người dùng quyết định lại.
 1. **TN3** (khi người dùng nói bắt đầu): làm theo `ke-hoach-thi-nghiem-3.md` mục 10:
    - rà soát và test lần cuối;
    - đóng băng `hypotheses-tn3.md` bằng commit;
