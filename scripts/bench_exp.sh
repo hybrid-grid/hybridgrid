@@ -730,7 +730,8 @@ PY
     for entry in "${image_entries[@]}"; do
         read -r service recorded <<< "$entry"
         name="${PROJECT}-${service}:latest"
-        if ! grep -Fxq "$name" <<< "$images"; then
+        # Newer Docker Compose prints `hgexp-worker-4`, older prints `hgexp-worker-4:latest`.
+        if ! grep -Fxq -e "$name" -e "${name%:latest}" <<< "$images"; then
             printf 'resume image mismatch: %s is absent from compose config --images\n' "$name" >&2
             mismatch=1
             continue

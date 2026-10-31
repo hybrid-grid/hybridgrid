@@ -9,7 +9,8 @@ cat > "$TMP/docker" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$DOCKER_CALL_LOG"
 if [[ $1 == compose && $2 == -p && $4 == -f && $6 == config && $7 == --images ]]; then
-    printf '%s\n' hgexp-coordinator:latest hgexp-builder:latest
+    if [[ ${IMAGES_UNTAGGED:-0} == 1 ]]; then printf '%s\n' hgexp-coordinator hgexp-builder
+    else printf '%s\n' hgexp-coordinator:latest hgexp-builder:latest; fi
 elif [[ $1 == image && $2 == inspect && $3 == --format ]]; then
     case $5 in
         sha256:coord|hgexp-coordinator:latest) printf '%s\n' sha256:coord ;;
@@ -33,6 +34,11 @@ compose() { docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"; }
 source <(awk '/^verify_resume_images\(\) \{/ {copy=1} /^FAIL_REASON=/ {copy=0} copy' "$RUNNER")
 
 verify_resume_images
+# Docker Compose 29.x prints image names without the :latest tag; resume must still work.
+IMAGES_UNTAGGED=1 verify_resume_images
+if IMAGES_UNTAGGED=1 CURRENT_BUILDER=sha256:changed verify_resume_images 2> "$TMP/error"; then
+    printf 'expected changed image rejection with untagged names\n' >&2; exit 1
+fi
 if CURRENT_BUILDER=sha256:changed verify_resume_images 2> "$TMP/error"; then
     printf 'expected changed image rejection\n' >&2; exit 1
 fi
