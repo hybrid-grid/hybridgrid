@@ -111,7 +111,7 @@ run_invalid 'hybrid-linucb-a000' 'alpha must be at least 0.01'
 run_invalid 'hybrid-linucb-rc-a010' 'invalid arm'
 run_invalid 'linucb-a1000' 'invalid arm'
 DIAG_CANDIDATES=2 run_invalid 'leastloaded' 'DIAG_CANDIDATES must be 0 or 1'
-ORDER_MODE=unknown run_invalid 'leastloaded' 'ORDER_MODE must be shuffle or latin5'
+ORDER_MODE=unknown run_invalid 'leastloaded' 'ORDER_MODE must be shuffle, latin5, or latinN'
 EXPECT_TASKS_PER_BUILD=0 run_invalid 'leastloaded' 'EXPECT_TASKS_PER_BUILD must be a positive integer'
 if P90_THRESHOLD=0 DRY_RUN=1 REPS=1 ARMS=p90 bash "$RUNNER" > "$TMP/stdout" 2> "$TMP/stderr"; then
     printf 'expected rejection of P90_THRESHOLD=0\n' >&2

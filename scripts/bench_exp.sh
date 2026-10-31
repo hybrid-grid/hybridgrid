@@ -11,6 +11,8 @@ PROJECT=hgexp
 ARMS="${ARMS:-leastloaded sed hybrid-linucb hybrid-linucb-d-g098}"
 REPS="${REPS:-20}"
 ROUND_START="${ROUND_START:-1}"
+ROUND_END_SET=${ROUND_END+x}
+ROUND_END="${ROUND_END-$REPS}"
 OUT_DIR="${OUT_DIR:-/tmp/bench_exp_$(date +%Y%m%d_%H%M%S)}"
 JOBS="${JOBS:-8}"
 CLIENTS="${CLIENTS:-1}"
@@ -44,6 +46,7 @@ P90_THRESHOLD="${P90_THRESHOLD:-}"
 REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-}"
 DRIFT="${DRIFT:-none}"
 DRIFT_AT="${DRIFT_AT:-120}"
+DRIFT_ON_MAX_SET=${DRIFT_ON_MAX+x}
 DRIFT_TARGET="${DRIFT_TARGET-worker-5}"
 DRIFT_CPU="${DRIFT_CPU:-1}"
 # Optional replacement for the stress-ng arguments (default: --cpu $DRIFT_CPU), for example "--vm 1 --vm-bytes 600M --vm-keep".
@@ -62,14 +65,20 @@ decimal() { [[ $2 =~ ^[0-9]+([.][0-9]+)?$ ]] || die "$1 must be a nonnegative de
 now() { python3 -c 'import time; print(time.time())'; }
 compose() { docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"; }
 
-positive_int REPS "$REPS"; positive_int ROUND_START "$ROUND_START"
+positive_int REPS "$REPS"; positive_int ROUND_START "$ROUND_START"; positive_int ROUND_END "$ROUND_END"
+ROUND_END=$((10#$ROUND_END))
 positive_int JOBS "$JOBS"; positive_int SESSION_BUILDS "$SESSION_BUILDS"
 nonnegative_int WARM_START "$WARM_START"; positive_int DRIFT_CPU "$DRIFT_CPU"
 positive_int DRIFT_DURATION "$DRIFT_DURATION"; positive_int DRIFT_ON "$DRIFT_ON"
 positive_int DRIFT_OFF "$DRIFT_OFF"; positive_int EST_CELL_S "$EST_CELL_S"
 nonnegative_int COOLDOWN "$COOLDOWN"; positive_int DRIFT_AT "$DRIFT_AT"
+DRIFT_ON_MAX="${DRIFT_ON_MAX-$((DRIFT_AT + 40))}"
+positive_int DRIFT_ON_MAX "$DRIFT_ON_MAX"
+DRIFT_ON_MAX=$((10#$DRIFT_ON_MAX))
 (( DRIFT_AT > 100 )) || die 'DRIFT_AT must be >= 101'
 (( ROUND_START <= REPS )) || die 'ROUND_START must not exceed REPS'
+(( ROUND_START <= ROUND_END && ROUND_END <= REPS )) || die 'ROUND_END must be between ROUND_START and REPS'
+(( DRIFT_ON_MAX >= DRIFT_AT )) || die 'DRIFT_ON_MAX must be >= DRIFT_AT'
 [[ $CLIENTS == 1 || $CLIENTS == 2 ]] || die 'CLIENTS must be 1 or 2'
 [[ $DRIFT == none || $DRIFT == permanent || $DRIFT == transient || $DRIFT == onoff ]] || die 'DRIFT must be none, permanent, transient, or onoff'
 [[ -z $REQUEST_TIMEOUT || $REQUEST_TIMEOUT =~ ^[1-9][0-9]*(s|m)$ ]] || die 'REQUEST_TIMEOUT must look like 600s or 10m'
@@ -95,7 +104,7 @@ python3 -c 'import sys; a,e=map(float,sys.argv[1:]); sys.exit(not (0 <= a <= 10 
 python3 -c 'import sys; sys.exit(float(sys.argv[1]) <= 0)' "$BUILDER_CPUS" || die 'BUILDER_CPUS must be > 0'
 [[ -z $MIN_TASKS ]] || positive_int MIN_TASKS "$MIN_TASKS"
 [[ -z $EXPECT_TASKS_PER_BUILD ]] || positive_int EXPECT_TASKS_PER_BUILD "$EXPECT_TASKS_PER_BUILD"
-[[ $ORDER_MODE == shuffle || $ORDER_MODE == latin5 ]] || die 'ORDER_MODE must be shuffle or latin5'
+[[ $ORDER_MODE == shuffle || $ORDER_MODE == latin5 || $ORDER_MODE == latinN ]] || die 'ORDER_MODE must be shuffle, latin5, or latinN'
 [[ $SEED_BASE =~ ^-?[0-9]+$ ]] || die 'SEED_BASE must be an integer'
 [[ $CPYTHON_VERSION =~ ^[a-zA-Z0-9._-]+$ ]] || die 'invalid CPYTHON_VERSION'
 [[ $CONFIGURE_FLAGS =~ ^[-a-zA-Z0-9_=./\ ]+$ ]] || die 'CONFIGURE_FLAGS contains unsupported characters'
@@ -181,20 +190,24 @@ done
 if [[ $ORDER_MODE == latin5 ]]; then
     (( ${#arm_list[@]} == 5 )) || die 'ORDER_MODE=latin5 requires exactly 5 arms'
     (( REPS % 5 == 0 )) || die 'ORDER_MODE=latin5 requires REPS divisible by 5'
+elif [[ $ORDER_MODE == latinN ]]; then
+    (( ${#arm_list[@]} >= 2 )) || die 'ORDER_MODE=latinN requires at least 2 arms'
+    (( REPS % ${#arm_list[@]} == 0 )) || die 'ORDER_MODE=latinN requires REPS divisible by number of arms'
 fi
 
 order_for_round() {
     SEED_BASE="$SEED_BASE" ARMS="$ARMS" ROUND="$1" ORDER_MODE="$ORDER_MODE" python3 - <<'PY'
 import os, random
 a = os.environ['ARMS'].split()
-if os.environ['ORDER_MODE'] == 'latin5':
+if os.environ['ORDER_MODE'] in ('latin5', 'latinN'):
     round_number = int(os.environ['ROUND'])
-    group, row = divmod(round_number - 1, 5)
+    n = len(a)
+    group, row = divmod(round_number - 1, n)
     rng = random.Random(int(os.environ['SEED_BASE']) * 1000 + group)
-    rows = rng.sample(range(5), 5)
-    columns = rng.sample(range(5), 5)
-    symbols = rng.sample(a, 5)
-    a = [symbols[(rows[row] + columns[position]) % 5] for position in range(5)]
+    rows = rng.sample(range(n), n)
+    columns = rng.sample(range(n), n)
+    symbols = rng.sample(a, n)
+    a = [symbols[(rows[row] + columns[position]) % n] for position in range(n)]
 else:
     random.Random(int(os.environ['SEED_BASE']) + int(os.environ['ROUND'])).shuffle(a)
 print(' '.join(a))
@@ -279,14 +292,14 @@ if [[ $DRY_RUN == 1 ]]; then
     generate_compose "${arm_flags[0]}"
     printf 'compose: %s\n' "$COMPOSE_FILE"
     for i in "${!arm_list[@]}"; do printf 'arm %s: hg-coord %s\n' "${arm_list[$i]}" "${arm_flags[$i]}"; done
-    for (( round=1; round<=REPS; round++ )); do
+    for (( round=1; round<=ROUND_END; round++ )); do
         if (( round < ROUND_START )); then
             printf 'round %d (already completed): %s\n' "$round" "$(order_for_round "$round")"
         else
             printf 'round %d: %s\n' "$round" "$(order_for_round "$round")"
         fi
     done
-    cells=$(( (REPS - ROUND_START + 1) * ${#arm_list[@]} + (ROUND_START == 1 ? 1 : 0) ))
+    cells=$(( (ROUND_END - ROUND_START + 1) * ${#arm_list[@]} + (ROUND_START == 1 ? 1 : 0) ))
     printf 'estimated wall time: %d s (%d cells x %d builds x %d s, plus cooldown; excludes setup)\n' "$((cells * (EST_CELL_S * SESSION_BUILDS + COOLDOWN)))" "$cells" "$SESSION_BUILDS" "$EST_CELL_S"
     case $WORKLOAD in
         cpython)
@@ -304,6 +317,9 @@ if [[ $DRY_RUN == 1 ]]; then
             ;;
     esac
     printf 'meta keys: WORKLOAD ABSL_REF ABSL_COMMIT SYN_SEED SYN_FILES SYN_C_FRACTION SYN_ALPHA SYN_MEDIAN_UNITS SYN_MAX_UNITS SYN_HIDDEN SYN_MANIFEST_SHA256 BUILDER_MEM P90_THRESHOLD ORDER_MODE EXPECT_TASKS_PER_BUILD\n'
+    if [[ -n $ROUND_END_SET || -n $DRIFT_ON_MAX_SET ]]; then
+        printf 'round range: %s..%s of %s; drift_on max: %s\n' "$ROUND_START" "$ROUND_END" "$REPS" "$DRIFT_ON_MAX"
+    fi
     exit 0
 fi
 
@@ -322,7 +338,7 @@ else
     # (written before WORKLOAD existed) must still have their default value.
     python3 - "$OUT_DIR/meta.json" \
         "ARMS=$ARMS" "JOBS=$JOBS" "CLIENTS=$CLIENTS" "SESSION_BUILDS=$SESSION_BUILDS" "BUILDER_CPUS=$BUILDER_CPUS" \
-        "DRIFT=$DRIFT" "DRIFT_AT=$DRIFT_AT" "DRIFT_TARGET=$DRIFT_TARGET" "SEED_BASE=$SEED_BASE" "WARM_START=$WARM_START" \
+        "DRIFT=$DRIFT" "DRIFT_AT=$DRIFT_AT" "DRIFT_ON_MAX=$DRIFT_ON_MAX" "DRIFT_TARGET=$DRIFT_TARGET" "SEED_BASE=$SEED_BASE" "WARM_START=$WARM_START" \
         "WORKLOAD=$WORKLOAD" "BUILDER_MEM=$BUILDER_MEM" "ABSL_REF=$ABSL_REF" "ABSL_COMMIT=$ABSL_COMMIT" \
         "SYN_SEED=$SYN_SEED" "SYN_FILES=$SYN_FILES" "SYN_C_FRACTION=$SYN_C_FRACTION" "SYN_ALPHA=$SYN_ALPHA" \
         "SYN_MEDIAN_UNITS=$SYN_MEDIAN_UNITS" "SYN_MAX_UNITS=$SYN_MAX_UNITS" "SYN_HIDDEN=$SYN_HIDDEN" \
@@ -333,6 +349,7 @@ else
 import json, sys
 meta = json.load(open(sys.argv[1]))
 defaults = {"WORKLOAD": "cpython", "BUILDER_MEM": "1G", "P90_THRESHOLD": "", "DRIFT_STRESS_ARGS": "", "DIAG_CANDIDATES": "0", "ORDER_MODE": "shuffle", "EXPECT_TASKS_PER_BUILD": ""}
+defaults["DRIFT_ON_MAX"] = str(int(meta.get("DRIFT_AT", "120")) + 40)
 bad = []
 for item in sys.argv[2:]:
     key, value = item.split("=", 1)
@@ -356,6 +373,20 @@ for path in sys.argv[1:3]:
     kept = [rows[0]] + [row for row in rows[1:] if int(row[round_col]) < int(sys.argv[3])]
     with open(path, 'w', newline='') as f:
         csv.writer(f, lineterminator='\n').writerows(kept)
+PY
+    python3 - "$OUT_DIR/meta.json" "$ROUND_END_SET" "$ROUND_END" "$DRIFT_ON_MAX_SET" "$DRIFT_ON_MAX" <<'PY' || die 'failed to update resume metadata'
+import json, sys
+path, end_set, end, max_set, drift_max = sys.argv[1:]
+with open(path) as f:
+    meta = json.load(f)
+changed = False
+for key, value, explicit in (("ROUND_END", end, end_set), ("DRIFT_ON_MAX", drift_max, max_set)):
+    if (explicit or key in meta) and meta.get(key) != value:
+        meta[key] = value
+        changed = True
+if changed:
+    with open(path, 'w') as f:
+        json.dump(meta, f, indent=2)
 PY
 fi
 
@@ -659,6 +690,7 @@ write_meta() {
     [[ -z $(git -C "$ROOT" status --porcelain) ]] || git_dirty=true
     host_nproc=$(nproc)
     export ARMS REPS ROUND_START OUT_DIR JOBS CLIENTS BUILDER_CPUS SESSION_BUILDS CONFIGURE_FLAGS CPYTHON_VERSION COOLDOWN SEED_BASE ORDER_MODE EXPECT_TASKS_PER_BUILD ALPHA EPSILON WARM_START DIAG_CANDIDATES DRIFT DRIFT_AT DRIFT_TARGET DRIFT_CPU DRIFT_STRESS_ARGS DRIFT_DURATION DRIFT_ON DRIFT_OFF MIN_TASKS DRY_RUN EST_CELL_S
+    export ROUND_END DRIFT_ON_MAX ROUND_END_SET DRIFT_ON_MAX_SET
     export WORKLOAD ABSL_REF ABSL_COMMIT SYN_SEED SYN_FILES SYN_C_FRACTION SYN_ALPHA SYN_MEDIAN_UNITS SYN_MAX_UNITS SYN_HIDDEN SYN_MANIFEST_SHA256 BUILDER_MEM P90_THRESHOLD REQUEST_TIMEOUT
     META_IMAGES="$image_ids" META_DOCKER="$docker_info" META_COMMIT="$git_commit" META_DIRTY="$git_dirty" META_NPROC="$host_nproc" \
         META_LABELS="$(printf '%s|' "${arm_list[@]}")" META_FLAGS="$(printf '%s|' "${arm_flags[@]}")" \
@@ -667,6 +699,10 @@ import csv, json, os, sys
 e = os.environ
 keys = 'ARMS REPS ROUND_START OUT_DIR JOBS CLIENTS BUILDER_CPUS SESSION_BUILDS CONFIGURE_FLAGS CPYTHON_VERSION COOLDOWN SEED_BASE ORDER_MODE EXPECT_TASKS_PER_BUILD ALPHA EPSILON WARM_START DIAG_CANDIDATES DRIFT DRIFT_AT DRIFT_TARGET DRIFT_CPU DRIFT_STRESS_ARGS DRIFT_DURATION DRIFT_ON DRIFT_OFF MIN_TASKS DRY_RUN EST_CELL_S WORKLOAD ABSL_REF ABSL_COMMIT SYN_SEED SYN_FILES SYN_C_FRACTION SYN_ALPHA SYN_MEDIAN_UNITS SYN_MAX_UNITS SYN_HIDDEN SYN_MANIFEST_SHA256 BUILDER_MEM P90_THRESHOLD REQUEST_TIMEOUT'.split()
 meta = {key: e[key] for key in keys}
+if e['ROUND_END_SET']:
+    meta['ROUND_END'] = e['ROUND_END']
+if e['DRIFT_ON_MAX_SET']:
+    meta['DRIFT_ON_MAX'] = e['DRIFT_ON_MAX']
 labels = e['META_LABELS'].rstrip('|').split('|')
 flags = e['META_FLAGS'].rstrip('|').split('|')
 images = dict(item.split('=', 1) for item in e['META_IMAGES'].rstrip('|').split('|'))
@@ -902,7 +938,7 @@ PY
     if [[ $DRIFT != none && $record != 0 ]]; then
         (( first_on >= 101 )) || { FAIL_REASON="missing valid drift_on event (first dispatch_count=$first_on)"; return 1; }
         (( first_on >= DRIFT_AT )) || { FAIL_REASON="drift_on too early: dispatch_count=$first_on precedes DRIFT_AT=$DRIFT_AT"; return 1; }
-        (( first_on <= DRIFT_AT + 40 )) || { FAIL_REASON="drift_on too late: dispatch_count=$first_on exceeds $((DRIFT_AT + 40))"; return 1; }
+        (( first_on <= DRIFT_ON_MAX )) || { FAIL_REASON="drift_on too late: dispatch_count=$first_on exceeds $DRIFT_ON_MAX"; return 1; }
         (( post_dispatched >= 100 )) || { FAIL_REASON="only $post_dispatched tasks dispatched after drift_on; need 100"; return 1; }
     fi
     if [[ $DRIFT == permanent ]]; then
@@ -944,7 +980,7 @@ if (( ROUND_START == 1 )); then
     rm -f "$OUT_DIR/tasks_${arm_list[0]}_round0.jsonl"
     write_meta
 fi
-for (( round=ROUND_START; round<=REPS; round++ )); do
+for (( round=ROUND_START; round<=ROUND_END; round++ )); do
     order=$(order_for_round "$round")
     printf '%s,%s\n' "$round" "${order// /|}" >> "$OUT_DIR/order_log.csv"
     read -r -a shuffled <<< "$order"
@@ -968,3 +1004,6 @@ for (( round=ROUND_START; round<=REPS; round++ )); do
     done
 done
 printf 'results: %s/results.csv\n' "$OUT_DIR"
+if (( ROUND_END < REPS )); then
+    printf 'rounds through %s of %s completed; resume with ROUND_START=%s\n' "$ROUND_END" "$REPS" "$((ROUND_END + 1))"
+fi
