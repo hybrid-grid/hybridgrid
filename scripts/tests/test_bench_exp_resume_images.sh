@@ -15,7 +15,7 @@ elif [[ $1 == image && $2 == inspect && $3 == --format ]]; then
     case $5 in
         sha256:coord|hgexp-coordinator:latest) printf '%s\n' sha256:coord ;;
         sha256:builder) [[ ${MISSING_BUILDER:-0} == 0 ]] && printf '%s\n' sha256:builder ;;
-        hgexp-builder:latest) printf '%s\n' "${CURRENT_BUILDER:-sha256:builder}" ;;
+        hgexp-builder:latest|hgexp-builder) [[ ${NO_BUILDER_IMAGE:-0} == 0 ]] || exit 1; printf '%s\n' "${CURRENT_BUILDER:-sha256:builder}" ;;
     esac
 else
     exit 70
@@ -31,7 +31,7 @@ cat > "$TMP/meta.json" <<'JSON'
 JSON
 die() { printf 'ERROR: %s\n' "$*" >&2; return 1; }
 compose() { docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"; }
-source <(awk '/^verify_resume_images\(\) \{/ {copy=1} /^FAIL_REASON=/ {copy=0} copy' "$RUNNER")
+source <(awk '/^require_existing_images\(\) \{/ {copy=1} /^FAIL_REASON=/ {copy=0} copy' "$RUNNER")
 
 verify_resume_images
 # Docker Compose 29.x prints image names without the :latest tag; resume must still work.
@@ -48,4 +48,13 @@ if MISSING_BUILDER=1 verify_resume_images 2> "$TMP/error"; then
 fi
 grep -Fq 'recorded_exists=missing' "$TMP/error"
 ! grep -Fq ' build' "$DOCKER_CALL_LOG"
+# REUSE_IMAGES=1 starts a fresh directory on existing images and never builds.
+require_existing_images
+IMAGES_UNTAGGED=1 require_existing_images
+if NO_BUILDER_IMAGE=1 require_existing_images 2> "$TMP/error"; then
+    printf 'expected missing reusable image rejection\n' >&2; exit 1
+fi
+grep -Fq 'REUSE_IMAGES=1 but image hgexp-builder:latest does not exist' "$TMP/error"
+! grep -Fq ' build' "$DOCKER_CALL_LOG"
+grep -Fq 'if [[ $REUSE_IMAGES == 1 ]]; then require_existing_images; else compose build; fi' "$RUNNER"
 printf 'bench_exp resume image tests passed\n'

@@ -35,6 +35,7 @@ SYN_MANIFEST_SHA256=
 COOLDOWN="${COOLDOWN:-8}"
 SEED_BASE="${SEED_BASE:-1000}"
 ORDER_MODE="${ORDER_MODE:-shuffle}"
+REUSE_IMAGES="${REUSE_IMAGES:-0}"
 EXPECT_TASKS_PER_BUILD="${EXPECT_TASKS_PER_BUILD:-}"
 ALPHA="${ALPHA:-0.5}"
 EPSILON="${EPSILON:-0.1}"
@@ -105,6 +106,7 @@ python3 -c 'import sys; sys.exit(float(sys.argv[1]) <= 0)' "$BUILDER_CPUS" || di
 [[ -z $MIN_TASKS ]] || positive_int MIN_TASKS "$MIN_TASKS"
 [[ -z $EXPECT_TASKS_PER_BUILD ]] || positive_int EXPECT_TASKS_PER_BUILD "$EXPECT_TASKS_PER_BUILD"
 [[ $ORDER_MODE == shuffle || $ORDER_MODE == latin5 || $ORDER_MODE == latinN ]] || die 'ORDER_MODE must be shuffle, latin5, or latinN'
+[[ $REUSE_IMAGES == 0 || $REUSE_IMAGES == 1 ]] || die 'REUSE_IMAGES must be 0 or 1'
 [[ $SEED_BASE =~ ^-?[0-9]+$ ]] || die 'SEED_BASE must be an integer'
 [[ $CPYTHON_VERSION =~ ^[a-zA-Z0-9._-]+$ ]] || die 'invalid CPYTHON_VERSION'
 [[ $CONFIGURE_FLAGS =~ ^[-a-zA-Z0-9_=./\ ]+$ ]] || die 'CONFIGURE_FLAGS contains unsupported characters'
@@ -714,6 +716,16 @@ with open(sys.argv[2], 'w') as f:
 PY
 }
 
+require_existing_images() {
+    local images name
+    images=$(compose config --images) || die 'cannot resolve compose images'
+    [[ -n $images ]] || die 'compose config lists no images'
+    while IFS= read -r name; do
+        [[ -n $name ]] || continue
+        docker image inspect --format '{{.Id}}' "$name" > /dev/null 2>&1 || die "REUSE_IMAGES=1 but image $name does not exist"
+    done <<< "$images"
+}
+
 verify_resume_images() {
     local images entry service recorded name recorded_id current_id mismatch=0
     local -a image_entries=()
@@ -963,9 +975,11 @@ if [[ $WORKLOAD == syn ]]; then
 fi
 
 # Build fresh images once; a resume must use the images recorded at warm-up.
+# REUSE_IMAGES=1 lets a campaign that runs many output directories share one image set: every compose image
+# must already exist and none is rebuilt, so a later directory never invalidates the images another one recorded.
 generate_compose "${arm_flags[0]}"
 if (( ROUND_START == 1 )); then
-    compose build
+    if [[ $REUSE_IMAGES == 1 ]]; then require_existing_images; else compose build; fi
 else
     verify_resume_images
 fi
