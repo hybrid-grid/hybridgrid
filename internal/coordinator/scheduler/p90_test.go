@@ -71,7 +71,7 @@ func TestP90Scheduler_Selection(t *testing.T) {
 					if !errors.Is(err, tt.wantErr) {
 						t.Fatalf("error = %v, want %v", err, tt.wantErr)
 					}
-					if info != (DispatchInfo{}) {
+					if !isZeroDispatchInfo(info) {
 						t.Fatalf("non-learning dispatch info = %+v", info)
 					}
 					if tt.wantErr == nil && (w == nil || w.ID != arm.want) {
@@ -166,7 +166,7 @@ func TestSelectWith_PreservesExistingRouting(t *testing.T) {
 	ctx := TaskContext{SourceSizeBytes: 101}
 	plain := &selectionSpy{worker: w}
 	got, info, err := SelectWith(plain, pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "", ctx)
-	if err != nil || got != w || plain.selectCalls != 1 || info != (DispatchInfo{}) {
+	if err != nil || got != w || plain.selectCalls != 1 || !isZeroDispatchInfo(info) {
 		t.Fatalf("plain path: worker %v, info %+v, calls %d, err %v", got, info, plain.selectCalls, err)
 	}
 	learner := &learnerSpy{selectionSpy: selectionSpy{worker: w}}
@@ -174,4 +174,11 @@ func TestSelectWith_PreservesExistingRouting(t *testing.T) {
 	if err != nil || got != w || learner.selectCalls != 0 || learner.contextCalls != 1 || learner.context != ctx || info.QValueAtDispatch != 3 {
 		t.Fatalf("learner path: worker %v, info %+v, calls %d/%d, err %v", got, info, learner.selectCalls, learner.contextCalls, err)
 	}
+}
+
+// isZeroDispatchInfo reports whether a dispatch carries no learner state.
+// DispatchInfo holds a slice, so it is no longer comparable with ==.
+func isZeroDispatchInfo(info DispatchInfo) bool {
+	return info.QValueAtDispatch == 0 && !info.WasExploration &&
+		info.Candidates == nil && info.RewardOffset == 0
 }

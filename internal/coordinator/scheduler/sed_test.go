@@ -481,7 +481,7 @@ func TestSEDScheduler_SelectWithReturnsZeroDispatchInfo(t *testing.T) {
 	if w.ID != "w5" {
 		t.Errorf("got %s, want w5", w.ID)
 	}
-	if info != (DispatchInfo{}) {
+	if !isZeroDispatchInfo(info) {
 		t.Errorf("DispatchInfo = %+v, want zero value", info)
 	}
 }

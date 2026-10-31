@@ -7,6 +7,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/scheduler"
 )
 
 // TaskLogger emits one JSON Lines record per completed task.
@@ -70,6 +72,9 @@ type TaskLogRecord struct {
 	Success                     bool   `json:"success"`
 	ExitCode                    int32  `json:"exit_code"`
 	FromCache                   bool   `json:"from_cache"`
+
+	LinUCBCandidates []scheduler.CandidateDiag `json:"linucb_candidates,omitempty"`
+	RewardOffset     float64                   `json:"reward_offset,omitempty"`
 
 	// Learner introspection (populated only by LearningScheduler
 	// implementations; zero/false otherwise).

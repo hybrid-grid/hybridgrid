@@ -15,11 +15,14 @@ import pandas as pd
 from scipy.stats import rankdata, wilcoxon
 
 
-SUFFIX = re.compile(r"^(?P<base>.+?)(?P<arm>-arm)?(?P<gamma>-g\d{3})?(?P<penalty>-l(?:0|\d{3}))?$")
+SUFFIX = re.compile(
+    r"^(?P<base>.+?)(?P<arm>-arm)?(?P<gamma>-g\d{3})?"
+    r"(?P<penalty>-l(?:0|\d{3}))?(?P<alpha>-a\d{3})?"
+    r"(?P<reward_center>-rc)?(?P<features>-fc)?$")
 TASK_NAME = re.compile(r"^tasks_(.+)_round(\d+)\.jsonl$")
 BASES = {"leastloaded", "simple", "p2c", "epsilon-greedy", "linucb",
          "hybrid-linucb", "hybrid-linucb-d", "heft", "icecc-fastest", "sed",
-         "p90", "sed-p90"}
+         "p90", "sed-p90", "ewma"}
 DEFAULT_TARGET = "worker-5:50051"
 BOOT_SEED = 20260709
 BOOT_N = 10000
@@ -41,16 +44,13 @@ EXP3_METRICS = METRICS[-6:]
 BUILD_ID = re.compile(r"-b(?P<build>\d+)-c[^-]+$")
 
 
-def parse_arm(label):
-    """Return the D2 base and resolved options, rejecting malformed suffixes."""
+def parse_arm(label, warm_start=100):
+    """Return the base and resolved options; label alpha uses hundredths (001..999)."""
     match = SUFFIX.fullmatch(label)
     if not match:
         raise ValueError(f"invalid arm label: {label}")
     base = match["base"]
-    # A suffix-like fragment in the base means the label did not match D2 order.
     if base not in BASES:
-        raise ValueError(f"invalid arm label: {label}")
-    if re.search(r"(?:-arm|-g\d+|-l\d+)(?:-|$)", base):
         raise ValueError(f"invalid arm label: {label}")
     if match["gamma"] and base != "hybrid-linucb-d":
         raise ValueError(f"discount only applies to hybrid-linucb-d: {label}")
@@ -58,14 +58,31 @@ def parse_arm(label):
         raise ValueError(f"arm discount only applies to hybrid-linucb-d: {label}")
     if match["penalty"] and base not in ("hybrid-linucb", "hybrid-linucb-d"):
         raise ValueError(f"load penalty does not apply to {base}: {label}")
+    if match["alpha"] and base not in ("linucb", "hybrid-linucb", "hybrid-linucb-d", "ewma"):
+        raise ValueError(f"alpha does not apply to {base}: {label}")
+    if match["reward_center"] and base not in ("hybrid-linucb", "hybrid-linucb-d"):
+        raise ValueError(f"reward centering does not apply to {base}: {label}")
+    if match["features"] and base not in ("linucb", "hybrid-linucb", "hybrid-linucb-d"):
+        raise ValueError(f"compact features do not apply to {base}: {label}")
     gamma = int(match["gamma"][2:]) / 100 if match["gamma"] else 0.98
     penalty = (int(match["penalty"][2:]) / 100
                if match["penalty"] and match["penalty"] != "-l0" else
                (0.0 if match["penalty"] else 0.5))
-    if not 0 < gamma <= 1 or not 0 <= penalty <= 1:
+    alpha = int(match["alpha"][2:]) / 100 if match["alpha"] else None
+    if not 0 < gamma <= 1 or not 0 <= penalty <= 5 or (alpha is not None and
+            not 0.01 <= alpha <= (1 if base == "ewma" else 9.99)):
         raise ValueError(f"suffix out of range: {label}")
+    if match["reward_center"]:
+        if int(warm_start) <= 0:
+            raise ValueError(f"reward centering requires warm start: {label}")
+        if base == "hybrid-linucb-d" and not match["arm"] and gamma != 1:
+            raise ValueError(f"reward centering requires arm discount or gamma 1.00: {label}")
     return {"base": base, "discount_mode": "arm" if match["arm"] else "global",
-            "discount": gamma, "load_penalty": penalty}
+            "discount": gamma, "load_penalty": penalty,
+            "alpha": alpha if base != "ewma" else None,
+            "ewma_alpha": alpha if base == "ewma" else None,
+            "reward_center": "warm" if match["reward_center"] else "none",
+            "features": "compact" if match["features"] else "full"}
 
 
 def holm(p_values):
@@ -123,10 +140,17 @@ def _number(value):
         return None
 
 
+def _target_addresses(target):
+    if isinstance(target, set):
+        return target
+    return set(str(target).split("|"))
+
+
 def _share(tasks, target):
     if not tasks or any(not t.get("worker_address") for t in tasks):
         return math.nan
-    return sum(t["worker_address"] == target for t in tasks) / len(tasks)
+    targets = _target_addresses(target)
+    return sum(t["worker_address"] in targets for t in tasks) / len(tasks)
 
 
 def candidate_metrics(tasks):
@@ -276,7 +300,8 @@ def time_to_adapt(post, target, reference_share, window=20, factor=0.5,
     if not math.isfinite(reference_share) or (not fixed and reference_share < 0.05) or not post or any(
             not task.get("worker_address") for task in post):
         return "NA", math.nan, False
-    hits = [int(task["worker_address"] == target) for task in post]
+    targets = _target_addresses(target)
+    hits = [int(task["worker_address"] in targets) for task in post]
     threshold = reference_share if fixed else factor * reference_share
     for count in range(window, len(hits) + 1):
         if sum(hits[count - window:count]) / window <= threshold:
@@ -287,6 +312,7 @@ def time_to_adapt(post, target, reference_share, window=20, factor=0.5,
 def _excess_share(tasks, target):
     if not tasks:
         return math.nan
+    targets = _target_addresses(target)
     excess = []
     for task in tasks:
         candidates = task.get("candidates")
@@ -300,9 +326,10 @@ def _excess_share(tasks, target):
         free = [c for c in candidates if c.get("healthy") is not False and
                 c["active"] < c["max_parallel"]]
         total = sum(c["cpu_millis"] for c in free)
-        expected = next((c["cpu_millis"] / total for c in free
-                         if c["address"] == target and total > 0), 0.0)
-        excess.append(int(task["worker_address"] == target) - expected)
+        expected = sum(next((c["cpu_millis"] / total for c in free
+                             if c["address"] == address and total > 0), 0.0)
+                       for address in targets)
+        excess.append(int(task["worker_address"] in targets) - expected)
     return sum(excess) / len(excess)
 
 
@@ -329,7 +356,7 @@ def drift_metrics(tasks, events, target, window, factor, tta_ref="pre_all",
         return result
     # Event is posted after injection; the counter is the last booked dispatch.
     onset = int(on["dispatch_count"]) + 1
-    target = on.get("target") or target
+    target = _target_addresses(on.get("target") or target)
     ordered = sorted(tasks, key=lambda t: int(t["dispatch_seq"]))
     pre = [t for t in ordered if 101 <= int(t["dispatch_seq"]) < onset]
     pre_all = [t for t in ordered if 1 <= int(t["dispatch_seq"]) < onset]
@@ -378,7 +405,7 @@ def drift_metrics(tasks, events, target, window, factor, tta_ref="pre_all",
             result[f"drift_{kind}_phases_n"] = len(group)
             if all(t.get("worker_address") for t in group):
                 result[f"drift_{kind}_phases_target_n"] = sum(
-                    t["worker_address"] == target for t in group)
+                    t["worker_address"] in target for t in group)
     off = phases[1] if (len(phases) == 2 and phases[0]["kind"] == "drift_on"
                         and phases[1]["kind"] == "drift_off") else None
     if off:
@@ -386,7 +413,7 @@ def drift_metrics(tasks, events, target, window, factor, tta_ref="pre_all",
         result["target_after_recovery_share"] = _share(recovered, target)
         if recovered and all(t.get("worker_address") for t in recovered):
             result["target_after_recovery_tasks"] = sum(
-                t["worker_address"] == target for t in recovered)
+                t["worker_address"] in target for t in recovered)
     return result
 
 
@@ -433,7 +460,7 @@ def load_cells(out_dir, window=20, factor=0.5, tta_ref="pre_all", tta_fixed=None
     results["round"] = pd.to_numeric(results["round"], errors="coerce")
     arms = _meta_arms(meta) or sorted(str(x) for x in results["arm"].dropna().unique())
     for arm in arms:
-        parse_arm(arm)
+        parse_arm(arm, warm_start=meta.get("WARM_START", 100))
     rounds = sorted(int(x) for x in results["round"].dropna().unique())
     log_keys = {}
     for path in sorted(out_dir.glob("tasks_*_round*.jsonl")):
@@ -470,9 +497,8 @@ def load_cells(out_dir, window=20, factor=0.5, tta_ref="pre_all", tta_fixed=None
             expected_client_keys = set(sorted(client_values)[:expected_clients])
     else:
         expected_client_keys = {"1"}
-    target = meta.get("DRIFT_TARGET", DEFAULT_TARGET)
-    if target and ":" not in str(target):
-        target = f"{target}:50051"
+    target = {address if ":" in address else f"{address}:50051"
+              for address in str(meta.get("DRIFT_TARGET", DEFAULT_TARGET)).split(",")}
     drift_required = str(meta.get("DRIFT", "none")).lower() != "none"
     cells, dropped, notes = [], [], set()
     if results["round"].isna().any():
@@ -534,8 +560,9 @@ def load_cells(out_dir, window=20, factor=0.5, tta_ref="pre_all", tta_fixed=None
                     elif reason is None and drift_required and any(
                             e.get("kind") == "drift_on" and
                             (_number(e.get("dispatch_count")) is None or
-                             _number(e.get("dispatch_count")) < 101) for e in events):
-                        reason = "drift_on before dispatch 101"
+                             _number(e.get("dispatch_count")) < max(101, int(meta.get("DRIFT_AT", 101))))
+                            for e in events):
+                        reason = f"drift_on before dispatch {max(101, int(meta.get('DRIFT_AT', 101)))}"
             if reason:
                 round_reasons.append(f"{arm}: {reason}")
                 continue
@@ -608,7 +635,7 @@ def compare(cells, treatments, baselines):
     treatments = treatments or [arm for arm in available if parse_arm(arm)["base"] in
                                 ("hybrid-linucb", "hybrid-linucb-d")]
     baselines = baselines or [arm for arm in available if parse_arm(arm)["base"] in
-                              ("leastloaded", "sed", "p90", "sed-p90")]
+                              ("leastloaded", "sed", "p90", "sed-p90", "ewma")]
     extra_metrics = tuple(sorted(c for c in cells if c.startswith(("build_", "client_", "drift_phase_"))))
     for metric in METRICS + extra_metrics:
         if metric not in cells:
@@ -651,10 +678,10 @@ def write_summary(path, cells, pairs, drops, notes, window, factor, tta_ref,
              "On/off aggregate shares pool decisions inside each phase after first drift_on; "
              "cell_end cleanup is excluded. Counts are decision and target-decision totals.",
              "Holm family: every treatment x baseline pair for one metric in this directory; "
-             "gamma/lambda sweep arms enlarge the family.", ""]
-    if not cells.empty and any(parse_arm(arm)["base"] in ("p90", "sed-p90")
+             "gamma/lambda/alpha/centering/features variants enlarge the family.", ""]
+    if not cells.empty and any(parse_arm(arm)["base"] in ("p90", "sed-p90", "ewma")
                                for arm in cells["arm"].unique()):
-        lines.insert(-1, "Default baselines are leastloaded, sed, p90, and sed-p90 when present.")
+        lines.insert(-1, "Default baselines are leastloaded, sed, p90, sed-p90, and ewma when present.")
     if any(metric in cells for metric in EXP3_METRICS):
         lines += ["Experiment 3 metrics pool successful tasks across clients within each build. "
                   "build_<k>_<metric> reports each build; cell-level metrics report the last "

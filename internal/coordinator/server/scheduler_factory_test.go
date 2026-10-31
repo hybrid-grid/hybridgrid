@@ -1,11 +1,13 @@
 package server
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 
+	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/registry"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/resilience"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/scheduler"
@@ -88,6 +90,85 @@ func TestNewScheduler_DiscountedParams(t *testing.T) {
 			linucb, ok := got.(*scheduler.LinUCBScheduler)
 			if assert.True(t, ok) {
 				assert.Equal(t, tt.want, linucb.Params())
+			}
+		})
+	}
+}
+
+func TestNewScheduler_ExperimentConfig(t *testing.T) {
+	reg := registry.NewInMemoryRegistry(60 * time.Second)
+	defer reg.Stop()
+	cm := resilience.NewCircuitManager(resilience.DefaultCircuitConfig())
+
+	for _, typ := range []string{"linucb", "hybrid-linucb", "hybrid-linucb-d"} {
+		t.Run(typ, func(t *testing.T) {
+			cfg := Config{SchedulerType: typ, FeatureSetValue: "compact", RewardCenterValue: "none", DiagCandidates: true}
+			got, ok := newScheduler(cfg, reg, cm).(*scheduler.LinUCBScheduler)
+			if !ok {
+				t.Fatal("expected LinUCBScheduler")
+			}
+			if !strings.Contains(got.Params(), "features=compact") {
+				t.Fatalf("Params() = %q, want features=compact", got.Params())
+			}
+		})
+	}
+
+	hybrid, ok := newScheduler(Config{SchedulerType: "hybrid-linucb", RewardCenterValue: "warm", WarmStartTasks: 100}, reg, cm).(*scheduler.LinUCBScheduler)
+	if !ok {
+		t.Fatal("expected hybrid LinUCBScheduler")
+	}
+	if !strings.Contains(hybrid.Params(), "reward_center=warm") {
+		t.Fatalf("Params() = %q, want reward_center=warm", hybrid.Params())
+	}
+	discounted, ok := newScheduler(Config{SchedulerType: "hybrid-linucb-d", RewardCenterValue: "warm", WarmStartTasks: 100, DiscountValue: 0.95, DiscountModeValue: "arm"}, reg, cm).(*scheduler.LinUCBScheduler)
+	if !ok {
+		t.Fatal("expected discounted LinUCBScheduler")
+	}
+	if !strings.Contains(discounted.Params(), "reward_center=warm") {
+		t.Fatalf("Params() = %q, want reward_center=warm", discounted.Params())
+	}
+
+	ewma, ok := newScheduler(Config{SchedulerType: "ewma", EwmaAlphaValue: 0.4}, reg, cm).(*scheduler.EWMAScheduler)
+	if !ok {
+		t.Fatal("expected EWMAScheduler")
+	}
+	if !strings.Contains(ewma.Params(), "alpha=0.4") {
+		t.Fatalf("Params() = %q, want alpha=0.4", ewma.Params())
+	}
+
+	for _, address := range []string{"127.0.0.1:19001", "127.0.0.1:19002"} {
+		if err := reg.Add(&registry.WorkerInfo{
+			ID:           address,
+			Address:      address,
+			MaxParallel:  2,
+			Capabilities: &pb.WorkerCapabilities{NativeArch: pb.Architecture_ARCH_X86_64, Cpp: &pb.CppCapability{Compilers: []string{"gcc"}}},
+		}); err != nil {
+			t.Fatalf("add worker: %v", err)
+		}
+	}
+	diag, ok := newScheduler(Config{SchedulerType: "linucb", DiagCandidates: true}, reg, cm).(*scheduler.LinUCBScheduler)
+	if !ok {
+		t.Fatal("expected diagnostic LinUCBScheduler")
+	}
+	_, info, err := diag.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "", scheduler.TaskContext{SourceSizeBytes: 1024})
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if len(info.Candidates) != 2 {
+		t.Fatalf("diagnostics = %d candidates, want 2", len(info.Candidates))
+	}
+	for _, typ := range []string{"hybrid-linucb", "hybrid-linucb-d"} {
+		t.Run(typ+" diagnostics", func(t *testing.T) {
+			configured, ok := newScheduler(Config{SchedulerType: typ, DiagCandidates: true}, reg, cm).(*scheduler.LinUCBScheduler)
+			if !ok {
+				t.Fatal("expected LinUCBScheduler")
+			}
+			_, info, err := configured.SelectWithDispatchInfo(pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64, "", scheduler.TaskContext{SourceSizeBytes: 1024})
+			if err != nil {
+				t.Fatalf("select: %v", err)
+			}
+			if len(info.Candidates) != 2 {
+				t.Fatalf("diagnostics = %d candidates, want 2", len(info.Candidates))
 			}
 		})
 	}

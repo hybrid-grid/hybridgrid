@@ -6,6 +6,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STRESS_DIR="$ROOT/test/stress"
 COMPOSE_FILE="$STRESS_DIR/docker-compose-exp.yml"
 PROJECT=hgexp
+# Labels: <base>[-arm][-g<ddd>][-l<ddd>][-a<ddd>][-rc][-fc].
+# -a uses hundredths (001..999); the three-digit label caps bandit alpha at 9.99.
 ARMS="${ARMS:-leastloaded sed hybrid-linucb hybrid-linucb-d-g098}"
 REPS="${REPS:-20}"
 ROUND_START="${ROUND_START:-1}"
@@ -30,17 +32,22 @@ SYN_HIDDEN="${SYN_HIDDEN:-0.0}"
 SYN_MANIFEST_SHA256=
 COOLDOWN="${COOLDOWN:-8}"
 SEED_BASE="${SEED_BASE:-1000}"
+ORDER_MODE="${ORDER_MODE:-shuffle}"
+EXPECT_TASKS_PER_BUILD="${EXPECT_TASKS_PER_BUILD:-}"
 ALPHA="${ALPHA:-0.5}"
 EPSILON="${EPSILON:-0.1}"
 WARM_START="${WARM_START:-100}"
+DIAG_CANDIDATES="${DIAG_CANDIDATES:-0}"
 P90_THRESHOLD="${P90_THRESHOLD:-}"
 # Coordinator per-compile deadline (e.g. 600s). Empty keeps the built-in 120s
 # and passes no flag, so Experiments 1-2 commands are unchanged.
 REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-}"
 DRIFT="${DRIFT:-none}"
 DRIFT_AT="${DRIFT_AT:-120}"
-DRIFT_TARGET="${DRIFT_TARGET:-worker-5}"
+DRIFT_TARGET="${DRIFT_TARGET-worker-5}"
 DRIFT_CPU="${DRIFT_CPU:-1}"
+# Optional replacement for the stress-ng arguments (default: --cpu $DRIFT_CPU), for example "--vm 1 --vm-bytes 600M --vm-keep".
+DRIFT_STRESS_ARGS="${DRIFT_STRESS_ARGS:-}"
 DRIFT_DURATION="${DRIFT_DURATION:-30}"
 DRIFT_ON="${DRIFT_ON:-10}"
 DRIFT_OFF="${DRIFT_OFF:-10}"
@@ -74,12 +81,21 @@ if [[ -n $REQUEST_TIMEOUT ]]; then
     case $REQUEST_TIMEOUT in *m) rt_s=$(( ${REQUEST_TIMEOUT%m} * 60 )) ;; *) rt_s=${REQUEST_TIMEOUT%s} ;; esac
     HG_TIMEOUT_ENV=("HG_TIMEOUT=$(( rt_s + 60 ))s")
 fi
-[[ $DRIFT_TARGET =~ ^worker-[1-5]$ ]] || die 'DRIFT_TARGET must be worker-1..worker-5'
+[[ $DRIFT_TARGET =~ ^worker-[1-5](,worker-[1-5]){0,3}$ ]] || die 'DRIFT_TARGET must list 1 to 4 workers from worker-1..worker-5, separated by commas'
+IFS=, read -r -a drift_targets <<< "$DRIFT_TARGET"
+declare -A seen_drift_targets=()
+for target in "${drift_targets[@]}"; do
+    [[ -z ${seen_drift_targets[$target]+x} ]] || die "DRIFT_TARGET contains duplicate worker '$target'"
+    seen_drift_targets[$target]=1
+done
 [[ $DRY_RUN == 0 || $DRY_RUN == 1 ]] || die 'DRY_RUN must be 0 or 1'
+[[ $DIAG_CANDIDATES == 0 || $DIAG_CANDIDATES == 1 ]] || die 'DIAG_CANDIDATES must be 0 or 1'
 decimal ALPHA "$ALPHA"; decimal EPSILON "$EPSILON"; decimal BUILDER_CPUS "$BUILDER_CPUS"
 python3 -c 'import sys; a,e=map(float,sys.argv[1:]); sys.exit(not (0 <= a <= 10 and 0 <= e <= 1))' "$ALPHA" "$EPSILON" || die 'ALPHA must be in [0, 10] and EPSILON in [0, 1]'
 python3 -c 'import sys; sys.exit(float(sys.argv[1]) <= 0)' "$BUILDER_CPUS" || die 'BUILDER_CPUS must be > 0'
 [[ -z $MIN_TASKS ]] || positive_int MIN_TASKS "$MIN_TASKS"
+[[ -z $EXPECT_TASKS_PER_BUILD ]] || positive_int EXPECT_TASKS_PER_BUILD "$EXPECT_TASKS_PER_BUILD"
+[[ $ORDER_MODE == shuffle || $ORDER_MODE == latin5 ]] || die 'ORDER_MODE must be shuffle or latin5'
 [[ $SEED_BASE =~ ^-?[0-9]+$ ]] || die 'SEED_BASE must be an integer'
 [[ $CPYTHON_VERSION =~ ^[a-zA-Z0-9._-]+$ ]] || die 'invalid CPYTHON_VERSION'
 [[ $CONFIGURE_FLAGS =~ ^[-a-zA-Z0-9_=./\ ]+$ ]] || die 'CONFIGURE_FLAGS contains unsupported characters'
@@ -98,10 +114,11 @@ declare -A seen=()
 read -r -a requested_arms <<< "$ARMS"
 (( ${#requested_arms[@]} > 0 )) || die 'ARMS is empty'
 for label in "${requested_arms[@]}"; do
-    if [[ ! $label =~ ^(leastloaded|simple|p2c|epsilon-greedy|linucb|hybrid-linucb-d|hybrid-linucb|heft|icecc-fastest|sed-p90|sed|p90)(-arm)?(-g[0-9]{3})?(-l(0|[0-9]{3}))?$ ]]; then
-        die "invalid arm '$label': expected <base>[-arm][-g<ddd>][-l<ddd>]"
+    if [[ ! $label =~ ^(leastloaded|simple|p2c|epsilon-greedy|linucb|hybrid-linucb-d|hybrid-linucb|heft|icecc-fastest|sed-p90|sed|ewma|p90)(-arm)?(-g[0-9]{3})?(-l(0|[0-9]{3}))?(-a[0-9]{3})?(-rc)?(-fc)?$ ]]; then
+        die "invalid arm '$label': expected <base>[-arm][-g<ddd>][-l<ddd>][-a<ddd>][-rc][-fc]"
     fi
     base=${BASH_REMATCH[1]}; mode=${BASH_REMATCH[2]}; gamma=${BASH_REMATCH[3]}; penalty=${BASH_REMATCH[4]}
+    arm_alpha=${BASH_REMATCH[6]}; reward_center=${BASH_REMATCH[7]}; features=${BASH_REMATCH[8]}
     if [[ $base == p90 || $base == sed-p90 ]]; then
         [[ -n $P90_THRESHOLD ]] || die "P90_THRESHOLD is required for arm '$label'"
         positive_int P90_THRESHOLD "$P90_THRESHOLD"
@@ -114,6 +131,15 @@ for label in "${requested_arms[@]}"; do
     if [[ -n $penalty && $base != hybrid-linucb && $base != hybrid-linucb-d ]]; then
         die "arm '$label': -l requires hybrid-linucb or hybrid-linucb-d"
     fi
+    if [[ -n $arm_alpha && $base != linucb && $base != hybrid-linucb && $base != hybrid-linucb-d && $base != ewma ]]; then
+        die "arm '$label': -a requires linucb, hybrid-linucb, hybrid-linucb-d, or ewma"
+    fi
+    if [[ -n $reward_center && $base != hybrid-linucb && $base != hybrid-linucb-d ]]; then
+        die "arm '$label': -rc requires hybrid-linucb or hybrid-linucb-d"
+    fi
+    if [[ -n $features && $base != linucb && $base != hybrid-linucb && $base != hybrid-linucb-d ]]; then
+        die "arm '$label': -fc requires linucb, hybrid-linucb, or hybrid-linucb-d"
+    fi
     discount=0.98; discount_mode=global; load_penalty=0.5
     [[ -z $mode ]] || discount_mode=arm
     if [[ -n $gamma ]]; then
@@ -124,19 +150,53 @@ for label in "${requested_arms[@]}"; do
         digits=${penalty#-l}; (( 10#$digits <= 500 )) || die "arm '$label': load penalty exceeds 5.0"
         load_penalty=$(printf '%d.%02d' "$((10#$digits / 100))" "$((10#$digits % 100))")
     fi
-    flags="--scheduler=$base --alpha=$ALPHA --epsilon=$EPSILON --warm-start=$WARM_START --load-penalty=$load_penalty"
+    alpha=$ALPHA; ewma_alpha=
+    if [[ -n $arm_alpha ]]; then
+        digits=${arm_alpha#-a}; (( 10#$digits > 0 )) || die "arm '$label': alpha must be at least 0.01"
+        value=$(printf '%d.%02d' "$((10#$digits / 100))" "$((10#$digits % 100))")
+        if [[ $base == ewma ]]; then
+            (( 10#$digits <= 100 )) || die "arm '$label': EWMA alpha must be in [0.01, 1.00]"
+            ewma_alpha=$value
+        else
+            alpha=$value
+        fi
+    fi
+    if [[ -n $reward_center ]]; then
+        (( 10#$WARM_START > 0 )) || die "arm '$label': -rc requires WARM_START > 0"
+        [[ $base != hybrid-linucb-d || $discount_mode == arm || $discount == 1.00 ]] || die "arm '$label': -rc requires arm discount or gamma 1.00"
+    fi
+    flags="--scheduler=$base --alpha=$alpha --epsilon=$EPSILON --warm-start=$WARM_START --load-penalty=$load_penalty"
     [[ $base != p90 && $base != sed-p90 ]] || flags+=" --size-threshold=$P90_THRESHOLD"
     [[ $base != hybrid-linucb-d ]] || flags+=" --discount=$discount --discount-mode=$discount_mode"
     [[ -z $REQUEST_TIMEOUT ]] || flags+=" --request-timeout=$REQUEST_TIMEOUT"
+    [[ -z $ewma_alpha ]] || flags+=" --ewma-alpha=$ewma_alpha"
+    [[ -z $reward_center ]] || flags+=' --reward-center=warm'
+    [[ -z $features ]] || flags+=' --features=compact'
+    if [[ $DIAG_CANDIDATES == 1 && ( $base == linucb || $base == hybrid-linucb || $base == hybrid-linucb-d ) ]]; then
+        flags+=' --diag-candidates'
+    fi
     flags+=' --task-log=/tmp/tasks.jsonl'
     arm_list+=("$label"); arm_bases+=("$base"); arm_flags+=("$flags")
 done
+if [[ $ORDER_MODE == latin5 ]]; then
+    (( ${#arm_list[@]} == 5 )) || die 'ORDER_MODE=latin5 requires exactly 5 arms'
+    (( REPS % 5 == 0 )) || die 'ORDER_MODE=latin5 requires REPS divisible by 5'
+fi
 
 order_for_round() {
-    SEED_BASE="$SEED_BASE" ARMS="$ARMS" ROUND="$1" python3 - <<'PY'
+    SEED_BASE="$SEED_BASE" ARMS="$ARMS" ROUND="$1" ORDER_MODE="$ORDER_MODE" python3 - <<'PY'
 import os, random
 a = os.environ['ARMS'].split()
-random.Random(int(os.environ['SEED_BASE']) + int(os.environ['ROUND'])).shuffle(a)
+if os.environ['ORDER_MODE'] == 'latin5':
+    round_number = int(os.environ['ROUND'])
+    group, row = divmod(round_number - 1, 5)
+    rng = random.Random(int(os.environ['SEED_BASE']) * 1000 + group)
+    rows = rng.sample(range(5), 5)
+    columns = rng.sample(range(5), 5)
+    symbols = rng.sample(a, 5)
+    a = [symbols[(rows[row] + columns[position]) % 5] for position in range(5)]
+else:
+    random.Random(int(os.environ['SEED_BASE']) + int(os.environ['ROUND'])).shuffle(a)
 print(' '.join(a))
 PY
 }
@@ -243,7 +303,7 @@ if [[ $DRY_RUN == 1 ]]; then
             printf 'build: cd /workspace/syn-build && hgbuild ninja --no-fallback -j"$1"\n'
             ;;
     esac
-    printf 'meta keys: WORKLOAD ABSL_REF ABSL_COMMIT SYN_SEED SYN_FILES SYN_C_FRACTION SYN_ALPHA SYN_MEDIAN_UNITS SYN_MAX_UNITS SYN_HIDDEN SYN_MANIFEST_SHA256 BUILDER_MEM P90_THRESHOLD\n'
+    printf 'meta keys: WORKLOAD ABSL_REF ABSL_COMMIT SYN_SEED SYN_FILES SYN_C_FRACTION SYN_ALPHA SYN_MEDIAN_UNITS SYN_MAX_UNITS SYN_HIDDEN SYN_MANIFEST_SHA256 BUILDER_MEM P90_THRESHOLD ORDER_MODE EXPECT_TASKS_PER_BUILD\n'
     exit 0
 fi
 
@@ -266,12 +326,13 @@ else
         "WORKLOAD=$WORKLOAD" "BUILDER_MEM=$BUILDER_MEM" "ABSL_REF=$ABSL_REF" "ABSL_COMMIT=$ABSL_COMMIT" \
         "SYN_SEED=$SYN_SEED" "SYN_FILES=$SYN_FILES" "SYN_C_FRACTION=$SYN_C_FRACTION" "SYN_ALPHA=$SYN_ALPHA" \
         "SYN_MEDIAN_UNITS=$SYN_MEDIAN_UNITS" "SYN_MAX_UNITS=$SYN_MAX_UNITS" "SYN_HIDDEN=$SYN_HIDDEN" \
-        "P90_THRESHOLD=$P90_THRESHOLD" "REQUEST_TIMEOUT=$REQUEST_TIMEOUT" "ALPHA=$ALPHA" "EPSILON=$EPSILON" "CPYTHON_VERSION=$CPYTHON_VERSION" \
-        "CONFIGURE_FLAGS=$CONFIGURE_FLAGS" "COOLDOWN=$COOLDOWN" "DRIFT_CPU=$DRIFT_CPU" \
-        "DRIFT_DURATION=$DRIFT_DURATION" "DRIFT_ON=$DRIFT_ON" "DRIFT_OFF=$DRIFT_OFF" <<'PY' || die 'resume configuration differs from meta.json'
+        "P90_THRESHOLD=$P90_THRESHOLD" "REQUEST_TIMEOUT=$REQUEST_TIMEOUT" "ALPHA=$ALPHA" "EPSILON=$EPSILON" "DIAG_CANDIDATES=$DIAG_CANDIDATES" "CPYTHON_VERSION=$CPYTHON_VERSION" \
+        "CONFIGURE_FLAGS=$CONFIGURE_FLAGS" "COOLDOWN=$COOLDOWN" "DRIFT_CPU=$DRIFT_CPU" "DRIFT_STRESS_ARGS=$DRIFT_STRESS_ARGS" \
+        "DRIFT_DURATION=$DRIFT_DURATION" "DRIFT_ON=$DRIFT_ON" "DRIFT_OFF=$DRIFT_OFF" \
+        "ORDER_MODE=$ORDER_MODE" "EXPECT_TASKS_PER_BUILD=$EXPECT_TASKS_PER_BUILD" <<'PY' || die 'resume configuration differs from meta.json'
 import json, sys
 meta = json.load(open(sys.argv[1]))
-defaults = {"WORKLOAD": "cpython", "BUILDER_MEM": "1G", "P90_THRESHOLD": ""}
+defaults = {"WORKLOAD": "cpython", "BUILDER_MEM": "1G", "P90_THRESHOLD": "", "DRIFT_STRESS_ARGS": "", "DIAG_CANDIDATES": "0", "ORDER_MODE": "shuffle", "EXPECT_TASKS_PER_BUILD": ""}
 bad = []
 for item in sys.argv[2:]:
     key, value = item.split("=", 1)
@@ -300,13 +361,17 @@ fi
 
 injector_pid=; stats_pid=; cell_marker=; events_file=; syn_host_dir=; SYN_MARKER=
 stop_stress() {
-    local running=0 stopped=0 count
-    if compose exec -T "$DRIFT_TARGET" pgrep -x stress-ng >/dev/null 2>&1; then
-        running=1
-    fi
-    if compose exec -T "$DRIFT_TARGET" pkill -x stress-ng >/dev/null 2>&1; then stopped=1; fi
+    local running=0 failed=0 count target
+    for target in "${drift_targets[@]}"; do
+        if compose exec -T "$target" pgrep -x stress-ng >/dev/null 2>&1; then
+            running=1
+            compose exec -T "$target" pkill -x stress-ng >/dev/null 2>&1 || failed=1
+        else
+            compose exec -T "$target" pkill -x stress-ng >/dev/null 2>&1 || true
+        fi
+    done
     if (( running == 1 )) && [[ $DRIFT != none ]]; then
-        if (( stopped == 0 )); then
+        if (( failed == 1 )); then
             [[ -z $cell_marker ]] || printf 'stress-ng cleanup failed\n' > "$cell_marker.error"
             return 1
         fi
@@ -333,30 +398,60 @@ dispatch_count() {
         python3 -c 'import json,sys; print(int(json.load(sys.stdin)["dispatches"]))'
 }
 post_event() {
-    local kind=$1 count=$2 detail=$3
+    local kind=$1 count=$2 detail=$3 target
+    # Keep the CSV target field comma-free while naming every affected address.
+    target=${DRIFT_TARGET//,/:50051|}:50051
     python3 -c 'import json,sys; print(json.dumps(dict(kind=sys.argv[1], target=sys.argv[2], dispatch_count=int(sys.argv[3]), detail=sys.argv[4])))' \
-        "$kind" "$DRIFT_TARGET:50051" "$count" "$detail" |
+        "$kind" "$target" "$count" "$detail" |
         curl -fsS --max-time 3 -X POST -H 'Content-Type: application/json' --data-binary @- http://localhost:18080/events >/dev/null || return 1
-    printf '%s,%s,%s,%s,%s\n' "$(now)" "$kind" "$DRIFT_TARGET:50051" "$count" "$detail" >> "$events_file"
+    printf '%s,%s,%s,%s,%s\n' "$(now)" "$kind" "$target" "$count" "$detail" >> "$events_file"
 }
 start_stress() {
-    local count=$1 try
-    compose exec -d -T "$DRIFT_TARGET" stress-ng --cpu "$DRIFT_CPU" || return 1
-    for try in 1 2 3 4 5 6 7 8 9 10; do
-        if compose exec -T "$DRIFT_TARGET" pgrep -x stress-ng >/dev/null 2>&1; then
-            # Onset = counter once stress-ng is confirmed running; docker exec
-            # takes ~0.5-1 s on Docker Desktop, so the trigger reading is early.
-            post_event drift_on "$(dispatch_count 2>/dev/null || printf '%s' "$count")" "stress_started trigger=$count" || return 1
-            return 0
+    local count=$1 try target confirmed
+    local -a started=() stress_args=(--cpu "$DRIFT_CPU")
+    [[ -z $DRIFT_STRESS_ARGS ]] || read -r -a stress_args <<< "$DRIFT_STRESS_ARGS"
+    for target in "${drift_targets[@]}"; do
+        started+=("$target")
+        if ! compose exec -d -T "$target" stress-ng "${stress_args[@]}"; then
+            rollback_stress "${started[@]}"
+            return 1
         fi
-        sleep 0.2
+        confirmed=0
+        for try in 1 2 3 4 5 6 7 8 9 10; do
+            if compose exec -T "$target" pgrep -x stress-ng >/dev/null 2>&1; then
+                confirmed=1
+                break
+            fi
+            sleep 0.2
+        done
+        if (( confirmed == 0 )); then
+            rollback_stress "${started[@]}"
+            return 1
+        fi
     done
-    return 1
+    # Onset = counter once all targets are confirmed running; docker exec
+    # takes ~0.5-1 s on Docker Desktop, so the trigger reading is early.
+    if ! post_event drift_on "$(dispatch_count 2>/dev/null || printf '%s' "$count")" "stress_started trigger=$count"; then
+        rollback_stress "${started[@]}"
+        return 1
+    fi
+}
+rollback_stress() {
+    local target
+    for target in "$@"; do
+        compose exec -T "$target" pkill -x stress-ng >/dev/null 2>&1 || true
+    done
 }
 stop_stress_phase() {
-    local count=$1
-    if compose exec -T "$DRIFT_TARGET" pgrep -x stress-ng >/dev/null 2>&1; then
-        compose exec -T "$DRIFT_TARGET" pkill -x stress-ng || return 1
+    local count=$1 target running=0 failed=0
+    for target in "${drift_targets[@]}"; do
+        if compose exec -T "$target" pgrep -x stress-ng >/dev/null 2>&1; then
+            running=1
+            compose exec -T "$target" pkill -x stress-ng || failed=1
+        fi
+    done
+    (( failed == 0 )) || return 1
+    if (( running == 1 )); then
         post_event drift_off "$(dispatch_count 2>/dev/null || printf '%s' "$count")" "stress_stopped trigger=$count" || return 1
     fi
 }
@@ -563,14 +658,14 @@ write_meta() {
     git_dirty=false
     [[ -z $(git -C "$ROOT" status --porcelain) ]] || git_dirty=true
     host_nproc=$(nproc)
-    export ARMS REPS ROUND_START OUT_DIR JOBS CLIENTS BUILDER_CPUS SESSION_BUILDS CONFIGURE_FLAGS CPYTHON_VERSION COOLDOWN SEED_BASE ALPHA EPSILON WARM_START DRIFT DRIFT_AT DRIFT_TARGET DRIFT_CPU DRIFT_DURATION DRIFT_ON DRIFT_OFF MIN_TASKS DRY_RUN EST_CELL_S
+    export ARMS REPS ROUND_START OUT_DIR JOBS CLIENTS BUILDER_CPUS SESSION_BUILDS CONFIGURE_FLAGS CPYTHON_VERSION COOLDOWN SEED_BASE ORDER_MODE EXPECT_TASKS_PER_BUILD ALPHA EPSILON WARM_START DIAG_CANDIDATES DRIFT DRIFT_AT DRIFT_TARGET DRIFT_CPU DRIFT_STRESS_ARGS DRIFT_DURATION DRIFT_ON DRIFT_OFF MIN_TASKS DRY_RUN EST_CELL_S
     export WORKLOAD ABSL_REF ABSL_COMMIT SYN_SEED SYN_FILES SYN_C_FRACTION SYN_ALPHA SYN_MEDIAN_UNITS SYN_MAX_UNITS SYN_HIDDEN SYN_MANIFEST_SHA256 BUILDER_MEM P90_THRESHOLD REQUEST_TIMEOUT
     META_IMAGES="$image_ids" META_DOCKER="$docker_info" META_COMMIT="$git_commit" META_DIRTY="$git_dirty" META_NPROC="$host_nproc" \
         META_LABELS="$(printf '%s|' "${arm_list[@]}")" META_FLAGS="$(printf '%s|' "${arm_flags[@]}")" \
         python3 - "$OUT_DIR/.worker_limits.csv" "$OUT_DIR/meta.json" <<'PY'
 import csv, json, os, sys
 e = os.environ
-keys = 'ARMS REPS ROUND_START OUT_DIR JOBS CLIENTS BUILDER_CPUS SESSION_BUILDS CONFIGURE_FLAGS CPYTHON_VERSION COOLDOWN SEED_BASE ALPHA EPSILON WARM_START DRIFT DRIFT_AT DRIFT_TARGET DRIFT_CPU DRIFT_DURATION DRIFT_ON DRIFT_OFF MIN_TASKS DRY_RUN EST_CELL_S WORKLOAD ABSL_REF ABSL_COMMIT SYN_SEED SYN_FILES SYN_C_FRACTION SYN_ALPHA SYN_MEDIAN_UNITS SYN_MAX_UNITS SYN_HIDDEN SYN_MANIFEST_SHA256 BUILDER_MEM P90_THRESHOLD REQUEST_TIMEOUT'.split()
+keys = 'ARMS REPS ROUND_START OUT_DIR JOBS CLIENTS BUILDER_CPUS SESSION_BUILDS CONFIGURE_FLAGS CPYTHON_VERSION COOLDOWN SEED_BASE ORDER_MODE EXPECT_TASKS_PER_BUILD ALPHA EPSILON WARM_START DIAG_CANDIDATES DRIFT DRIFT_AT DRIFT_TARGET DRIFT_CPU DRIFT_STRESS_ARGS DRIFT_DURATION DRIFT_ON DRIFT_OFF MIN_TASKS DRY_RUN EST_CELL_S WORKLOAD ABSL_REF ABSL_COMMIT SYN_SEED SYN_FILES SYN_C_FRACTION SYN_ALPHA SYN_MEDIAN_UNITS SYN_MAX_UNITS SYN_HIDDEN SYN_MANIFEST_SHA256 BUILDER_MEM P90_THRESHOLD REQUEST_TIMEOUT'.split()
 meta = {key: e[key] for key in keys}
 labels = e['META_LABELS'].rstrip('|').split('|')
 flags = e['META_FLAGS'].rstrip('|').split('|')
@@ -583,11 +678,44 @@ with open(sys.argv[2], 'w') as f:
 PY
 }
 
+verify_resume_images() {
+    local images entry service recorded name recorded_id current_id mismatch=0
+    local -a image_entries=()
+    images=$(compose config --images) || die 'cannot resolve compose images on resume'
+    # tr strips the CR that a Windows Python adds to every printed line; a trailing CR in an image id makes
+    # `docker image inspect` fail and would reject every resume.
+    mapfile -t image_entries < <(python3 - "$OUT_DIR/meta.json" <<'PY' | tr -d '\r'
+import json,sys
+for service, image_id in json.load(open(sys.argv[1]))['image_ids'].items():
+    print(service + ' ' + image_id)
+PY
+)
+    (( ${#image_entries[@]} > 0 )) || die 'resume meta.json has no image_ids'
+    for entry in "${image_entries[@]}"; do
+        read -r service recorded <<< "$entry"
+        name="${PROJECT}-${service}:latest"
+        if ! grep -Fxq "$name" <<< "$images"; then
+            printf 'resume image mismatch: %s is absent from compose config --images\n' "$name" >&2
+            mismatch=1
+            continue
+        fi
+        recorded_id=$(docker image inspect --format '{{.Id}}' "$recorded" 2>/dev/null) || recorded_id=
+        current_id=$(docker image inspect --format '{{.Id}}' "$name" 2>/dev/null) || current_id=
+        if [[ -z $recorded_id || $recorded_id != "$recorded" || $current_id != "$recorded" ]]; then
+            printf 'resume image mismatch: %s recorded=%s recorded_exists=%s current=%s\n' \
+                "$service" "$recorded" "${recorded_id:-missing}" "${current_id:-missing}" >&2
+            mismatch=1
+        fi
+    done
+    (( mismatch == 0 )) || die 'resume images differ from meta.json; restore the recorded images before continuing'
+}
+
 FAIL_REASON=
 run_cell() {
     local arm=$1 round=$2 pos=$3 record=$4 flags=$5 attempt=$6
-    local i service status start end elapsed makespan tasks_path counts successes failures first_on post_completed stats_before stats_after
+    local i service status start end elapsed makespan tasks_path counts successes failures first_on post_dispatched on_count off_count wrong_targets stats_before stats_after
     local token ready_entries ready_all client log id pid time_tag build_status min_start max_end
+    local span_reason cardinality_reason expected_target
     FAIL_REASON=; stop_background
     compose down >/dev/null 2>&1 || true
     generate_compose "$flags"
@@ -729,39 +857,59 @@ run_cell() {
     span_reason=$(python3 "$ROOT/scripts/exp_checks.py" "$tasks_path" "$tmp_results" "$arm" "$round") || {
         FAIL_REASON="HGTIME span check: $span_reason"; return 1;
     }
-    counts=$(python3 - "$tasks_path" <<'PY'
+    if [[ -n $EXPECT_TASKS_PER_BUILD ]]; then
+        cardinality_reason=$(python3 "$ROOT/scripts/exp_checks.py" cardinality "$tasks_path" "$EXPECT_TASKS_PER_BUILD" "$SESSION_BUILDS") || {
+            FAIL_REASON="task cardinality: $cardinality_reason"; return 1;
+        }
+    fi
+    expected_target=${DRIFT_TARGET//,/:50051|}:50051
+    counts=$(python3 - "$tasks_path" "$expected_target" <<'PY'
 import json,sys
 ok=bad=0
 post=0
 first_on=None
 completed=[]
+on_count=off_count=wrong_targets=0
+expected_target=sys.argv[2]
 for line in open(sys.argv[1]):
     row=json.loads(line)
     if row.get('event') == 'task_completed':
         if row.get('success') is True: ok+=1
         else: bad+=1
         completed.append(int(row.get('dispatch_seq',0)))
-    elif row.get('event') == 'injected_event' and row.get('kind') == 'drift_on' and first_on is None:
-        first_on=int(row.get('dispatch_count',0))
+    elif row.get('event') == 'injected_event':
+        kind=row.get('kind','')
+        if kind == 'drift_on':
+            on_count+=1
+            if first_on is None: first_on=int(row.get('dispatch_count',0))
+        elif kind == 'drift_off':
+            off_count+=1
+        if kind.startswith('drift_') and row.get('target') != expected_target:
+            wrong_targets+=1
 if first_on is not None:
     post=sum(seq > first_on for seq in completed)
-print(ok,bad,first_on if first_on is not None else -1,post)
+print(ok,bad,first_on if first_on is not None else -1,post,on_count,off_count,wrong_targets)
 PY
 ) || { FAIL_REASON='task log parse failed'; return 1; }
-    read -r successes failures first_on post_completed <<< "$counts"
+    read -r successes failures first_on post_dispatched on_count off_count wrong_targets <<< "$counts"
     if [[ $record == 0 ]]; then
         MIN_TASKS=${MIN_TASKS:-$successes}
         (( successes > 0 && failures == 0 )) || { FAIL_REASON="warm-up tasks: $successes successful, $failures failed"; return 1; }
     else
         (( successes >= MIN_TASKS )) || { FAIL_REASON="only $successes successful tasks; need $MIN_TASKS"; return 1; }
         (( failures == 0 )) || { FAIL_REASON="$failures failed tasks"; return 1; }
-        if [[ $DRIFT != none ]]; then
-            (( first_on >= 101 )) || { FAIL_REASON="missing valid drift_on event (first dispatch_count=$first_on)"; return 1; }
-            (( first_on <= DRIFT_AT + 40 )) || { FAIL_REASON="drift_on too late: dispatch_count=$first_on exceeds $((DRIFT_AT + 40))"; return 1; }
-            (( post_completed >= 100 )) || { FAIL_REASON="only $post_completed completed tasks after drift_on; need 100"; return 1; }
-        fi
-        cat "$tmp_results" >> "$OUT_DIR/results.csv"
     fi
+    if [[ $DRIFT != none && $record != 0 ]]; then
+        (( first_on >= 101 )) || { FAIL_REASON="missing valid drift_on event (first dispatch_count=$first_on)"; return 1; }
+        (( first_on >= DRIFT_AT )) || { FAIL_REASON="drift_on too early: dispatch_count=$first_on precedes DRIFT_AT=$DRIFT_AT"; return 1; }
+        (( first_on <= DRIFT_AT + 40 )) || { FAIL_REASON="drift_on too late: dispatch_count=$first_on exceeds $((DRIFT_AT + 40))"; return 1; }
+        (( post_dispatched >= 100 )) || { FAIL_REASON="only $post_dispatched tasks dispatched after drift_on; need 100"; return 1; }
+    fi
+    if [[ $DRIFT == permanent ]]; then
+        (( on_count == 1 && off_count == 1 )) || { FAIL_REASON="permanent drift requires exactly one drift_on and one drift_off (found $on_count on, $off_count off)"; return 1; }
+        (( wrong_targets == 0 )) || { FAIL_REASON="$wrong_targets drift events have target different from $expected_target"; return 1; }
+    fi
+    if [[ $record != 0 ]]; then cat "$tmp_results" >> "$OUT_DIR/results.csv"; fi
     return 0
 }
 
@@ -777,9 +925,13 @@ if [[ $WORKLOAD == syn ]]; then
     SYN_MARKER="$SYN_MANIFEST_SHA256 $SYN_SEED $SYN_FILES $SYN_C_FRACTION $SYN_ALPHA $SYN_MEDIAN_UNITS $SYN_MAX_UNITS $SYN_HIDDEN"
 fi
 
-# Build the common image once, before the discarded warm-up and measured cells.
+# Build fresh images once; a resume must use the images recorded at warm-up.
 generate_compose "${arm_flags[0]}"
-compose build
+if (( ROUND_START == 1 )); then
+    compose build
+else
+    verify_resume_images
+fi
 if (( ROUND_START == 1 )); then
     printf 'warm-up (discarded)\n'
     for attempt in 1 2; do

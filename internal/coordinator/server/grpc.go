@@ -371,7 +371,7 @@ type Config struct {
 	Tracing         tracing.Config
 	EnableRequestID bool
 	// SchedulerType selects the scheduler implementation.
-	// Valid: "leastloaded" (default), "sed", "p90", "sed-p90", "simple", "p2c",
+	// Valid: "leastloaded" (default), "sed", "p90", "sed-p90", "ewma", "simple", "p2c",
 	// "epsilon-greedy", "linucb", "hybrid-linucb", "hybrid-linucb-d", "heft", "icecc-fastest".
 	SchedulerType string
 	// SizeThreshold is the TaskContext.SourceSizeBytes cutoff in bytes for p90 arms.
@@ -383,9 +383,17 @@ type Config struct {
 	// Theoretical form is 1 + sqrt(ln(2/δ)/2); we default to 1.0 and
 	// expect empirical tuning. Ignored for non-LinUCB schedulers.
 	AlphaValue float64
-	// WarmStartTasks is the hybrid-linucb warm-start window: that many
-	// initial dispatches are routed least-loaded while the bandit learns
-	// passively. 0 disables warm-start. Ignored by other schedulers.
+	// FeatureSetValue selects full or compact LinUCB features.
+	FeatureSetValue string
+	// RewardCenterValue selects the residual reward baseline for hybrid LinUCB.
+	RewardCenterValue string
+	// DiagCandidates records the score decomposition for each LinUCB candidate.
+	DiagCandidates bool
+	// EwmaAlphaValue is the EWMA scheduler's smoothing factor.
+	EwmaAlphaValue float64
+	// WarmStartTasks is the hybrid-linucb and ewma warm-start window: that
+	// many initial dispatches are routed least-loaded while learning from
+	// outcomes. 0 disables warm-start. Ignored by other schedulers.
 	WarmStartTasks int
 	// LoadPenaltyValue is the hybrid-linucb λ in p = mean + bonus −
 	// λ·loadRatio. 0 disables the penalty. Ignored by other schedulers.
@@ -421,6 +429,9 @@ func DefaultConfig() Config {
 
 		DiscountValue:     0.98,
 		DiscountModeValue: "global",
+		FeatureSetValue:   "full",
+		RewardCenterValue: "none",
+		EwmaAlphaValue:    0.2,
 
 		DispatchQueueTimeout: 30 * time.Second,
 	}
@@ -452,6 +463,9 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 			Registry:       reg,
 			CircuitChecker: cm,
 			Alpha:          cfg.AlphaValue,
+			FeatureSet:     cfg.FeatureSetValue,
+			RewardCenter:   cfg.RewardCenterValue,
+			DiagCandidates: cfg.DiagCandidates,
 		})
 	case "hybrid-linucb":
 		// Pass-through without zero-defaulting so --warm-start=0 or
@@ -461,6 +475,9 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 			Registry:       reg,
 			CircuitChecker: cm,
 			Alpha:          cfg.AlphaValue,
+			FeatureSet:     cfg.FeatureSetValue,
+			RewardCenter:   cfg.RewardCenterValue,
+			DiagCandidates: cfg.DiagCandidates,
 			WarmStartTasks: cfg.WarmStartTasks,
 			LoadPenalty:    cfg.LoadPenaltyValue,
 		})
@@ -477,6 +494,9 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 			Registry:       reg,
 			CircuitChecker: cm,
 			Alpha:          cfg.AlphaValue,
+			FeatureSet:     cfg.FeatureSetValue,
+			RewardCenter:   cfg.RewardCenterValue,
+			DiagCandidates: cfg.DiagCandidates,
 			WarmStartTasks: cfg.WarmStartTasks,
 			LoadPenalty:    cfg.LoadPenaltyValue,
 			Discount:       discount,
@@ -491,6 +511,13 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 		return scheduler.NewSEDScheduler(scheduler.SEDConfig{
 			Registry:       reg,
 			CircuitChecker: cm,
+		})
+	case "ewma":
+		return scheduler.NewEWMAScheduler(scheduler.EWMAConfig{
+			Registry:       reg,
+			CircuitChecker: cm,
+			WarmStartTasks: cfg.WarmStartTasks,
+			Alpha:          cfg.EwmaAlphaValue,
 		})
 	case "p90":
 		return scheduler.NewP90Scheduler(reg, cfg.SizeThreshold)
@@ -1185,6 +1212,8 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 			ReceivedTS:                  start.UTC(),
 			WorkerAddress:               worker.Address,
 			Candidates:                  candidates,
+			LinUCBCandidates:            dispatchInfo.Candidates,
+			RewardOffset:                dispatchInfo.RewardOffset,
 			TaskID:                      req.TaskId,
 			BuildType:                   "cpp",
 			BuildID:                     buildID,

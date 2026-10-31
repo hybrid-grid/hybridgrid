@@ -55,6 +55,23 @@ type DispatchInfo struct {
 	// (uniform random for ε-greedy). Lets evaluation split traffic into
 	// explore vs exploit windows.
 	WasExploration bool
+	// Candidates contains all scored workers in decision order. It is nil
+	// unless LinUCB diagnostics are enabled on a bandit decision.
+	Candidates []CandidateDiag
+	// RewardOffset is the frozen pooled warm-start baseline, or zero before freeze.
+	RewardOffset float64
+}
+
+// CandidateDiag is the per-candidate score decomposition recorded when diagnostics are on.
+type CandidateDiag struct {
+	Address     string    `json:"address"`
+	Mean        float64   `json:"mean"`
+	Bonus       float64   `json:"bonus"`
+	LoadPenalty float64   `json:"load_penalty"`
+	P           float64   `json:"p"`
+	XAinvX      float64   `json:"x_ainv_x"`
+	ArmCount    int64     `json:"arm_count"`
+	X           []float64 `json:"x"`
 }
 
 // LearningScheduler extends Scheduler with an online-learning loop.

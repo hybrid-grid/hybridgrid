@@ -44,6 +44,46 @@ class StatisticsTests(unittest.TestCase):
 
 
 class MetricTests(unittest.TestCase):
+    def test_drift_at_from_meta_sets_lower_acceptance_bound(self):
+        for onset, drift_at, accepted in ((120, "131", False), (131, "131", True),
+                                          (100, None, False), (101, None, True)):
+            with self.subTest(onset=onset, drift_at=drift_at), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                meta = {"ARMS": "leastloaded", "REPS": "1", "DRIFT": "permanent"}
+                if drift_at is not None:
+                    meta["DRIFT_AT"] = drift_at
+                (root / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+                (root / "results.csv").write_text(
+                    "arm,round,elapsed_s\nleastloaded,1,10\n", encoding="utf-8")
+                records = [task(sequence=1), {"event": "injected_event", "kind": "drift_on",
+                                               "dispatch_count": onset, "target": "worker-5:50051"}]
+                (root / "tasks_leastloaded_round1.jsonl").write_text(
+                    "\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8")
+                cells, dropped, _ = analyze.load_cells(root)
+                self.assertEqual(cells.empty, not accepted)
+                if accepted:
+                    self.assertFalse(dropped)
+                else:
+                    self.assertIn(f"drift_on before dispatch {drift_at or 101}", dropped[0])
+
+    def test_exact_task_cardinality(self):
+        tasks = [dict(task(sequence=sequence), build_id=f"arm-r1-b{build}-c1")
+                 for build in (1, 2) for sequence in range((build - 1) * 3 + 1, build * 3 + 1)]
+        self.assertEqual(checks.check_task_cardinality(tasks, 3, 2), [])
+        wrong = [dict(item) for item in tasks]
+        wrong[0]["dispatch_seq"] = 2
+        self.assertTrue(any("dispatch_seq" in reason for reason in
+                            checks.check_task_cardinality(wrong, 3, 2)))
+        wrong = [dict(item) for item in tasks]
+        wrong[0]["success"] = False
+        reasons = checks.check_task_cardinality(wrong, 3, 2)
+        self.assertTrue(any("build 1" in reason for reason in reasons))
+        self.assertTrue(any("failed tasks" in reason for reason in reasons))
+        wrong = [dict(item) for item in tasks]
+        wrong[0]["build_id"] = "unknown"
+        self.assertTrue(any("build_id" in reason for reason in
+                            checks.check_task_cardinality(wrong, 3, 2)))
+
     def test_exp3_top5_ceiling_ties_strength_and_last_finisher(self):
         candidates = [
             {"address": "w1", "active": 0, "max_parallel": 1, "cpu_millis": 600},
@@ -161,6 +201,43 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(values["drift_phase_2_off_share"], 0)
         self.assertEqual(values["target_after_recovery_share"], 0)
 
+    def test_pipe_delimited_drift_targets_across_metrics(self):
+        targets = "worker-4:50051|worker-5:50051"
+        candidates = [
+            {"address": "worker-4:50051", "active": 0, "max_parallel": 1,
+             "cpu_millis": 500},
+            {"address": "worker-5:50051", "active": 0, "max_parallel": 1,
+             "cpu_millis": 1000},
+            {"address": "other:50051", "active": 0, "max_parallel": 1,
+             "cpu_millis": 1500},
+        ]
+        addresses = ["worker-4:50051", "worker-5:50051",
+                     "worker-4:50051", "worker-5:50051", "other:50051",
+                     "other:50051", "worker-5:50051", "other:50051"]
+        tasks = [task(address, sequence, candidates=candidates)
+                 for sequence, address in enumerate(addresses, 101)]
+        events = [{"kind": "drift_on", "dispatch_count": 102, "target": targets},
+                  {"kind": "drift_off", "dispatch_count": 105, "target": targets}]
+        values = analyze.drift_metrics(tasks, events, "fallback:50051", 2, 0.25)
+        self.assertEqual(values["drift_pre_share"], 1)
+        self.assertEqual(values["drift_pre_all_share"], 1)
+        self.assertEqual(values["drift_post_share"], 0.5)
+        self.assertEqual(values["drift_post_early_share"], 0.5)
+        self.assertEqual(values["excess_target_share_pre"], 0.5)
+        self.assertEqual(values["excess_target_share_post"], 0)
+        self.assertEqual(values["time_to_adapt"], "4")
+        self.assertEqual(values["time_to_adapt_rank"], 4)
+        self.assertEqual(values["drift_phase_1_on_share"], 2 / 3)
+        self.assertEqual(values["drift_phase_2_off_share"], 1 / 3)
+        self.assertEqual(values["drift_on_phases_n"], 3)
+        self.assertEqual(values["drift_on_phases_target_n"], 2)
+        self.assertEqual(values["drift_off_phases_n"], 3)
+        self.assertEqual(values["drift_off_phases_target_n"], 1)
+        self.assertEqual(values["drift_on_phases_share"], 2 / 3)
+        self.assertEqual(values["drift_off_phases_share"], 1 / 3)
+        self.assertEqual(values["target_after_recovery_tasks"], 1)
+        self.assertEqual(values["target_after_recovery_share"], 1 / 3)
+
     def test_drift_references_counts_early_late_and_excess(self):
         candidates = [{"address": "target", "active": 0, "max_parallel": 1,
                        "cpu_millis": 1000},
@@ -265,10 +342,34 @@ class MetricTests(unittest.TestCase):
 
 
 class InputTests(unittest.TestCase):
+    def test_drift_target_metadata_fallback(self):
+        for configured, addresses, want_pre, want_post in (
+                ("worker-4,worker-5", ["worker-4:50051", "worker-5:50051",
+                                       "worker-5:50051", "other:50051"], 1, 0.5),
+                ("worker-5", ["worker-5:50051", "other:50051",
+                              "worker-5:50051", "other:50051"], 0.5, 0.5)):
+            with self.subTest(configured=configured), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "meta.json").write_text(
+                    json.dumps({"DRIFT_TARGET": configured}), encoding="utf-8")
+                (root / "results.csv").write_text(
+                    "arm,round,elapsed_s\nleastloaded,1,10\n", encoding="utf-8")
+                records = [task(address, sequence, ts=f"2026-01-01T00:00:{sequence - 100:02d}Z")
+                           for sequence, address in enumerate(addresses, 101)]
+                records.append({"event": "injected_event", "kind": "drift_on",
+                                "dispatch_count": 102})
+                (root / "tasks_leastloaded_round1.jsonl").write_text(
+                    "\n".join(json.dumps(record) for record in records) + "\n",
+                    encoding="utf-8")
+                cells, dropped, _ = analyze.load_cells(root)
+                self.assertFalse(dropped)
+                self.assertEqual(cells.iloc[0]["drift_pre_share"], want_pre)
+                self.assertEqual(cells.iloc[0]["drift_post_share"], want_post)
+
     def test_exp3_multi_build_clients_and_default_baselines(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            arms = ("leastloaded", "sed", "p90", "sed-p90", "hybrid-linucb")
+            arms = ("leastloaded", "sed", "p90", "sed-p90", "ewma", "hybrid-linucb")
             (root / "meta.json").write_text(json.dumps({"ARMS": list(arms), "REPS": 1,
                 "CLIENTS": 2, "SESSION_BUILDS": 2}), encoding="utf-8")
             with (root / "results.csv").open("w", newline="", encoding="utf-8") as handle:
@@ -325,7 +426,7 @@ class InputTests(unittest.TestCase):
                                   "pre_all", None)
             self.assertIn("cell-level metrics report the last build",
                           summary.read_text(encoding="utf-8"))
-            self.assertIn("leastloaded, sed, p90, and sed-p90",
+            self.assertIn("leastloaded, sed, p90, sed-p90, and ewma",
                           summary.read_text(encoding="utf-8"))
 
     def make_directory(self, root):
@@ -594,14 +695,68 @@ class InputTests(unittest.TestCase):
         self.assertEqual(parsed["discount"], 0.98)
         self.assertEqual(parsed["load_penalty"], 1.0)
         self.assertEqual(analyze.parse_arm("hybrid-linucb-l0")["load_penalty"], 0)
-        for label in ("p90", "sed-p90"):
+        self.assertEqual(analyze.parse_arm("hybrid-linucb-l500")["load_penalty"], 5)
+        self.assertEqual(analyze.parse_arm("hybrid-linucb-d-arm-g098-a010"), {
+            "base": "hybrid-linucb-d", "discount_mode": "arm", "discount": 0.98,
+            "load_penalty": 0.5, "alpha": 0.1, "ewma_alpha": None,
+            "reward_center": "none", "features": "full"})
+        for label, expected in (
+                ("hybrid-linucb-d-arm-rc", (None, None, "warm", "full")),
+                ("hybrid-linucb-d-arm-g098-a010-rc-fc", (0.1, None, "warm", "compact")),
+                ("hybrid-linucb-rc", (None, None, "warm", "full")),
+                ("linucb-a020", (0.2, None, "none", "full")),
+                ("ewma-a010", (None, 0.1, "none", "full")),
+                ("hybrid-linucb-fc", (None, None, "none", "compact")),
+                ("hybrid-linucb-d-g100-rc", (None, None, "warm", "full")),
+                ("hybrid-linucb-a999", (9.99, None, "none", "full"))):
+            with self.subTest(label=label):
+                options = analyze.parse_arm(label)
+                self.assertEqual(tuple(options[key] for key in
+                    ("alpha", "ewma_alpha", "reward_center", "features")), expected)
+        for label in ("p90", "sed-p90", "ewma"):
             self.assertEqual(analyze.parse_arm(label)["base"], label)
+            self.assertEqual(analyze.parse_arm(label)["reward_center"], "none")
+            self.assertEqual(analyze.parse_arm(label)["features"], "full")
         for bad in ("sed-g095", "leastloaded-l025", "hybrid-linucb-d-l025-g095",
                     "hybrid-linucb-d-g999", "hybrid-linucb-d-unknown",
                     "p90-arm", "p90-g095", "p90-l025", "sed-p90-arm",
-                    "sed-p90-g095", "sed-p90-l025"):
+                    "sed-p90-g095", "sed-p90-l025", "ewma-arm", "ewma-g095", "ewma-l025",
+                    "ewma-rc", "sed-a010", "hybrid-linucb-d-rc", "leastloaded-fc",
+                    "ewma-a000", "ewma-a101", "hybrid-linucb-a000",
+                    "hybrid-linucb-rc-a010", "linucb-a1000", "ewma-fc",
+                    "hybrid-linucb-d-a010-g098"):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 analyze.parse_arm(bad)
+        with self.assertRaises(ValueError):
+            analyze.parse_arm("hybrid-linucb-d-arm-rc", warm_start=0)
+        with self.assertRaises(ValueError):
+            analyze.parse_arm("hybrid-linucb-rc", warm_start=0)
+
+    def test_alpha_centering_and_features_keep_arm_labels_distinct(self):
+        arms = ("leastloaded", "hybrid-linucb-d-arm-g098-a010",
+                "hybrid-linucb-d-arm-g098-a010-rc-fc")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "meta.json").write_text(json.dumps({"ARMS": list(arms),
+                "REPS": 1, "WARM_START": 100}), encoding="utf-8")
+            with (root / "results.csv").open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(("arm", "round", "elapsed_s"))
+                for index, arm in enumerate(arms):
+                    writer.writerow((arm, 1, 10 - index))
+                    (root / f"tasks_{arm}_round1.jsonl").write_text(
+                        json.dumps(task()) + "\n", encoding="utf-8")
+            cells, dropped, _ = analyze.load_cells(root)
+            self.assertFalse(dropped)
+            self.assertEqual(set(cells["arm"]), set(arms))
+            pairs = analyze.compare(cells, None, None)
+            self.assertEqual(set(pairs["treatment"]), set(arms[1:]))
+            summary = root / "summary.md"
+            analyze.write_summary(summary, cells, pairs, [], [], 20, 0.5,
+                                  "pre_all", None)
+            written = summary.read_text(encoding="utf-8")
+            for arm in arms:
+                self.assertIn(arm, written)
 
 
 if __name__ == "__main__":

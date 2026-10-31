@@ -76,10 +76,17 @@ type LinUCBScheduler struct {
 	latencyTracker *metrics.LatencyTracker
 	alpha          float64
 	dim            int
+	featureSet     string
+	rewardCenter   string
+	diagCandidates bool
+	rewardOffset   float64
+	centerFrozen   bool
+	warmOutcomes   []warmOutcome
 
 	// warmStartTasks configures the Hybrid-LinUCB warm-start window:
 	// dispatches 1..N are routed by the least-loaded heuristic while
-	// the bandit learns passively from their outcomes. 0 = pure LinUCB.
+	// the bandit learns passively from their outcomes. Centering buffers
+	// those outcomes until N have arrived. 0 = pure LinUCB.
 	warmStartTasks int64
 	// loadPenalty is λ in the hybrid score p = mean + bonus − λ·loadRatio.
 	// It acts as a hand-coded prior on the load feature: the model
@@ -126,6 +133,14 @@ type linUCBArm struct {
 	lastStep int64
 }
 
+type warmOutcome struct {
+	workerID string
+	x        *mat.VecDense
+	step     int64
+	hasStep  bool
+	reward   float64
+}
+
 // LinUCBConfig holds construction parameters.
 type LinUCBConfig struct {
 	Registry       registry.Registry
@@ -141,14 +156,22 @@ type LinUCBConfig struct {
 	WarmStartTasks int
 	// LoadPenalty is the Hybrid-LinUCB λ coefficient. Zero (the
 	// default) keeps pure-LinUCB behavior.
-	LoadPenalty  float64
-	Discount     float64
-	DiscountMode DiscountMode
+	LoadPenalty    float64
+	Discount       float64
+	DiscountMode   DiscountMode
+	FeatureSet     string
+	RewardCenter   string
+	DiagCandidates bool
 }
 
-// NewLinUCBScheduler constructs the scheduler. The feature dimension
-// is fixed at the value returned by featureDim() to keep the state
-// shape stable across the cluster's lifetime.
+// ValidFeatureSet reports whether a feature layout is supported.
+func ValidFeatureSet(s string) bool { return s == "" || s == "full" || s == "compact" }
+
+// ValidRewardCenter reports whether a reward centering mode is supported.
+func ValidRewardCenter(s string) bool { return s == "" || s == "none" || s == "warm" }
+
+// NewLinUCBScheduler constructs the scheduler. The selected feature
+// dimension stays fixed across the cluster's lifetime.
 //
 // Default α is 0.5. The Li 2010 theoretical form (Eq. 4) is
 // "conservatively large in some applications" per the paper itself;
@@ -187,12 +210,28 @@ func NewLinUCBScheduler(cfg LinUCBConfig) *LinUCBScheduler {
 		// Empty and unknown library values use the global clock.
 		mode = DiscountModeGlobal
 	}
+	featureSet := cfg.FeatureSet
+	if !ValidFeatureSet(featureSet) || featureSet == "" {
+		featureSet = "full"
+	}
+	dim := featureDim()
+	if featureSet == "compact" {
+		dim = 4
+	}
+	rewardCenter := cfg.RewardCenter
+	if !ValidRewardCenter(rewardCenter) || rewardCenter == "" ||
+		(rewardCenter == "warm" && (warmStart == 0 || (discount != 0 && mode != DiscountModeArm))) {
+		rewardCenter = "none"
+	}
 	return &LinUCBScheduler{
 		registry:          cfg.Registry,
 		circuitChecker:    cfg.CircuitChecker,
 		latencyTracker:    lt,
 		alpha:             alpha,
-		dim:               featureDim(),
+		dim:               dim,
+		featureSet:        featureSet,
+		rewardCenter:      rewardCenter,
+		diagCandidates:    cfg.DiagCandidates,
 		warmStartTasks:    int64(warmStart),
 		loadPenalty:       loadPenalty,
 		discount:          discount,
@@ -219,6 +258,15 @@ func (s *LinUCBScheduler) Params() string {
 			params += " discount_effective=off"
 		}
 	}
+	if s.featureSet == "compact" {
+		params += " features=compact"
+	}
+	if s.rewardCenter == "warm" {
+		params += " reward_center=warm"
+	}
+	if s.diagCandidates {
+		params += " diag_candidates=on"
+	}
 	return params
 }
 
@@ -231,26 +279,32 @@ func (s *LinUCBScheduler) Select(buildType pb.BuildType, arch pb.Architecture, c
 
 // SelectWithDispatchInfo implements LearningScheduler. It computes
 // p_{t,a} for every eligible worker and returns argmax along with the
-// score (Q value) and an exploration flag. We mark a dispatch as
-// "exploration" when the chosen arm's UCB bonus exceeds its mean term —
-// i.e. selection was driven by uncertainty rather than learned value.
+// score (Q value) and an exploration flag. Exploration means the UCB
+// winner differs from the penalized-mean winner.
 //
 // In hybrid mode (warmStartTasks/loadPenalty non-zero) the score is
 // p = θ̂ᵀx + α√(xᵀA⁻¹x) − λ·loadRatio, and the first warmStartTasks
-// dispatches are delegated to the least-loaded heuristic while the
-// bandit observes their outcomes (docs/thesis/hybrid_linucb_proposal.md).
+// dispatches are delegated to the least-loaded heuristic. Centered mode
+// keeps using that heuristic until enough outcomes have completed.
 func (s *LinUCBScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb.Architecture, clientOS string, ctx TaskContext) (*registry.WorkerInfo, DispatchInfo, error) {
 	candidates, err := s.eligibleWorkers(buildType, arch, clientOS)
 	if err != nil {
 		return nil, DispatchInfo{}, err
 	}
 	n := atomic.AddInt64(&s.totalDispatches, 1)
+	var offset float64
+	var frozen bool
+	if s.rewardCenter == "warm" {
+		s.mu.Lock()
+		offset, frozen = s.rewardOffset, s.centerFrozen
+		s.mu.Unlock()
+	}
 	if len(candidates) == 1 {
 		// Fast path: no choice. Skip matrix ops entirely.
-		return candidates[0], DispatchInfo{QValueAtDispatch: 0, WasExploration: false}, nil
+		return candidates[0], DispatchInfo{QValueAtDispatch: 0, WasExploration: false, RewardOffset: offset}, nil
 	}
-	if s.warmStartTasks > 0 && n <= s.warmStartTasks {
-		return s.selectWarmStart(candidates, arch, ctx, n)
+	if (s.warmStartTasks > 0 && n <= s.warmStartTasks) || (s.rewardCenter == "warm" && !frozen) {
+		return s.selectWarmStart(candidates, arch, ctx, n, offset)
 	}
 
 	// Single pass: track argmax over (mean−λ·lr+bonus) for selection and
@@ -263,11 +317,26 @@ func (s *LinUCBScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb
 	var bestMeanID string
 	bestP := math.Inf(-1)
 	bestMean := math.Inf(-1)
+	var diagnostics []CandidateDiag
+	if s.diagCandidates {
+		diagnostics = make([]CandidateDiag, 0, len(candidates))
+	}
 	for _, w := range candidates {
 		x := s.featureVector(w, arch, ctx)
-		mean, bonus := s.score(w.ID, x)
-		penalized := mean - s.loadPenalty*loadRatio(w)
+		mean, bonus, xAinvX, count := s.scoreDetailed(w.ID, x)
+		penalty := s.loadPenalty * loadRatio(w)
+		penalized := mean - penalty
 		p := penalized + bonus
+		if s.diagCandidates {
+			values := make([]float64, s.dim)
+			for i := range values {
+				values[i] = x.AtVec(i)
+			}
+			diagnostics = append(diagnostics, CandidateDiag{
+				Address: w.Address, Mean: mean, Bonus: bonus, LoadPenalty: penalty,
+				P: p, XAinvX: xAinvX, ArmCount: count, X: values,
+			})
+		}
 		if p > bestP {
 			bestP = p
 			best = w
@@ -291,15 +360,19 @@ func (s *LinUCBScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb
 		s.mu.Unlock()
 	}
 
-	return best, DispatchInfo{QValueAtDispatch: bestP, WasExploration: wasExploration}, nil
+	q := bestP
+	if frozen {
+		q += offset
+	}
+	return best, DispatchInfo{QValueAtDispatch: q, WasExploration: wasExploration,
+		Candidates: diagnostics, RewardOffset: offset}, nil
 }
 
 // selectWarmStart routes a warm-start dispatch to the least-loaded
 // candidate (min ActiveTasks, first-wins tie-break — mirroring
-// LeastLoadedScheduler.Select) while the bandit learns passively: the
-// chosen worker's feature vector is cached in pendingX so RecordOutcome
-// applies the normal rank-1 update, exactly as if the bandit had made
-// the choice itself.
+// LeastLoadedScheduler.Select). The chosen feature vector is cached in
+// pendingX. Centered mode buffers warm outcomes before replay; default
+// mode applies each outcome immediately.
 //
 // DispatchInfo semantics: QValueAtDispatch reports the learner's hybrid
 // score for the delegated choice so offline analysis can watch Q
@@ -310,7 +383,7 @@ func (s *LinUCBScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb
 // Lock ordering: s.score locks s.mu internally, so it must complete
 // before the pendingX store takes s.mu — never call it with the lock
 // held.
-func (s *LinUCBScheduler) selectWarmStart(candidates []*registry.WorkerInfo, arch pb.Architecture, ctx TaskContext, n int64) (*registry.WorkerInfo, DispatchInfo, error) {
+func (s *LinUCBScheduler) selectWarmStart(candidates []*registry.WorkerInfo, arch pb.Architecture, ctx TaskContext, n int64, offset float64) (*registry.WorkerInfo, DispatchInfo, error) {
 	chosen := candidates[0]
 	for _, w := range candidates[1:] {
 		if w.ActiveTasks < chosen.ActiveTasks {
@@ -331,12 +404,20 @@ func (s *LinUCBScheduler) selectWarmStart(candidates []*registry.WorkerInfo, arc
 		s.mu.Unlock()
 	}
 
-	return chosen, DispatchInfo{QValueAtDispatch: q, WasExploration: true}, nil
+	if offset != 0 {
+		q += offset
+	}
+	return chosen, DispatchInfo{QValueAtDispatch: q, WasExploration: true, RewardOffset: offset}, nil
 }
 
 // score returns the mean estimate (θ̂^T x) and the UCB exploration bonus
 // (α √(x^T A^{-1} x)) for the given arm and context.
 func (s *LinUCBScheduler) score(workerID string, x *mat.VecDense) (mean, bonus float64) {
+	mean, bonus, _, _ = s.scoreDetailed(workerID, x)
+	return mean, bonus
+}
+
+func (s *LinUCBScheduler) scoreDetailed(workerID string, x *mat.VecDense) (mean, bonus, xAinvX float64, count int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	arm := s.armForLocked(workerID)
@@ -366,7 +447,7 @@ func (s *LinUCBScheduler) score(workerID string, x *mat.VecDense) (mean, bonus f
 		q = 0
 	}
 	bonus = s.alpha * math.Sqrt(q)
-	return mean, bonus
+	return mean, bonus, q, arm.count
 }
 
 // RecordOutcome implements LearningScheduler. It applies the rank-1
@@ -395,7 +476,37 @@ func (s *LinUCBScheduler) RecordOutcome(workerID string, reward float64, _ bool,
 		// post-completion feature vector.
 		return
 	}
+	if s.rewardCenter == "warm" && !s.centerFrozen {
+		s.warmOutcomes = append(s.warmOutcomes, warmOutcome{
+			workerID: workerID, x: x, step: step, hasStep: hasStep, reward: reward,
+		})
+		if int64(len(s.warmOutcomes)) < s.warmStartTasks {
+			// Without W recorded outcomes the scheduler remains in phase 1.
+			return
+		}
+		var total float64
+		for _, outcome := range s.warmOutcomes {
+			total += outcome.reward
+		}
+		s.rewardOffset = total / float64(len(s.warmOutcomes))
+		s.centerFrozen = true
+		for _, outcome := range s.warmOutcomes {
+			s.applyOutcomeLocked(outcome.workerID, outcome.x, outcome.step,
+				outcome.hasStep, outcome.reward-s.rewardOffset)
+		}
+		s.warmOutcomes = nil
+		return
+	}
+	if s.rewardCenter == "warm" {
+		reward -= s.rewardOffset
+	}
+	s.applyOutcomeLocked(workerID, x, step, hasStep, reward)
+}
 
+// applyOutcomeLocked is the common update path for live and replayed outcomes.
+// The caller holds s.mu; reward is already on the model's target scale.
+func (s *LinUCBScheduler) applyOutcomeLocked(workerID string, x *mat.VecDense, step int64, hasStep bool, reward float64) {
+	var ok bool
 	if s.discount > 0 {
 		arm, exists := s.arms[workerID]
 		if !exists {
@@ -837,6 +948,15 @@ func (s *LinUCBScheduler) featureVector(w *registry.WorkerInfo, targetArch pb.Ar
 		logSize = 1.0
 	}
 	x.SetVec(1, logSize)
+	if s.featureSet == "compact" {
+		x.SetVec(2, loadRatio(w))
+		rawSize := math.Log1p(float64(ctx.RawSourceSizeBytes)) / rawSizeNormDenom
+		if rawSize > 1.0 {
+			rawSize = 1.0
+		}
+		x.SetVec(3, rawSize)
+		return x
+	}
 
 	// target arch one-hot (build type omitted — see featureDim doc).
 	switch targetArch {
