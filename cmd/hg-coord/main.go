@@ -73,6 +73,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			noMdns, _ := cmd.Flags().GetBool("no-mdns")
 			schedulerType, _ := cmd.Flags().GetString("scheduler")
 			taskLogPath, _ := cmd.Flags().GetString("task-log")
+			buildHistoryPath, _ := cmd.Flags().GetString("build-history")
 			dispatchQueueTimeout, _ := cmd.Flags().GetDuration("dispatch-queue-timeout")
 			epsilonValue, _ := cmd.Flags().GetFloat64("epsilon")
 			alphaValue, _ := cmd.Flags().GetFloat64("alpha")
@@ -258,6 +259,19 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			statsCtx, statsCancel := context.WithCancel(ctx)
 			defer statsCancel()
 			go teleSvc.RunStatsLoop(statsCtx)
+			if buildHistoryPath != "" {
+				if err := teleStore.EnablePersistence(statsCtx, buildHistoryPath); err != nil {
+					log.Warn().Err(err).Str("path", buildHistoryPath).
+						Msg("Build history disabled; starting with an empty history")
+				} else {
+					log.Info().Str("path", buildHistoryPath).Msg("Build history persistence enabled")
+				}
+			}
+			// Label the live scheduler AFTER loading history so the
+			// snapshot cannot overwrite this run's policy label.
+			if name, params := srv.SchedulerInfo(); name != "" {
+				teleStore.SetScheduler(name, params)
+			}
 
 			// Handle shutdown signals
 			sigCh := make(chan os.Signal, 1)
@@ -354,6 +368,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 	serveCmd.Flags().StringSlice("event-webhook", nil, "HTTP webhook URL(s) receiving task events (repeatable)")
 	serveCmd.Flags().String("event-webhook-secret", "", "Shared secret HMAC-SHA256-signing every webhook delivery (X-Hybridgrid-Signature header)")
 	serveCmd.Flags().String("task-log", "", "Path to per-task JSON Lines log file (default: stdout)")
+	serveCmd.Flags().String("build-history", "", "Persist build history to this JSON file and reload it on start (default: off)")
 	serveCmd.Flags().Float64("epsilon", 0.1, "Exploration rate for epsilon-greedy scheduler (in [0, 1]; ignored otherwise)")
 	serveCmd.Flags().Float64("alpha", 1.0, "LinUCB exploration coefficient α (in [0, 10]; ignored for other schedulers)")
 	serveCmd.Flags().Int("warm-start", 100, "Hybrid-LinUCB warm-start dispatch count (>= 0; ignored for other schedulers)")

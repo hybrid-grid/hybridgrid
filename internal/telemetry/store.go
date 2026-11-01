@@ -19,6 +19,19 @@ type Store struct {
 	buildTruncated map[string]bool
 	recentEvents   []*TaskInfo
 
+	// Scheduler labels: the coordinator's active policy is stamped
+	// onto every build created while it runs, so history survives
+	// scheduler changes across coordinator restarts.
+	scheduler       string
+	schedulerParams string
+	stamps          map[string]buildStamp
+
+	// Persistence: when enabled, the retained task set plus build
+	// stamps are written to historyPath whenever state changed, and
+	// reloaded on startup.
+	historyPath string
+	dirty       bool
+
 	maxBuilds        int
 	maxTasksTotal    int
 	maxTasksPerBuild int
@@ -32,12 +45,23 @@ func NewStore() *Store {
 		tasks:            make(map[string]*TaskInfo),
 		buildTasks:       make(map[string][]string),
 		buildTruncated:   make(map[string]bool),
+		stamps:           make(map[string]buildStamp),
 		recentEvents:     make([]*TaskInfo, 0, 100),
 		maxBuilds:        100,
 		maxTasksTotal:    20000,
 		maxTasksPerBuild: 5000,
 		maxEvents:        100,
 	}
+}
+
+// SetScheduler records the coordinator's active scheduling policy;
+// every build created from now on is labelled with it.
+func (s *Store) SetScheduler(name, params string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.scheduler = name
+	s.schedulerParams = params
+	s.markDirty()
 }
 
 // RecordTask records the latest state of one task and updates build
@@ -76,6 +100,7 @@ func (s *Store) RecordTask(task *TaskInfo) {
 	for len(s.tasks) > s.maxTasksTotal {
 		s.evictOldestTask()
 	}
+	s.markDirty()
 }
 
 // Tasks returns the latest state of each task, newest first.
@@ -145,6 +170,10 @@ func (s *Store) BuildDetail(buildID string) (*BuildInfo, []*TaskInfo, bool) {
 // the read lock.
 func (s *Store) buildInfo(buildID string) *BuildInfo {
 	build := &BuildInfo{ID: buildID, Status: "completed", Truncated: s.buildTruncated[buildID]}
+	if stamp, ok := s.stamps[buildID]; ok {
+		build.Scheduler = stamp.Scheduler
+		build.SchedulerParams = stamp.Params
+	}
 	for _, task := range s.tasks {
 		if task.BuildID != buildID {
 			continue
@@ -195,6 +224,9 @@ func (s *Store) ensureBuild(buildID string) {
 	}
 	s.buildTasks[buildID] = make([]string, 0)
 	s.buildOrder = append(s.buildOrder, buildID)
+	if s.scheduler != "" {
+		s.stamps[buildID] = buildStamp{Scheduler: s.scheduler, Params: s.schedulerParams}
+	}
 }
 
 func (s *Store) evictOldestBuild() {
@@ -205,12 +237,14 @@ func (s *Store) evictOldestBuild() {
 	s.buildOrder = s.buildOrder[1:]
 	delete(s.buildTasks, buildID)
 	delete(s.buildTruncated, buildID)
+	delete(s.stamps, buildID)
 	for id, task := range s.tasks {
 		if task.BuildID == buildID {
 			delete(s.tasks, id)
 		}
 	}
 	s.removeMissingTasksFromOrder()
+	s.markDirty()
 }
 
 func (s *Store) evictOldestTask() {

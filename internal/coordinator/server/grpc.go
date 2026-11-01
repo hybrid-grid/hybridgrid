@@ -781,6 +781,14 @@ func (s *Server) SetEventNotifier(notifier EventNotifier) {
 	s.eventNotifier = notifier
 }
 
+// SchedulerInfo reports the active scheduler type and its parameter
+// string — the same values the task log records — so out-of-process
+// consumers (telemetry, dashboard) can label builds with the policy
+// that produced them.
+func (s *Server) SchedulerInfo() (string, string) {
+	return s.config.SchedulerType, s.schedulerParams
+}
+
 // SetTelemetry attaches a telemetry service to the coordinator gRPC
 // server. Must be called before Start; the service is registered on
 // the same port as the build plane.
