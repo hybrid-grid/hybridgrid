@@ -10,7 +10,7 @@
 
 ## Abstract
 
-This paper presents Hybrid-Grid, an open-source distributed compilation system for C/C++, and **HG-LinUCB-D**, the learning scheduler at its centre. Building the system taught us that the hard part of distributed compilation is deciding which worker each translation unit should go to — and that this decision gets hard when a worker's advertised capacity stops describing how fast it actually runs, as happens when a workstation's owner starts a render or a build of their own. HG-LinUCB-D extends our contextual-bandit scheduler with **per-worker exponential forgetting**, so that each worker's model is dominated by its recent compile outcomes. We evaluate it on abseil-cpp over five heterogeneous Docker workers at three concurrent jobs, with two workers silently losing CPU to background contention. With the implementation frozen before measurement, HG-LinUCB-D (γ = 0.80) reduces second-build time by 21.7% against LeastLoaded, 29.9% against SED and 9.0% against γ = 0.98 over 15 blocks, and by 30.7%, 30.3% and 11.0% over 10 blocks of a partially held-out scenario, faster than all three in every block (Holm-adjusted p ≤ 0.0078). Dispatch traces show reduced exposure to degraded workers: under HG-LinUCB-D they received a median 2.6–3.3% of build-2 tasks, versus 24–26% under LeastLoaded and 34–39% under SED. The scenario was identified through exploratory experiments, and our conclusions are limited to it.
+This paper presents Hybrid-Grid, an open-source distributed compilation system for C/C++, and **HG-LinUCB-D**, the learning scheduler at its centre. Building the system taught us that the hard part of distributed compilation is deciding which worker each translation unit should go to — and that this decision gets hard when a worker's advertised capacity stops describing how fast it actually runs, as happens when a workstation's owner starts a render or a build of their own. HG-LinUCB-D extends our contextual-bandit scheduler with **per-worker exponential forgetting**, so that each worker's model is dominated by its recent compile outcomes. We evaluate it on abseil-cpp over five heterogeneous Docker workers at three concurrent jobs, with two workers silently losing CPU to background contention. With the implementation frozen before measurement, HG-LinUCB-D with discount factor γ = 0.80 reduces second-build time by 21.7% against LeastLoaded, 29.9% against SED and 9.0% against γ = 0.98 over 15 blocks, and by 30.7%, 30.3% and 11.0% over 10 blocks of a partially held-out scenario, faster than all three in every block (Holm-adjusted p ≤ 0.0078). Dispatch traces show reduced exposure to degraded workers: under HG-LinUCB-D they received a median 2.6–3.3% of build-2 tasks, versus 24–26% under LeastLoaded and 34–39% under SED. The scenario was identified through exploratory experiments, and our conclusions are limited to it.
 
 **Keywords:** distributed compilation; task scheduling; contextual bandit; non-stationary bandit; heterogeneous cluster; performance interference
 
@@ -44,11 +44,11 @@ Section 2 reviews related work. Section 3 describes Hybrid-Grid and Section 4 st
 
 ### 2.1. Heuristic scheduling on heterogeneous machines
 
-Lenstra, Shmoys and Tardos [1] proved $R||C_{\max}$ NP-hard with a $3/2$ approximation lower bound and gave a ratio-$2$ algorithm; the gap remains open after more than 35 years. In practice Power-of-Two-Choices [3] is the prominent heuristic: sampling two servers at random and choosing the less loaded one reduces maximum load from $\Theta(\log n / \log\log n)$ to $\Theta(\log\log n)$ on homogeneous clusters. Sparrow [4] extends P2C with late binding for low-latency decentralised scheduling. HEFT [5] ranks DAG tasks by upward rank and assigns them by earliest finish time, using estimates of each task's cost on each machine. Shortest-expected-delay rules, of which the SED baseline in Section 8 is an instance, weight queue length by advertised capacity. Queue-length and capacity-weighted rules have no explicit estimate of a machine's current speed; when that speed departs from what the machine declares, they notice it only through the side effect that slower tasks stay in the queue longer.
+Lenstra, Shmoys and Tardos [1] proved $R||C_{\max}$ NP-hard with a $3/2$ approximation lower bound and gave a ratio-$2$ algorithm; the gap remains open after more than 35 years. In practice Power-of-Two-Choices [3] is the prominent heuristic: sampling two servers at random and choosing the less loaded one reduces maximum load from $\Theta(\log m / \log\log m)$ to $\Theta(\log\log m)$ on homogeneous clusters of $m$ servers. Sparrow [4] extends P2C with late binding for low-latency decentralised scheduling. HEFT [5] ranks DAG tasks by upward rank and assigns them by earliest finish time, using estimates of each task's cost on each machine. Shortest-expected-delay rules, of which the SED baseline in Section 8 is an instance, weight queue length by advertised capacity. Queue-length and capacity-weighted rules have no explicit estimate of a machine's current speed; when that speed departs from what the machine declares, they notice it only through the side effect that slower tasks stay in the queue longer.
 
 ### 2.2. Multi-armed and contextual bandits
 
-The classical bandit framework is presented systematically in Sutton and Barto [6]; UCB1 [16] introduced optimism under uncertainty into arm selection, and Slivkins [7] and Lattimore–Szepesvári [8] systematise the regret theory. LinUCB [9] extends to the contextual setting: each arm maintains a linear model $(A_a, b_a)$ and is scored by $\hat{\theta}_a^\top x + \alpha\sqrt{x^\top A_a^{-1} x}$. A $\tilde{O}(\sqrt{Td})$ regret bound is proven for the SupLinUCB variant [10]; that bound does not apply directly to the LinUCB Algorithm 1 that real systems, including ours, implement.
+The classical bandit framework is presented systematically in Sutton and Barto [6]; UCB1 [16] introduced optimism under uncertainty into arm selection, and Slivkins [7] and Lattimore–Szepesvári [8] systematise the regret theory. LinUCB [9] extends to the contextual setting: each arm $a$ keeps ridge-regression statistics $(A_a, b_a)$ over $d$-dimensional contexts $x$, with estimate $\hat\theta_a = A_a^{-1} b_a$, and is scored by $\hat{\theta}_a^\top x + \alpha\sqrt{x^\top A_a^{-1} x}$, where $\alpha$ weights exploration. A $\tilde{O}(\sqrt{Hd})$ regret bound over $H$ rounds is proven for the SupLinUCB variant [10]; that bound does not apply directly to the basic LinUCB algorithm (Algorithm 1 of [9]) that real systems, including ours, implement.
 
 ### 2.3. Bandits that forget, and latency-aware selection
 
@@ -110,11 +110,11 @@ Two properties of this lifecycle shape Sections 5 and 7. First, the scheduler se
 
 ### 3.3. The coordinator's dispatch path
 
-With `make -jN` or `ninja -jN`, up to $N$ `Compile()` calls request a decision at once. The decision reads worker state (`ActiveTasks`) and the dispatch writes it back; if those were separate operations across goroutines, two dispatches could read the same stale count and overbook the same worker. Hybrid-Grid confines reading worker state, selecting a worker and recording the dispatch to **a single `dispatchLoop` goroutine** (Figure 2). Each `Compile()` call submits a request into a channel and waits; a Go channel already *is* a synchronised FIFO queue, so selection and booking are serialised against other dispatches without an additional lock around that pair of operations.
+With `make -jJ` or `ninja -jJ`, up to $J$ `Compile()` calls request a decision at once. The decision reads worker state (`ActiveTasks`) and the dispatch writes it back; if those were separate operations across goroutines, two dispatches could read the same stale count and overbook the same worker. Hybrid-Grid confines reading worker state, selecting a worker and recording the dispatch to **a single `dispatchLoop` goroutine** (Figure 2). Each `Compile()` call submits a request into a channel and waits; a Go channel already *is* a synchronised FIFO queue, so selection and booking are serialised against other dispatches without an additional lock around that pair of operations.
 
 ```mermaid
 flowchart LR
-    N["N concurrent<br/>Compile() calls"] --> CH["dispatch channel<br/>FIFO"]
+    N["J concurrent<br/>Compile() calls"] --> CH["dispatch channel<br/>FIFO"]
     CH --> LOOP["dispatchLoop<br/>a single goroutine"]
     subgraph INNER["inside the loop"]
         direction TB
@@ -140,9 +140,28 @@ Recording state *as of dispatch* rather than as of completion is a deliberate de
 
 ## 4. The Scheduling Problem
 
+**Notation.** The symbols below recur across sections; quantities used in one place only are defined where they appear.
+
+| Symbol | Meaning | Defined in |
+|---|---|---|
+| $t$, $w$, $w_t$ | task, candidate worker, worker selected for task $t$ | §4.1 |
+| $\mathcal{W}$, $\mathcal{W}_t$, $m$ | worker pool, eligible candidates for task $t$, number of workers | §4.1 |
+| $x_{t,w}$, $d$ | context of task $t$ on worker $w$, frozen at dispatch; its dimension, $d = 12$ | §4.3, Table 1 |
+| $T_{t,w}$, $T_t$ | compile time of task $t$ on worker $w$; observed time $T_t = T_{t,w_t}$, in ms | §4.1, §4.3 |
+| $r_t$ | reward of task $t$ | §4.3 |
+| $A_w$, $b_w$, $\hat\theta_w$, $I_d$ | worker $w$'s ridge matrix, reward-weighted context sum and coefficient estimate; the $d \times d$ identity | §5.1 |
+| $Q_t(w)$ | selection score of worker $w$ for task $t$ | §5.2 |
+| $\text{LoadRatio}_{t,w}$ | fraction of worker $w$'s slots busy when task $t$ is scored | §5.2, Table 1 |
+| $\alpha$, $\lambda$, $N$ | exploration weight, load-penalty weight, warm-start length (decisions) | §5.2 |
+| $\gamma$ | per-worker discount factor | §7.1 |
+| $n$; $x_{w,n}$, $r_{w,n}$ | index of worker $w$'s committed model updates; context and reward of its $n$-th update | §7.1 |
+| $D$ | scheduler's decision counter | Algorithm 1 |
+| $J$ | build-tool parallelism (`-jJ`) | §3.3 |
+| $k$ | dispatch position relative to the slowdown onset | §8.4 |
+
 ### 4.1. Statement
 
-Given heterogeneous workers $\mathcal{W} = \{1,\dots,m\}$ and a stream of compilation tasks released by the build tool as their dependencies complete, task $t$ has an execution time $p_{t,a}$ that depends on the assigned worker $a$ and on what else that worker is running, is unknown in advance, and is observable only after completion. The scheduler must choose $a_t \in \mathcal{W}_t$ when task $t$ is submitted, where $\mathcal{W}_t$ is the eligible set of Section 3.3, and each worker runs at most `MaxParallel`$_a$ tasks concurrently. For the remotely compiled tasks, the completion span is $C^{\text{compile}}_{\max} = \max_t C_t - t_{\text{start}}$; our primary metric is the end-to-end elapsed time of the build command, which additionally includes local preprocessing, linking and orchestration. The classical $R||C_{\max}$ model [1] is the abstract core of this problem; it does not capture task release over time, slot concurrency or contention inside a worker, all of which our system exhibits.
+Given heterogeneous workers $\mathcal{W} = \{1,\dots,m\}$ and a stream of compilation tasks released by the build tool as their dependencies complete, task $t$ has a compile time $T_{t,w}$ that depends on the assigned worker $w$ and on what else that worker is running, is unknown in advance, and is observable only after completion. The scheduler must choose a worker $w_t \in \mathcal{W}_t$ when task $t$ is submitted, where $\mathcal{W}_t$ is the eligible set of Section 3.3, and each worker runs at most `MaxParallel`$_w$ tasks concurrently. Our primary metric is the end-to-end elapsed time of the build command, including remote compilation, local preprocessing, linking and orchestration. The classical $R||C_{\max}$ model [1] is the abstract core of this problem; it does not capture task release over time, slot concurrency or contention inside a worker, all of which our system exhibits.
 
 Our evaluation cluster has $m = 5$ workers with CPU quotas of 0.5 / 0.6 / 0.8 / 1.0 / 1.1 cores and `MaxParallel` of 1 / 2 / 2 / 2 / 3, for 10 slots in total and a **2.2× capacity spread** between the strongest and weakest worker.
 
@@ -152,11 +171,11 @@ Our evaluation cluster has $m = 5$ workers with CPU quotas of 0.5 / 0.6 / 0.8 / 
 
 ### 4.3. Formulation
 
-At decision time $t$, the coordinator observes a context vector $x_{t,a} \in \mathbb{R}^d$ for each eligible worker $a \in \mathcal{W}_t$, selects $a_t$, dispatches the task, and on completion receives
+When task $t$ is scheduled, the coordinator observes a context vector $x_{t,w} \in \mathbb{R}^d$ ($d = 12$, Table 1) for each eligible worker $w \in \mathcal{W}_t$, selects $w_t$, dispatches the task, and on completion receives
 
-$$r_t = -\frac{\log\bigl(1 + T_{\text{compile}}^{(t)}\bigr)}{\log(1 + 120{,}000)},$$
+$$r_t = -\frac{\log(1 + T_t)}{\log(1 + 120\,000)},$$
 
-with the worker-reported compile time $T_{\text{compile}}$ in milliseconds. The log transform reduces the influence of long compiles, and the fixed denominator places a two-minute compile at $r = -1$. A failed task is scored with a synthetic duration of $\max(120\text{ s}, T_{\text{timeout}})$, where $T_{\text{timeout}}$ is the coordinator's request timeout (600 s in Section 8), so persistently broken workers are devalued with no separate rule; successful rewards are not clipped. This reward shape is an engineering choice with no direct peer-reviewed source; the closest theoretically motivated form is Decima's time-integrated reward [12].
+where $T_t = T_{t,w_t}$ is the worker-reported duration of a successful compile, as a number of milliseconds, and $\log$ is the natural logarithm. The log transform reduces the influence of long compiles, and the fixed denominator places a two-minute compile at $r_t = -1$. A failed task is scored by substituting the numerical millisecond value of $\max(120\text{ s}, T_{\text{timeout}})$ for $T_t$, where $T_{\text{timeout}}$ is the coordinator's request timeout (600 s in Section 8), so persistently broken workers are devalued with no separate rule; successful rewards are not clipped. This reward shape is an engineering choice with no direct peer-reviewed source; the closest theoretically motivated form is Decima's time-integrated reward [12].
 
 The system's `Scheduler` interface provides `Select(buildType, arch, clientOS) → (Worker, error)`; the extended `LearningScheduler` interface adds `SelectWithDispatchInfo`, which returns the score and per-candidate diagnostics for logging, and `RecordOutcome(workerID, reward, success, taskContext)`, whose task context carries the task ID under which the decision's frozen feature vector was stored. Heuristics implement only the first and need no modification.
 
@@ -174,7 +193,7 @@ This section presents the scheduler that HG-LinUCB-D builds on. Section 7 adds f
 
 ### 5.1. Disjoint LinUCB for worker selection
 
-We map each worker to an *arm* and use the disjoint model of Li et al. [9]: each worker $a$ has its own parameters, shared with no other — $A_a \in \mathbb{R}^{d\times d}$ initialised to $I_d$, $b_a \in \mathbb{R}^d$ initialised to $\mathbf{0}$, and the ridge-regression estimate $\hat{\theta}_a = A_a^{-1} b_a$. The disjoint model suits this problem: workers have separate execution environments and may respond differently to contention, so each model should learn how its own worker behaves. That property matters in Section 7: when one worker slows down, only that worker's model needs to change.
+We map each worker to an *arm* and use the disjoint model of Li et al. [9]: each worker $w$ has its own parameters, shared with no other — $A_w \in \mathbb{R}^{d\times d}$ initialised to the identity $I_d$, $b_w \in \mathbb{R}^d$ initialised to $\mathbf{0}$, and the ridge-regression estimate $\hat{\theta}_w = A_w^{-1} b_w$. The disjoint model suits this problem: workers have separate execution environments and may respond differently to contention, so each model should learn how its own worker behaves. That property matters in Section 7: when one worker slows down, only that worker's model needs to change.
 
 The context vector describes the *pair* (task, worker); Table 1 lists the layout. In the evaluation of Section 8 several dimensions are constant, and we mark them rather than let the table imply twelve active signals. Two deserve explicit notes: the RPC-latency feature stays at its default value because the latency tracker was never wired to the learner, and the raw-source-size feature is zero because the workload ships preprocessed sources only. The capacity features differ between workers but are constant within each worker's disjoint model.
 
@@ -183,28 +202,30 @@ The context vector describes the *pair* (task, worker); Table 1 lists the layout
 | # | Feature | Source | Normalisation | Varies in Section 8 |
 |---|---|---|---|---|
 | 0 | bias | — | constant 1.0 | no |
-| 1 | log source size sent | task | $\log(1+s)/\log(1+4\,\text{MiB})$ | yes |
+| 1 | log source size sent | task | $\log(1+s_t)/\log(1+4\,\text{MiB})$ | yes |
 | 2–3 | target arch one-hot (x86_64, arm64) | task | 0/1 | no |
-| 4 | worker CPU capacity | worker | $\log(1+m)/\log(1+16000)$, $m$ = cgroup milli-cores | across workers only |
-| 5 | worker memory | worker | $\log(1+b)/\log(1+64\,\text{GiB})$ | across workers only |
+| 4 | worker CPU capacity | worker | $\log(1+c_w)/\log(1+16000)$ | across workers only |
+| 5 | worker memory | worker | $\log(1+B_w)/\log(1+64\,\text{GiB})$ | across workers only |
 | 6 | native arch matches target | pair | 0/1 | no |
-| 7 | queue pressure (LoadRatio) | worker, instantaneous | active / max_parallel | yes |
-| 8 | recent RPC latency | worker, instantaneous | ms/100 | no (default value) |
+| 7 | queue pressure (LoadRatio) | worker, instantaneous | $\text{LoadRatio}_{t,w}$ = ActiveTasks / MaxParallel | yes |
+| 8 | recent RPC latency | worker, instantaneous | latency in ms / 100 | no (default value) |
 | 9 | task is C++ | task | 0/1 | no |
-| 10 | log raw source size | task | $\log(1+s_{\text{raw}})/\log(1+1\,\text{MiB})$ | no (zero) |
-| 11 | success rate (Laplace) | worker, history | $(s+1)/(s+f+2)$ | slightly |
+| 10 | log raw source size | task | $\log(1+s^{\text{raw}}_t)/\log(1+1\,\text{MiB})$ | no (zero) |
+| 11 | success rate (Laplace) | worker, history | $(n_{\text{succ}}+1)/(n_{\text{succ}}+n_{\text{fail}}+2)$ | slightly |
+
+$s_t$ is the total source size transmitted for task $t$ (preprocessed plus raw source bytes) and $s^{\text{raw}}_t$ its raw-source size in bytes; $c_w$ is worker $w$'s cgroup CPU quota in milli-cores and $B_w$ its memory limit in bytes; MiB and GiB in the denominators are byte counts; $n_{\text{succ}}$ and $n_{\text{fail}}$ are the registry's success and failure counters for the worker at dispatch, not discounted counts.
 
 ### 5.2. Two failure modes, two mechanisms
 
 Standard LinUCB inside Hybrid-Grid exhibits two structural problems, both direct consequences of the lifecycle in Section 3.2.
 
-**(F1) Cold start over a short horizon.** At initialisation $\hat\theta_a = \mathbf{0}$ and the score reduces to the exploration bonus, so early decisions are essentially random — tolerable over millions of ad impressions, expensive over a build of 152 tasks. HG-LinUCB therefore delegates the first $N = 100$ decisions to LeastLoaded while **still learning**: it records the context of each delegated choice and updates the chosen worker's model when the outcome arrives. The heuristic acts as a safe behaviour policy that spreads observations across all workers.
+**(F1) Cold start over a short horizon.** At initialisation $\hat\theta_w = \mathbf{0}$ and the score reduces to the exploration bonus, so early decisions are essentially random — tolerable over millions of ad impressions, expensive over a build of 152 tasks. HG-LinUCB therefore delegates the first $N = 100$ decisions to LeastLoaded while **still learning**: it records the context of each delegated choice and updates the chosen worker's model when the outcome arrives. The heuristic acts as a safe behaviour policy that spreads observations across all workers.
 
-**(F2) Delayed feedback causes pile-up.** A worker's model does not change until a reward returns, a full compile time after the decision. If the model rates worker $a$ best, the bandit keeps choosing it for every decision in that window. HG-LinUCB subtracts an **instantaneous load penalty** from the score:
+**(F2) Delayed feedback causes pile-up.** A worker's model does not change until a reward returns, a full compile time after the decision. If the model rates worker $w$ best, the bandit keeps choosing it for every decision in that window. HG-LinUCB subtracts an **instantaneous load penalty** from the score:
 
-$$Q(a) = \underbrace{\hat{\theta}_a^\top x}_{\text{learned value}} + \underbrace{\alpha\sqrt{x^\top A_a^{-1} x}}_{\text{exploration bonus}} - \underbrace{\lambda \cdot \text{LoadRatio}_a}_{\text{load penalty}},$$
+$$Q_t(w) = \underbrace{\hat{\theta}_w^\top x_{t,w}}_{\text{learned value}} + \underbrace{\alpha\sqrt{x_{t,w}^\top A_w^{-1} x_{t,w}}}_{\text{exploration bonus}} - \underbrace{\lambda \cdot \text{LoadRatio}_{t,w}}_{\text{load penalty}},$$
 
-with $\alpha = 0.5$ and $\lambda = 0.5$. The penalty is a hand-specified prior that uses the running task count at the instant of dispatch — information the learner would otherwise acquire only slowly, through delayed rewards. The bandit supplies what the heuristic lacks (an estimate of how this task will run on this worker), and the explicit penalty responds to current occupancy without waiting for the reward model to learn its effect. Because the penalty uses the *fraction* of a worker's slots in use rather than the absolute task count, a large $\lambda$ makes the scheduler resemble, but not reproduce, LeastLoaded.
+where $\alpha = \lambda = 0.5$ weight exploration and load; $x_{t,w}^\top A_w^{-1} x_{t,w}$, the squared norm of $x_{t,w}$ under $A_w^{-1}$, is large when the worker's model has little data in the direction of $x_{t,w}$; and, for the evaluated positive slot limits, $\text{LoadRatio}_{t,w} = \text{ActiveTasks}_{t,w}/\text{MaxParallel}_w$, read before task $t$ is booked (in general, the implementation substitutes 4 for a nonpositive slot limit and caps the ratio at 1). The penalty is a hand-specified prior that uses the running task count at the instant of dispatch — information the learner would otherwise acquire only slowly, through delayed rewards. The bandit supplies what the heuristic lacks (an estimate of how this task will run on this worker), and the explicit penalty responds to current occupancy without waiting for the reward model to learn its effect. Because the penalty uses the *fraction* of a worker's slots in use rather than the absolute task count, a large $\lambda$ makes the scheduler resemble, but not reproduce, LeastLoaded.
 
 ### 5.3. Implementation requirements
 
@@ -227,7 +248,7 @@ Our earlier evaluation of HG-LinUCB used a clean CPython build (295 translation 
 
 **Table 3.** Earlier stable-cluster results for HG-LinUCB (CPython). Δ is the median per-block difference, HG-LinUCB minus the comparator.
 
-| Operating point | Comparator | Δ (s) | $p_{\text{Holm}}$ | Cliff's d | Decisions with an idle worker |
+| Operating point | Comparator | Δ (s) | $p_{\text{Holm}}$ | Cliff's δ | Decisions with an idle worker |
 |---|---|---|---|---|---|
 | `-j5` | plain LinUCB | −8.95 | 0.003 | −0.84 | 100% |
 | `-j5` | P2C | −4.66 | 0.003 | −0.78 | 100% |
@@ -242,19 +263,19 @@ That is where the question in Section 4.4 comes from. On that cluster, the worke
 
 ### 7.1. The update
 
-**Each worker forgets on its own observation clock.** When a new outcome arrives for worker $w$, we shrink the weight of that worker's previous observations by a factor $\gamma$ and add the new outcome at full weight. Outcomes from other workers, and elapsed wall-clock time, do not age its model. Let $n$ count the outcomes accepted for worker $w$, in the order completions are processed. With $A_{w,0} = I_d$ and $b_{w,0} = \mathbf{0}$:
+**Each worker forgets on its own observation clock.** When a new outcome arrives for worker $w$, we shrink the weight of that worker's previous observations by a factor $\gamma$ and add the new outcome at full weight. Outcomes from other workers, and elapsed wall-clock time, do not age its model. Let $n$ count the model updates committed for worker $w$, in the order completions are processed, and let $x_{w,n}$ and $r_{w,n}$ be the frozen dispatch context and the reward of its $n$-th update. With $A_{w,0} = I_d$ and $b_{w,0} = \mathbf{0}$:
 
 $$A_{w,n} = \gamma A_{w,n-1} + (1-\gamma) I_d + x_{w,n} x_{w,n}^\top, \qquad b_{w,n} = \gamma\, b_{w,n-1} + r_{w,n}\, x_{w,n}, \qquad \hat\theta_{w,n} = A_{w,n}^{-1} b_{w,n}.$$
 
-Unrolled, this is ridge regression with exponentially decaying weights and an undecayed regulariser:
+When $n$ is omitted, $A_w$, $b_w$ and $\hat\theta_w$ denote the latest committed state. Unrolled, this is ridge regression with exponentially decaying weights and an undecayed regulariser:
 
 $$A_{w,n} = I_d + \sum_{i=1}^{n} \gamma^{\,n-i} x_{w,i} x_{w,i}^\top, \qquad b_{w,n} = \sum_{i=1}^{n} \gamma^{\,n-i} r_{w,i}\, x_{w,i}.$$
 
-The $(1-\gamma)I_d$ term restores the ridge prior at every step; without it the regulariser would decay along with the data. At dispatch time, after the warm-start window, the score is the HG-LinUCB score of Section 5.2 computed from the discounted model:
+where $i = 1,\dots,n$ runs over the worker's committed updates, so an observation's weight $\gamma^{\,n-i}$ depends only on how many later updates that worker has received. The $(1-\gamma)I_d$ term restores the ridge prior at every step; without it the regulariser would decay along with the data. At dispatch time, after the warm-start window, the score is the HG-LinUCB score of Section 5.2 computed from the discounted model:
 
-$$p_{t,w} = \hat\theta_w^\top x_{t,w} + \alpha\sqrt{x_{t,w}^\top A_w^{-1} x_{t,w}} - \lambda\,\text{LoadRatio}_w, \qquad a_t = \arg\max_{w \in \mathcal{W}_t} p_{t,w}.$$
+$$Q_t(w) = \hat\theta_w^\top x_{t,w} + \alpha\sqrt{x_{t,w}^\top A_w^{-1} x_{t,w}} - \lambda\,\text{LoadRatio}_{t,w}, \qquad w_t = \arg\max_{w \in \mathcal{W}_t} Q_t(w).$$
 
-The context is frozen at dispatch and reused at update (R1), and the warm start, load penalty and reward are those of Sections 4.3 and 5.2. With $\gamma = 1$ the update reduces to HG-LinUCB. Throughout this paper, HG-LinUCB-D denotes the per-worker clock configuration (`--discount-mode=arm`) with the full 12-feature layout and no reward centring.
+Because the quadratic form now uses the discounted matrix, its square root is a heuristic exploration width, not a calibrated standard error of the discounted estimator. The context is frozen at dispatch and reused at update (R1), and the warm start, load penalty and reward are those of Sections 4.3 and 5.2. With $\gamma = 1$ the update reduces to HG-LinUCB. Throughout this paper, HG-LinUCB-D denotes the per-worker clock configuration (`--discount-mode=arm`) with the full 12-feature layout and no reward centring.
 
 ### 7.2. Why a per-worker clock
 
@@ -264,17 +285,17 @@ This choice has a cost, and we state it plainly. It provides no guaranteed re-pr
 
 ### 7.3. Reading γ as a memory length
 
-The discount factor sets how many recent outcomes dominate a worker's model. Table 4 gives three readings of it, all in units of *that worker's own outcomes*, not cluster-wide dispatches.
+The discount factor sets how many recent outcomes dominate a worker's model. Table 4 gives three readings of it, all properties of the weights over *that worker's own updates*, not cluster-wide dispatches.
 
 **Table 4.** Memory implied by the two discount factors evaluated in Section 8.
 
 | Quantity | γ = 0.80 | γ = 0.98 |
 |---|---|---|
 | Total asymptotic observation weight $1/(1-\gamma)$ | 5 | 50 |
-| Half-life $\log 0.5 / \log\gamma$ (outcomes) | 3.1 | 34.3 |
-| Effective sample size of the weights $(1+\gamma)/(1-\gamma)$ | 9 | 99 |
+| Half-life $\log 0.5 / \log\gamma$ (updates) | 3.1 | 34.3 |
+| Asymptotic effective sample size of the weights $(1+\gamma)/(1-\gamma)$ | 9 | 99 |
 
-These are algebraic properties of the weights, not adaptation times. At γ = 0.80 the three most recent outcomes account for about 49% of the asymptotic total observation weight; at γ = 0.98 a worker the scheduler uses regularly still carries most of a 152-task build's history at the end of the build. Section 8 measures what that difference does to worker selection in one scenario; we make no claim that 0.80 is the right value elsewhere.
+For $0<\gamma<1$ and $n\to\infty$, the first is the limit of $\sum_i \gamma^{\,n-i}$, excluding the ridge term; the half-life is the number of later updates of the same worker that halve an observation's weight; the effective sample size is the limit of $(\sum_i \gamma^{\,n-i})^2 / \sum_i \gamma^{\,2(n-i)}$, not a count of observed tasks. These are algebraic properties of the weights, not adaptation times. At γ = 0.80 the three most recent outcomes account for about 49% of the asymptotic total observation weight; at γ = 0.98 a worker the scheduler uses regularly still carries most of a 152-task build's history at the end of the build. Section 8 measures what that difference does to worker selection in one scenario; we make no claim that 0.80 is the right value elsewhere.
 
 ### 7.4. Algorithm and cost
 
@@ -283,25 +304,26 @@ Algorithm 1: HG-LinUCB-D (one dispatch decision and one outcome)
 ──────────────────────────────────────────────────────────────────────
 Parameters: α (bonus), N (warm-start window), λ (load-penalty weight), γ (discount)
 Per-worker state w: A_w ∈ R^{d×d} (init I_d), b_w ∈ R^d (init 0), A_w^{-1} cached
-Global: n = number of dispatches so far
+Global: D = number of decisions so far (initially 0)
 
-SELECT(task τ, nonempty candidate set W_τ):
-  1  n ← n + 1
-  2  if |W_τ| = 1: return the single worker                  ▷ no choice, no context stored
-  3  if n ≤ N:                                               ▷ passive warm start
-  4      w* ← a least-loaded candidate;  x* ← BuildContext(τ, w*)
+SELECT(task t, nonempty candidate set W_t):
+  1  D ← D + 1
+  2  if |W_t| = 1: return the single worker                  ▷ no choice, no context stored
+  3  if D ≤ N:                                               ▷ passive warm start
+  4      w_t ← a least-loaded candidate;  x_{t,w_t} ← BuildContext(t, w_t)
   5  else:
-  6      for each w ∈ W_τ:
-  7          x_w ← BuildContext(τ, w)                         ▷ Table 1, state read HERE
-  8          p_w ← θ̂_wᵀx_w + α·sqrt(x_wᵀ A_w^{-1} x_w) − λ·LoadRatio(w)
-  9      w* ← argmax_{w ∈ W_τ} p_w;  x* ← x_{w*}
- 10  pending[τ.ID] ← x*;  return w*
+  6      for each w ∈ W_t:
+  7          x_{t,w} ← BuildContext(t, w)                     ▷ Table 1, state read HERE
+  8          Q_t(w) ← θ̂_wᵀx_{t,w} + α·sqrt(x_{t,w}ᵀ A_w^{-1} x_{t,w}) − λ·LoadRatio_{t,w}
+  9      w_t ← argmax_{w ∈ W_t} Q_t(w)
+ 10  pending[t] ← x_{t,w_t};  return w_t
 
-RECORDOUTCOME(worker w, reward r, success, task context τ):
- 11  if pending[τ.ID] does not exist: return
- 12  x ← pending[τ.ID]; delete the entry
- 13  A_w ← γ·A_w + (1−γ)·I_d + x xᵀ;   b_w ← γ·b_w + r·x       ▷ per-worker clock
- 14  A_w^{-1} ← inverse via Cholesky factorisation of A_w      ▷ on failure, keep previous model
+RECORDOUTCOME(worker w, reward r_t, success, task t):
+ 11  if r_t is not finite or pending[t] does not exist: return
+ 12  x ← pending[t]; delete the entry
+ 13  A′ ← γ·A_w + (1−γ)·I_d + x xᵀ;   b′ ← γ·b_w + r_t·x       ▷ per-worker clock
+ 14  if A′, b′ are finite and the Cholesky inverse of A′ succeeds and is finite:
+         A_w ← A′;  b_w ← b′;  A_w^{-1} ← (A′)^{-1}               ▷ otherwise keep the previous model
 ──────────────────────────────────────────────────────────────────────
 ```
 
@@ -324,7 +346,7 @@ $\hat\theta_w = A_w^{-1} b_w$ is recomputed when a worker is scored. Because the
 
 **Sessions.** Each cell is a session of two consecutive builds on one coordinator. The learner's state carries over from build 1 to build 2: build 1 is a learning build, during which the warm start completes and the degradation begins, and **build 2 is the measured build**. The coordinator restarts for every cell, so every scheduler starts each session cold. The onset is logged when the background load is confirmed running, at dispatches 105–108 in S1 and 134–139 in S2 across schedulers. For the γ = 0.80 treatment, 44–46 (S1) and 13–16 (S2) dispatches had taken place after the confirmed onset when build 2 began.
 
-**Design and analysis.** Each block ran all five registered schedulers once in a randomised 5 × 5 Latin-square order (each occupies each position exactly once per group of five blocks); the main comparison reports four of them, with the omission explained in Section 9.3. A discarded warm-up cell opens each scenario. The primary metric is build-2 elapsed time. For each scenario we compare HG-LinUCB-D (γ = 0.80) against LeastLoaded, SED and γ = 0.98 with **two-sided** Wilcoxon signed-rank tests [18], with Holm correction [19] applied separately within each scenario to the original four-comparison family, including the baseline omitted from the main comparison (Section 9.3), matched-pairs rank-biserial $r$, and the median per-block difference with a 95% bootstrap confidence interval (10,000 resamples of paired block differences; marginal intervals, not simultaneous Holm-adjusted ones). Percentages are the median paired difference relative to the baseline's median. Cell validity and rerun rules were fixed in the pre-registration; every reported cell completed without failure, rerun or interruption.
+**Design and analysis.** Each block ran all five registered schedulers once in a randomised 5 × 5 Latin-square order (each occupies each position exactly once per group of five blocks); the main comparison reports four of them, with the omission explained in Section 9.3. A discarded warm-up cell opens each scenario. The primary metric is build-2 elapsed time. For each scenario we compare HG-LinUCB-D (γ = 0.80) against LeastLoaded, SED and γ = 0.98 with **two-sided** Wilcoxon signed-rank tests [18], with Holm correction [19] applied separately within each scenario to the original four-comparison family, including the baseline omitted from the main comparison (Section 9.3), matched-pairs rank-biserial correlation $r_{\text{rb}}$, and the median per-block difference with a 95% bootstrap confidence interval (10,000 resamples of paired block differences; marginal intervals, not simultaneous Holm-adjusted ones). Percentages are the median paired difference relative to the baseline's median. Cell validity and rerun rules were fixed in the pre-registration; every reported cell completed without failure, rerun or interruption.
 
 **Provenance.** The scenario and the value γ = 0.80 were selected through exploratory pilot runs on the S1 configuration, which evaluated seven non-default HG-LinUCB-D configurations in addition to the default; the pilots also tested three settings of the omitted local baseline, and the full search history is recorded in the registration. Pilot data are excluded from every result here. The implementation, parameters, scenarios, block counts and analysis were then frozen in a pre-registration (Hybrid-Grid commit `5c25935`) before any reported data were collected. S2 was not used for selection, but one tool-validation run of its configuration with two schedulers was observed before the freeze, so we describe it as a **partially held-out** confirmation rather than a blind one.
 
@@ -341,9 +363,9 @@ Both HG-LinUCB-D configurations use $\alpha = 0.5$, $N = 100$ and $\lambda = 0.5
 
 ### 8.3. Results
 
-**Table 5.** Build-2 elapsed time, HG-LinUCB-D (γ = 0.80) against each baseline. Δ is the median per-block difference (treatment minus baseline; negative means HG-LinUCB-D is faster), with its 95% bootstrap CI. $r = -1$ means HG-LinUCB-D was faster in every block.
+**Table 5.** Build-2 elapsed time, HG-LinUCB-D (γ = 0.80) against each baseline. Δ is the median per-block difference (treatment minus baseline; negative means HG-LinUCB-D is faster), with its 95% bootstrap CI. $r_{\text{rb}} = -1$ means HG-LinUCB-D was faster in every block.
 
-| Scenario | Baseline | Baseline median (s) | Δ (s) | 95% CI | % | $p_{\text{Holm}}$ | $r$ | Blocks faster |
+| Scenario | Baseline | Baseline median (s) | Δ (s) | 95% CI | % | $p_{\text{Holm}}$ | $r_{\text{rb}}$ | Blocks faster |
 |---|---|---|---|---|---|---|---|---|
 | S1 (median 104.2 s) | LeastLoaded | 134.7 | −29.21 | [−33.89, −26.85] | −21.7% | 0.00024 | −1 | 15/15 |
 | | SED | 147.8 | −44.13 | [−44.61, −41.54] | −29.9% | 0.00024 | −1 | 15/15 |
@@ -398,9 +420,13 @@ The allocations differed across policies. **LeastLoaded** sends about a quarter 
 
 By dispatches 21–40 after the confirmed onset, the median share under γ = 0.80 was 5% in both scenarios; later windows ranged from 0–10% in S1 and 0–2.5% in S2. The γ = 0.98 allocation declined more gradually, while LeastLoaded and SED continued to send roughly a quarter or more of their work to the degraded pair. The axis is dispatches, not seconds, and the windows are coarse: the table describes allocation changes, not a formally measured adaptation time.
 
-**What the learner estimated.** The diagnostic log records each candidate's learned value $\mu_w = \hat\theta_w^\top x$ at every decision. For each decision at which both a healthy and a degraded worker were idle, we take the gap between the best healthy and the best degraded learned value, $G = \max_{\text{healthy}} \mu - \max_{\text{degraded}} \mu$. A positive gap means the model prefers a healthy worker before the exploration bonus and load penalty are added; restricting to idle workers removes the load penalty from the comparison. Such decisions covered 2,280 of 2,280 (S1) and 1,513 of 1,520 (S2) build-2 decisions for γ = 0.80, and 2,166 and 1,386 for γ = 0.98.
+**What the learner estimated.** The diagnostic log records each candidate's learned value $\mu_{t,w} = \hat\theta_w^\top x_{t,w}$ at every decision, indexed by its task $t$. For each decision at which both a healthy and a degraded worker were idle, we take the gap between the best healthy and the best degraded learned value:
 
-Over build 2, the median gap was **0.0645** (S1) and **0.0600** (S2) for γ = 0.80, against **0.0196** and **0.0262** for γ = 0.98 — approximately 3.3 and 2.3 times as large, respectively, with the shorter memory. On the model's inverse-transformed log-time scale, gaps of 0.06 and 0.02 correspond to ratios of about 2.0 and 1.3 in $1 + T_{\text{ms}}$. These are model-implied contrasts between the best idle candidate in each group, not arithmetic-mean latency predictions, and they are not directly comparable to the fourfold ratio of Section 8.1.
+$$G_t = \max_{w \in \mathcal{W}_t^{\text{healthy},0}} \mu_{t,w} - \max_{w \in \mathcal{W}_t^{\text{degraded},0}} \mu_{t,w},$$
+
+where $\mathcal{W}_t^{\text{healthy},0}$ and $\mathcal{W}_t^{\text{degraded},0}$ are the eligible healthy and degraded candidates with no active task (both nonempty), and $\mu_{t,w}$ is on the reward scale. A positive gap means the model prefers a healthy worker before adding the exploration bonus and subtracting the load penalty; restricting to idle workers removes the load penalty from the comparison. Such decisions covered 2,280 of 2,280 (S1) and 1,513 of 1,520 (S2) build-2 decisions for γ = 0.80, and 2,166 and 1,386 for γ = 0.98.
+
+Over build 2, the median gap was **0.0645** (S1) and **0.0600** (S2) for γ = 0.80, against **0.0196** and **0.0262** for γ = 0.98 — approximately 3.3 and 2.3 times as large, respectively, with the shorter memory. On the model's inverse-transformed log-time scale, gaps of 0.06 and 0.02 correspond to ratios of about 2.0 and 1.3 in $1 + \widetilde{T}$, where $\widetilde{T}_{t,w} = 120\,001^{-\mu_{t,w}} - 1$ is the model-implied compile time in milliseconds. These are model-implied contrasts between the best idle candidate in each group, not arithmetic-mean latency predictions, and they are not directly comparable to the fourfold ratio of Section 8.1.
 
 **How often the bonus decided.** After the warm start, we count the decisions in which adding the exploration bonus changed the winner: the worker maximising the learned value minus the load penalty was not the worker maximising the full score. In build 2 this happened on **2.0%** (S1) and **1.6%** (S2) of decisions for γ = 0.80, and on **18.4%** and **19.7%** for γ = 0.98. When the learned values separate the workers clearly, the bonus rarely overturns them; when they do not, about one decision in five is settled by the bonus. A winner change may occur between two healthy workers, so this statistic does not specifically count exploration onto degraded workers or estimate its cost; and it is a decomposition of logged decisions, not a counterfactual, since removing the bonus would change the whole trajectory.
 

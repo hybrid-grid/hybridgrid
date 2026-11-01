@@ -10,7 +10,7 @@
 
 ## Tóm tắt
 
-Bài báo trình bày Hybrid-Grid, một hệ thống biên dịch phân tán mã nguồn mở cho C/C++, và **HG-LinUCB-D**, bộ lập lịch học trực tuyến nằm ở trung tâm hệ thống. Quá trình xây dựng hệ thống cho chúng tôi thấy phần khó của biên dịch phân tán là quyết định gửi mỗi đơn vị dịch tới worker nào — và quyết định ấy trở nên khó khi năng lực mà một worker khai báo không còn phản ánh tốc độ thực của nó, như khi chủ của một máy trạm bắt đầu render video hay build một dự án riêng. HG-LinUCB-D mở rộng bộ lập lịch contextual bandit của chúng tôi bằng **cơ chế quên theo hàm mũ riêng cho từng worker**, để mô hình của mỗi worker được chi phối bởi các kết quả biên dịch gần đây. Chúng tôi đánh giá trên abseil-cpp với năm worker Docker không đồng nhất, ba tác vụ đồng thời, và hai worker âm thầm mất CPU cho tải nền. Với cài đặt được đóng băng trước khi đo, HG-LinUCB-D (γ = 0,80) giảm thời gian build thứ hai 21,7% so với LeastLoaded, 29,9% so với SED và 9,0% so với γ = 0,98 trên 15 khối, và 30,7%, 30,3%, 11,0% trên 10 khối của một kịch bản giữ lại một phần, nhanh hơn cả ba đối thủ ở mọi khối (p hiệu chỉnh Holm ≤ 0,0078). Nhật ký dispatch cho thấy mức phân bổ tới worker suy giảm thấp hơn: với HG-LinUCB-D, chúng nhận trung vị 2,6–3,3% tác vụ build 2, so với 24–26% của LeastLoaded và 34–39% của SED. Kịch bản được xác định qua các thí nghiệm khám phá, và kết luận của chúng tôi chỉ áp dụng cho kịch bản này.
+Bài báo trình bày Hybrid-Grid, một hệ thống biên dịch phân tán mã nguồn mở cho C/C++, và **HG-LinUCB-D**, bộ lập lịch học trực tuyến nằm ở trung tâm hệ thống. Quá trình xây dựng hệ thống cho chúng tôi thấy phần khó của biên dịch phân tán là quyết định gửi mỗi đơn vị dịch tới worker nào — và quyết định ấy trở nên khó khi năng lực mà một worker khai báo không còn phản ánh tốc độ thực của nó, như khi chủ của một máy trạm bắt đầu render video hay build một dự án riêng. HG-LinUCB-D mở rộng bộ lập lịch contextual bandit của chúng tôi bằng **cơ chế quên theo hàm mũ riêng cho từng worker**, để mô hình của mỗi worker được chi phối bởi các kết quả biên dịch gần đây. Chúng tôi đánh giá trên abseil-cpp với năm worker Docker không đồng nhất, ba tác vụ đồng thời, và hai worker âm thầm mất CPU cho tải nền. Với cài đặt được đóng băng trước khi đo, HG-LinUCB-D với hệ số chiết khấu γ = 0,80 giảm thời gian build thứ hai 21,7% so với LeastLoaded, 29,9% so với SED và 9,0% so với γ = 0,98 trên 15 khối, và 30,7%, 30,3%, 11,0% trên 10 khối của một kịch bản giữ lại một phần, nhanh hơn cả ba đối thủ ở mọi khối (p hiệu chỉnh Holm ≤ 0,0078). Nhật ký dispatch cho thấy mức phân bổ tới worker suy giảm thấp hơn: với HG-LinUCB-D, chúng nhận trung vị 2,6–3,3% tác vụ build 2, so với 24–26% của LeastLoaded và 34–39% của SED. Kịch bản được xác định qua các thí nghiệm khám phá, và kết luận của chúng tôi chỉ áp dụng cho kịch bản này.
 
 **Từ khóa:** biên dịch phân tán; lập lịch tác vụ; contextual bandit; bandit không dừng; cụm không đồng nhất; nhiễu hiệu năng
 
@@ -44,11 +44,11 @@ Mục 2 điểm lại các công trình liên quan. Mục 3 mô tả Hybrid-Grid
 
 ### 2.1. Lập lịch heuristic trên máy không đồng nhất
 
-Lenstra, Shmoys và Tardos [1] chứng minh $R||C_{\max}$ là NP-khó với cận dưới xấp xỉ $3/2$ và đưa ra thuật toán tỉ số $2$; khoảng trống này vẫn còn mở sau hơn 35 năm. Trong thực tế, Power-of-Two-Choices [3] là heuristic nổi bật: lấy ngẫu nhiên hai máy chủ và chọn máy ít tải hơn giảm tải cực đại từ $\Theta(\log n / \log\log n)$ xuống $\Theta(\log\log n)$ trên cụm đồng nhất. Sparrow [4] mở rộng P2C bằng late binding cho lập lịch phi tập trung độ trễ thấp. HEFT [5] xếp hạng tác vụ DAG theo upward rank và gán theo thời điểm hoàn thành sớm nhất, dựa trên ước lượng chi phí của từng tác vụ trên từng máy. Các quy tắc shortest-expected-delay, mà SED trong Mục 8 là một đại diện, cân độ dài hàng đợi theo năng lực khai báo. Các quy tắc theo độ dài hàng đợi và theo năng lực không có ước lượng tường minh về tốc độ hiện tại của máy; khi tốc độ ấy lệch khỏi những gì máy khai báo, chúng chỉ nhận ra qua tác dụng phụ là tác vụ chậm nằm trong hàng đợi lâu hơn.
+Lenstra, Shmoys và Tardos [1] chứng minh $R||C_{\max}$ là NP-khó với cận dưới xấp xỉ $3/2$ và đưa ra thuật toán tỉ số $2$; khoảng trống này vẫn còn mở sau hơn 35 năm. Trong thực tế, Power-of-Two-Choices [3] là heuristic nổi bật: lấy ngẫu nhiên hai máy chủ và chọn máy ít tải hơn giảm tải cực đại từ $\Theta(\log m / \log\log m)$ xuống $\Theta(\log\log m)$ trên cụm đồng nhất gồm $m$ máy chủ. Sparrow [4] mở rộng P2C bằng late binding cho lập lịch phi tập trung độ trễ thấp. HEFT [5] xếp hạng tác vụ DAG theo upward rank và gán theo thời điểm hoàn thành sớm nhất, dựa trên ước lượng chi phí của từng tác vụ trên từng máy. Các quy tắc shortest-expected-delay, mà SED trong Mục 8 là một đại diện, cân độ dài hàng đợi theo năng lực khai báo. Các quy tắc theo độ dài hàng đợi và theo năng lực không có ước lượng tường minh về tốc độ hiện tại của máy; khi tốc độ ấy lệch khỏi những gì máy khai báo, chúng chỉ nhận ra qua tác dụng phụ là tác vụ chậm nằm trong hàng đợi lâu hơn.
 
 ### 2.2. Multi-armed bandit và contextual bandit
 
-Khung bandit cổ điển được trình bày có hệ thống trong Sutton và Barto [6]; UCB1 [16] đưa nguyên tắc lạc quan trước bất định vào việc chọn arm, còn Slivkins [7] và Lattimore–Szepesvári [8] hệ thống hóa lý thuyết regret. LinUCB [9] mở rộng sang bối cảnh có ngữ cảnh: mỗi arm giữ một mô hình tuyến tính $(A_a, b_a)$ và được chấm điểm bằng $\hat{\theta}_a^\top x + \alpha\sqrt{x^\top A_a^{-1} x}$. Cận regret $\tilde{O}(\sqrt{Td})$ được chứng minh cho biến thể SupLinUCB [10]; cận này không áp dụng trực tiếp cho LinUCB Algorithm 1 mà các hệ thống thực, kể cả của chúng tôi, cài đặt.
+Khung bandit cổ điển được trình bày có hệ thống trong Sutton và Barto [6]; UCB1 [16] đưa nguyên tắc lạc quan trước bất định vào việc chọn arm, còn Slivkins [7] và Lattimore–Szepesvári [8] hệ thống hóa lý thuyết regret. LinUCB [9] mở rộng sang bối cảnh có ngữ cảnh: mỗi arm $a$ giữ các thống kê hồi quy ridge $(A_a, b_a)$ trên ngữ cảnh $x$ có $d$ chiều, với ước lượng $\hat\theta_a = A_a^{-1} b_a$, và được chấm điểm bằng $\hat{\theta}_a^\top x + \alpha\sqrt{x^\top A_a^{-1} x}$, trong đó $\alpha$ là trọng số khám phá. Cận regret $\tilde{O}(\sqrt{Hd})$ sau $H$ vòng được chứng minh cho biến thể SupLinUCB [10]; cận này không áp dụng trực tiếp cho thuật toán LinUCB cơ bản (Algorithm 1 của [9]) mà các hệ thống thực, kể cả của chúng tôi, cài đặt.
 
 ### 2.3. Bandit biết quên, và chọn máy theo độ trễ
 
@@ -110,11 +110,11 @@ Hai đặc điểm của vòng đời này định hình Mục 5 và 7. Thứ nh
 
 ### 3.3. Đường dispatch của coordinator
 
-Với `make -jN` hoặc `ninja -jN`, tới $N$ lời gọi `Compile()` cùng yêu cầu quyết định một lúc. Quyết định đọc trạng thái worker (`ActiveTasks`) và việc dispatch ghi lại trạng thái đó; nếu đây là hai thao tác tách rời trên các goroutine khác nhau, hai lần dispatch có thể đọc cùng một bộ đếm cũ và cùng xếp quá tải một worker. Hybrid-Grid gom việc đọc trạng thái worker, chọn worker và ghi nhận dispatch vào **một goroutine `dispatchLoop` duy nhất** (Hình 2). Mỗi lời gọi `Compile()` gửi yêu cầu vào một channel rồi chờ; bản thân channel của Go *đã là* một hàng đợi FIFO đồng bộ, nên việc chọn và đặt chỗ được tuần tự hóa so với các lần dispatch khác mà không cần thêm khóa quanh cặp thao tác này.
+Với `make -jJ` hoặc `ninja -jJ`, tới $J$ lời gọi `Compile()` cùng yêu cầu quyết định một lúc. Quyết định đọc trạng thái worker (`ActiveTasks`) và việc dispatch ghi lại trạng thái đó; nếu đây là hai thao tác tách rời trên các goroutine khác nhau, hai lần dispatch có thể đọc cùng một bộ đếm cũ và cùng xếp quá tải một worker. Hybrid-Grid gom việc đọc trạng thái worker, chọn worker và ghi nhận dispatch vào **một goroutine `dispatchLoop` duy nhất** (Hình 2). Mỗi lời gọi `Compile()` gửi yêu cầu vào một channel rồi chờ; bản thân channel của Go *đã là* một hàng đợi FIFO đồng bộ, nên việc chọn và đặt chỗ được tuần tự hóa so với các lần dispatch khác mà không cần thêm khóa quanh cặp thao tác này.
 
 ```mermaid
 flowchart LR
-    N["N lời gọi Compile()<br/>đồng thời"] --> CH["channel dispatch<br/>FIFO"]
+    N["J lời gọi Compile()<br/>đồng thời"] --> CH["channel dispatch<br/>FIFO"]
     CH --> LOOP["dispatchLoop<br/>một goroutine"]
     subgraph INNER["bên trong vòng lặp"]
         direction TB
@@ -140,9 +140,28 @@ Ghi trạng thái *tại thời điểm dispatch* thay vì tại thời điểm 
 
 ## 4. Bài toán lập lịch
 
+**Ký hiệu.** Bảng dưới liệt kê các ký hiệu dùng ở nhiều mục; đại lượng chỉ xuất hiện ở một chỗ được định nghĩa ngay tại chỗ đó.
+
+| Ký hiệu | Ý nghĩa | Định nghĩa ở |
+|---|---|---|
+| $t$, $w$, $w_t$ | tác vụ, worker ứng viên, worker được chọn cho tác vụ $t$ | Mục 4.1 |
+| $\mathcal{W}$, $\mathcal{W}_t$, $m$ | tập worker, tập ứng viên đủ điều kiện cho tác vụ $t$, số worker | Mục 4.1 |
+| $x_{t,w}$, $d$ | ngữ cảnh của tác vụ $t$ trên worker $w$, đóng băng lúc dispatch; số chiều $d = 12$ | Mục 4.3, Bảng 1 |
+| $T_{t,w}$, $T_t$ | thời gian biên dịch tác vụ $t$ trên worker $w$; thời gian quan sát được $T_t = T_{t,w_t}$, tính bằng ms | Mục 4.1, 4.3 |
+| $r_t$ | phần thưởng của tác vụ $t$ | Mục 4.3 |
+| $A_w$, $b_w$, $\hat\theta_w$, $I_d$ | ma trận ridge, tổng ngữ cảnh nhân phần thưởng và ước lượng hệ số của worker $w$; ma trận đơn vị $d \times d$ | Mục 5.1 |
+| $Q_t(w)$ | điểm chọn worker $w$ cho tác vụ $t$ | Mục 5.2 |
+| $\text{LoadRatio}_{t,w}$ | tỉ lệ slot của worker $w$ đang bận khi chấm điểm cho tác vụ $t$ | Mục 5.2, Bảng 1 |
+| $\alpha$, $\lambda$, $N$ | trọng số khám phá, trọng số phạt tải, độ dài warm-start (số quyết định) | Mục 5.2 |
+| $\gamma$ | hệ số chiết khấu riêng cho từng worker | Mục 7.1 |
+| $n$; $x_{w,n}$, $r_{w,n}$ | chỉ số các lần cập nhật mô hình đã được chấp nhận của worker $w$; ngữ cảnh và phần thưởng của lần cập nhật thứ $n$ | Mục 7.1 |
+| $D$ | bộ đếm quyết định của bộ lập lịch | Thuật toán 1 |
+| $J$ | mức song song của công cụ build (`-jJ`) | Mục 3.3 |
+| $k$ | vị trí dispatch tính từ thời điểm bắt đầu suy giảm | Mục 8.4 |
+
 ### 4.1. Phát biểu
 
-Cho tập worker không đồng nhất $\mathcal{W} = \{1,\dots,m\}$ và một luồng tác vụ biên dịch được công cụ build giải phóng khi các phụ thuộc hoàn tất, tác vụ $t$ có thời gian thực thi $p_{t,a}$ phụ thuộc vào worker $a$ được gán và vào những gì worker đó đang chạy, không biết trước và chỉ quan sát được sau khi hoàn tất. Bộ lập lịch phải chọn $a_t \in \mathcal{W}_t$ khi tác vụ $t$ được gửi tới, với $\mathcal{W}_t$ là tập đủ điều kiện ở Mục 3.3, và mỗi worker chạy đồng thời tối đa `MaxParallel`$_a$ tác vụ. Với các tác vụ biên dịch từ xa, khoảng hoàn tất là $C^{\text{compile}}_{\max} = \max_t C_t - t_{\text{start}}$; số đo chính của chúng tôi là thời gian chạy đầu-cuối của lệnh build, gồm thêm phần tiền xử lý tại chỗ, liên kết và điều phối. Mô hình $R||C_{\max}$ cổ điển [1] là lõi trừu tượng của bài toán; nó không mô tả việc tác vụ được giải phóng theo thời gian, đồng thời theo slot hay tranh chấp bên trong một worker, mà hệ thống của chúng tôi đều có.
+Cho tập worker không đồng nhất $\mathcal{W} = \{1,\dots,m\}$ và một luồng tác vụ biên dịch được công cụ build giải phóng khi các phụ thuộc hoàn tất, tác vụ $t$ có thời gian biên dịch $T_{t,w}$ phụ thuộc vào worker $w$ được gán và vào những gì worker đó đang chạy, không biết trước và chỉ quan sát được sau khi hoàn tất. Bộ lập lịch phải chọn một worker $w_t \in \mathcal{W}_t$ khi tác vụ $t$ được gửi tới, với $\mathcal{W}_t$ là tập đủ điều kiện ở Mục 3.3, và mỗi worker chạy đồng thời tối đa `MaxParallel`$_w$ tác vụ. Số đo chính của chúng tôi là thời gian chạy đầu-cuối của lệnh build, bao gồm biên dịch từ xa, tiền xử lý tại chỗ, liên kết và điều phối. Mô hình $R||C_{\max}$ cổ điển [1] là lõi trừu tượng của bài toán; nó không mô tả việc tác vụ được giải phóng theo thời gian, đồng thời theo slot hay tranh chấp bên trong một worker, mà hệ thống của chúng tôi đều có.
 
 Cụm đánh giá có $m = 5$ worker với hạn mức CPU 0,5 / 0,6 / 0,8 / 1,0 / 1,1 lõi và `MaxParallel` 1 / 2 / 2 / 2 / 3, tổng 10 slot và **chênh lệch năng lực 2,2 lần** giữa worker mạnh nhất và yếu nhất.
 
@@ -152,11 +171,11 @@ Cụm đánh giá có $m = 5$ worker với hạn mức CPU 0,5 / 0,6 / 0,8 / 1,0
 
 ### 4.3. Mô hình hóa
 
-Tại thời điểm quyết định $t$, coordinator quan sát véc-tơ ngữ cảnh $x_{t,a} \in \mathbb{R}^d$ cho mỗi worker đủ điều kiện $a \in \mathcal{W}_t$, chọn $a_t$, dispatch tác vụ, và khi hoàn tất nhận phần thưởng
+Khi lập lịch cho tác vụ $t$, coordinator quan sát véc-tơ ngữ cảnh $x_{t,w} \in \mathbb{R}^d$ ($d = 12$, Bảng 1) cho mỗi worker đủ điều kiện $w \in \mathcal{W}_t$, chọn $w_t$, dispatch tác vụ, và khi hoàn tất nhận phần thưởng
 
-$$r_t = -\frac{\log\bigl(1 + T_{\text{compile}}^{(t)}\bigr)}{\log(1 + 120{.}000)},$$
+$$r_t = -\frac{\log(1 + T_t)}{\log(1 + 120\,000)},$$
 
-với $T_{\text{compile}}$ là thời gian biên dịch do worker báo về, tính bằng mili giây. Phép log làm giảm ảnh hưởng của các lần biên dịch dài, còn mẫu số cố định đặt một lần biên dịch hai phút ở $r = -1$. Tác vụ thất bại được chấm theo thời lượng giả định $\max(120\text{ s}, T_{\text{timeout}})$, với $T_{\text{timeout}}$ là thời hạn yêu cầu của coordinator (600 s ở Mục 8), nên worker hỏng kéo dài bị hạ giá trị mà không cần quy tắc riêng; phần thưởng của tác vụ thành công không bị cắt. Dạng phần thưởng này là một lựa chọn kỹ thuật chưa có nguồn bình duyệt trực tiếp; dạng gần nhất có động cơ lý thuyết là phần thưởng tích phân theo thời gian của Decima [12].
+trong đó $T_t = T_{t,w_t}$ là thời lượng biên dịch thành công do worker báo về, lấy giá trị số theo mili giây, và $\log$ là logarit tự nhiên. Phép log làm giảm ảnh hưởng của các lần biên dịch dài, còn mẫu số cố định đặt một lần biên dịch hai phút ở $r_t = -1$. Tác vụ thất bại được chấm bằng cách thay $T_t$ bằng giá trị số theo mili giây của thời lượng giả định $\max(120\text{ s}, T_{\text{timeout}})$, với $T_{\text{timeout}}$ là thời hạn yêu cầu của coordinator (600 s ở Mục 8), nên worker hỏng kéo dài bị hạ giá trị mà không cần quy tắc riêng; phần thưởng của tác vụ thành công không bị cắt. Dạng phần thưởng này là một lựa chọn kỹ thuật chưa có nguồn bình duyệt trực tiếp; dạng gần nhất có động cơ lý thuyết là phần thưởng tích phân theo thời gian của Decima [12].
 
 Giao diện `Scheduler` của hệ thống cung cấp `Select(buildType, arch, clientOS) → (Worker, error)`; giao diện mở rộng `LearningScheduler` bổ sung `SelectWithDispatchInfo`, trả về điểm và thông tin chẩn đoán của từng ứng viên để ghi nhật ký, và `RecordOutcome(workerID, reward, success, taskContext)`, trong đó ngữ cảnh tác vụ mang mã tác vụ dùng làm khóa lưu véc-tơ đặc trưng đã đóng băng của quyết định. Các heuristic chỉ cài giao diện thứ nhất và không cần sửa đổi.
 
@@ -174,7 +193,7 @@ Mục này trình bày bộ lập lịch mà HG-LinUCB-D xây dựng trên đó.
 
 ### 5.1. LinUCB với mô hình riêng cho từng worker
 
-Chúng tôi ánh xạ mỗi worker thành một *arm* và dùng mô hình riêng biệt (disjoint) của Li và cộng sự [9]: mỗi worker $a$ có bộ tham số riêng, không chia sẻ với worker nào — $A_a \in \mathbb{R}^{d\times d}$ khởi tạo bằng $I_d$, $b_a \in \mathbb{R}^d$ khởi tạo bằng $\mathbf{0}$, và ước lượng hồi quy ridge $\hat{\theta}_a = A_a^{-1} b_a$. Mô hình riêng biệt phù hợp với bài toán: các worker có môi trường thực thi riêng và có thể phản ứng khác nhau trước tranh chấp tài nguyên, nên mỗi mô hình nên học hành vi của chính worker của nó. Tính chất này quan trọng ở Mục 7: khi một worker chậm đi, chỉ mô hình của worker đó cần thay đổi.
+Chúng tôi ánh xạ mỗi worker thành một *arm* và dùng mô hình riêng biệt (disjoint) của Li và cộng sự [9]: mỗi worker $w$ có bộ tham số riêng, không chia sẻ với worker nào — $A_w \in \mathbb{R}^{d\times d}$ khởi tạo bằng ma trận đơn vị $I_d$, $b_w \in \mathbb{R}^d$ khởi tạo bằng $\mathbf{0}$, và ước lượng hồi quy ridge $\hat{\theta}_w = A_w^{-1} b_w$. Mô hình riêng biệt phù hợp với bài toán: các worker có môi trường thực thi riêng và có thể phản ứng khác nhau trước tranh chấp tài nguyên, nên mỗi mô hình nên học hành vi của chính worker của nó. Tính chất này quan trọng ở Mục 7: khi một worker chậm đi, chỉ mô hình của worker đó cần thay đổi.
 
 Véc-tơ ngữ cảnh mô tả *cặp* (tác vụ, worker); Bảng 1 liệt kê bố cục. Trong đánh giá ở Mục 8 có nhiều chiều là hằng số, và chúng tôi đánh dấu chúng thay vì để bảng ngụ ý mười hai tín hiệu đang hoạt động. Hai chiều cần ghi chú riêng: đặc trưng độ trễ RPC giữ ở giá trị mặc định vì bộ đo độ trễ chưa bao giờ được nối vào bộ học, và đặc trưng kích thước mã nguồn thô bằng 0 vì workload chỉ gửi mã đã tiền xử lý. Các đặc trưng năng lực khác nhau giữa các worker nhưng là hằng số trong mô hình riêng của từng worker.
 
@@ -183,28 +202,30 @@ Véc-tơ ngữ cảnh mô tả *cặp* (tác vụ, worker); Bảng 1 liệt kê 
 | # | Đặc trưng | Nguồn | Chuẩn hóa | Thay đổi ở Mục 8 |
 |---|---|---|---|---|
 | 0 | bias | — | hằng số 1,0 | không |
-| 1 | log kích thước mã nguồn gửi đi | tác vụ | $\log(1+s)/\log(1+4\,\text{MiB})$ | có |
+| 1 | log kích thước mã nguồn gửi đi | tác vụ | $\log(1+s_t)/\log(1+4\,\text{MiB})$ | có |
 | 2–3 | one-hot kiến trúc đích (x86_64, arm64) | tác vụ | 0/1 | không |
-| 4 | năng lực CPU của worker | worker | $\log(1+m)/\log(1+16000)$, $m$ = milli-core cgroup | chỉ giữa các worker |
-| 5 | bộ nhớ worker | worker | $\log(1+b)/\log(1+64\,\text{GiB})$ | chỉ giữa các worker |
+| 4 | năng lực CPU của worker | worker | $\log(1+c_w)/\log(1+16000)$ | chỉ giữa các worker |
+| 5 | bộ nhớ worker | worker | $\log(1+B_w)/\log(1+64\,\text{GiB})$ | chỉ giữa các worker |
 | 6 | kiến trúc gốc khớp kiến trúc đích | cặp | 0/1 | không |
-| 7 | áp lực hàng đợi (LoadRatio) | worker, tức thời | active / max_parallel | có |
-| 8 | độ trễ RPC gần đây | worker, tức thời | ms/100 | không (giá trị mặc định) |
+| 7 | áp lực hàng đợi (LoadRatio) | worker, tức thời | $\text{LoadRatio}_{t,w}$ = ActiveTasks / MaxParallel | có |
+| 8 | độ trễ RPC gần đây | worker, tức thời | độ trễ tính bằng ms / 100 | không (giá trị mặc định) |
 | 9 | tác vụ là C++ | tác vụ | 0/1 | không |
-| 10 | log kích thước mã nguồn thô | tác vụ | $\log(1+s_{\text{raw}})/\log(1+1\,\text{MiB})$ | không (bằng 0) |
-| 11 | tỉ lệ thành công (Laplace) | worker, lịch sử | $(s+1)/(s+f+2)$ | rất ít |
+| 10 | log kích thước mã nguồn thô | tác vụ | $\log(1+s^{\text{raw}}_t)/\log(1+1\,\text{MiB})$ | không (bằng 0) |
+| 11 | tỉ lệ thành công (Laplace) | worker, lịch sử | $(n_{\text{succ}}+1)/(n_{\text{succ}}+n_{\text{fail}}+2)$ | rất ít |
+
+$s_t$ là tổng kích thước mã nguồn gửi đi cho tác vụ $t$ (tổng số byte mã nguồn đã tiền xử lý và mã nguồn thô), còn $s^{\text{raw}}_t$ là kích thước mã nguồn thô tính bằng byte; $c_w$ là hạn mức CPU cgroup của worker $w$ tính bằng milli-core và $B_w$ là giới hạn bộ nhớ tính bằng byte; MiB và GiB ở mẫu số là số byte; $n_{\text{succ}}$ và $n_{\text{fail}}$ là bộ đếm thành công và thất bại của registry cho worker tại lúc dispatch, không phải số đếm đã chiết khấu.
 
 ### 5.2. Hai chế độ thất bại, hai cơ chế
 
 LinUCB chuẩn bên trong Hybrid-Grid bộc lộ hai vấn đề cấu trúc, cả hai đều là hệ quả trực tiếp của vòng đời ở Mục 3.2.
 
-**(F1) Khởi đầu lạnh trên một chân trời ngắn.** Lúc khởi tạo $\hat\theta_a = \mathbf{0}$ và điểm chỉ còn số hạng khuyến khích khám phá, nên các quyết định đầu gần như ngẫu nhiên — chấp nhận được trên hàng triệu lượt hiển thị quảng cáo, nhưng đắt trên một build 152 tác vụ. Vì vậy HG-LinUCB giao $N = 100$ quyết định đầu cho LeastLoaded trong khi **vẫn học**: nó ghi lại ngữ cảnh của từng lựa chọn được giao và cập nhật mô hình của worker được chọn khi kết quả về. Heuristic đóng vai một chính sách hành vi an toàn, rải quan sát ra mọi worker.
+**(F1) Khởi đầu lạnh trên một chân trời ngắn.** Lúc khởi tạo $\hat\theta_w = \mathbf{0}$ và điểm chỉ còn số hạng khuyến khích khám phá, nên các quyết định đầu gần như ngẫu nhiên — chấp nhận được trên hàng triệu lượt hiển thị quảng cáo, nhưng đắt trên một build 152 tác vụ. Vì vậy HG-LinUCB giao $N = 100$ quyết định đầu cho LeastLoaded trong khi **vẫn học**: nó ghi lại ngữ cảnh của từng lựa chọn được giao và cập nhật mô hình của worker được chọn khi kết quả về. Heuristic đóng vai một chính sách hành vi an toàn, rải quan sát ra mọi worker.
 
-**(F2) Phản hồi trễ gây dồn việc.** Mô hình của một worker không đổi cho tới khi phần thưởng quay về, sau trọn một khoảng thời gian biên dịch kể từ lúc quyết định. Nếu mô hình đánh giá worker $a$ là tốt nhất, bandit sẽ tiếp tục chọn nó cho mọi quyết định trong khoảng đó. HG-LinUCB trừ đi một **mức phạt tải tức thời** khỏi điểm:
+**(F2) Phản hồi trễ gây dồn việc.** Mô hình của một worker không đổi cho tới khi phần thưởng quay về, sau trọn một khoảng thời gian biên dịch kể từ lúc quyết định. Nếu mô hình đánh giá worker $w$ là tốt nhất, bandit sẽ tiếp tục chọn nó cho mọi quyết định trong khoảng đó. HG-LinUCB trừ đi một **mức phạt tải tức thời** khỏi điểm:
 
-$$Q(a) = \underbrace{\hat{\theta}_a^\top x}_{\text{giá trị học được}} + \underbrace{\alpha\sqrt{x^\top A_a^{-1} x}}_{\text{thưởng khám phá}} - \underbrace{\lambda \cdot \text{LoadRatio}_a}_{\text{phạt tải}},$$
+$$Q_t(w) = \underbrace{\hat{\theta}_w^\top x_{t,w}}_{\text{giá trị học được}} + \underbrace{\alpha\sqrt{x_{t,w}^\top A_w^{-1} x_{t,w}}}_{\text{khuyến khích khám phá}} - \underbrace{\lambda \cdot \text{LoadRatio}_{t,w}}_{\text{phạt tải}},$$
 
-với $\alpha = 0{,}5$ và $\lambda = 0{,}5$. Mức phạt là một prior đặt bằng tay, dùng số tác vụ đang chạy tại đúng thời điểm dispatch — thông tin mà bộ học nếu không thì chỉ thu được chậm qua phần thưởng trễ. Bandit bù cho heuristic thứ nó thiếu (ước lượng tác vụ này sẽ chạy thế nào trên worker này), còn mức phạt tường minh phản ứng với mức chiếm slot hiện tại mà không cần chờ mô hình phần thưởng học tác động của nó. Vì mức phạt dùng *tỉ lệ* slot đang bận thay vì số tác vụ tuyệt đối, một $\lambda$ lớn khiến bộ lập lịch giống, nhưng không trùng với, LeastLoaded.
+trong đó $\alpha = \lambda = 0{,}5$ là trọng số khám phá và phạt tải; $x_{t,w}^\top A_w^{-1} x_{t,w}$, bình phương chuẩn của $x_{t,w}$ theo $A_w^{-1}$, lớn khi mô hình của worker có ít dữ liệu theo hướng của $x_{t,w}$; còn, với các giới hạn slot dương trong đánh giá, $\text{LoadRatio}_{t,w} = \text{ActiveTasks}_{t,w}/\text{MaxParallel}_w$, được đọc trước khi đặt chỗ cho tác vụ $t$ (trong trường hợp tổng quát, cài đặt thay giới hạn slot không dương bằng 4 và chặn trên tỉ lệ ở 1). Mức phạt là một prior đặt bằng tay, dùng số tác vụ đang chạy tại đúng thời điểm dispatch — thông tin mà bộ học nếu không thì chỉ thu được chậm qua phần thưởng trễ. Bandit bù cho heuristic thứ nó thiếu (ước lượng tác vụ này sẽ chạy thế nào trên worker này), còn mức phạt tường minh phản ứng với mức chiếm slot hiện tại mà không cần chờ mô hình phần thưởng học tác động của nó. Vì mức phạt dùng *tỉ lệ* slot đang bận thay vì số tác vụ tuyệt đối, một $\lambda$ lớn khiến bộ lập lịch giống, nhưng không trùng với, LeastLoaded.
 
 ### 5.3. Các yêu cầu triển khai
 
@@ -227,7 +248,7 @@ R4 đáng được nói riêng vì nó không gây triệu chứng nào nhìn th
 
 **Bảng 3.** Kết quả trước đây của HG-LinUCB trên cụm ổn định (CPython). Δ là trung vị hiệu theo khối, HG-LinUCB trừ đối thủ.
 
-| Điểm vận hành | Đối thủ | Δ (s) | $p_{\text{Holm}}$ | Cliff's d | Quyết định có worker rảnh |
+| Điểm vận hành | Đối thủ | Δ (s) | $p_{\text{Holm}}$ | Cliff's δ | Quyết định có worker rảnh |
 |---|---|---|---|---|---|
 | `-j5` | LinUCB thuần | −8,95 | 0,003 | −0,84 | 100% |
 | `-j5` | P2C | −4,66 | 0,003 | −0,78 | 100% |
@@ -242,19 +263,19 @@ Câu hỏi ở Mục 4.4 bắt nguồn từ đây. Trên cụm đó, các worker
 
 ### 7.1. Phép cập nhật
 
-**Mỗi worker quên theo đồng hồ quan sát của riêng nó.** Khi một kết quả mới về cho worker $w$, chúng tôi giảm trọng số các quan sát trước đó của worker này theo hệ số $\gamma$ và thêm kết quả mới với trọng số đầy đủ. Kết quả của các worker khác, hay thời gian thực trôi qua, không làm cũ mô hình của nó. Gọi $n$ là số kết quả đã được chấp nhận cho worker $w$, theo thứ tự các lần hoàn tất được xử lý. Với $A_{w,0} = I_d$ và $b_{w,0} = \mathbf{0}$:
+**Mỗi worker quên theo đồng hồ quan sát của riêng nó.** Khi một kết quả mới về cho worker $w$, chúng tôi giảm trọng số các quan sát trước đó của worker này theo hệ số $\gamma$ và thêm kết quả mới với trọng số đầy đủ. Kết quả của các worker khác, hay thời gian thực trôi qua, không làm cũ mô hình của nó. Gọi $n$ là số lần cập nhật mô hình đã được chấp nhận cho worker $w$, theo thứ tự các lần hoàn tất được xử lý, và $x_{w,n}$, $r_{w,n}$ là ngữ cảnh đã đóng băng lúc dispatch và phần thưởng của lần cập nhật thứ $n$. Với $A_{w,0} = I_d$ và $b_{w,0} = \mathbf{0}$:
 
 $$A_{w,n} = \gamma A_{w,n-1} + (1-\gamma) I_d + x_{w,n} x_{w,n}^\top, \qquad b_{w,n} = \gamma\, b_{w,n-1} + r_{w,n}\, x_{w,n}, \qquad \hat\theta_{w,n} = A_{w,n}^{-1} b_{w,n}.$$
 
-Khai triển ra, đây là hồi quy ridge với trọng số giảm dần theo hàm mũ và số hạng điều chuẩn không bị chiết khấu:
+Khi bỏ chỉ số $n$, $A_w$, $b_w$ và $\hat\theta_w$ chỉ trạng thái được chấp nhận gần nhất. Khai triển ra, đây là hồi quy ridge với trọng số giảm dần theo hàm mũ và số hạng điều chuẩn không bị chiết khấu:
 
 $$A_{w,n} = I_d + \sum_{i=1}^{n} \gamma^{\,n-i} x_{w,i} x_{w,i}^\top, \qquad b_{w,n} = \sum_{i=1}^{n} \gamma^{\,n-i} r_{w,i}\, x_{w,i}.$$
 
-Số hạng $(1-\gamma)I_d$ khôi phục prior ridge ở mỗi bước; thiếu nó, số hạng điều chuẩn sẽ suy giảm cùng dữ liệu. Lúc dispatch, sau cửa sổ warm-start, điểm là điểm HG-LinUCB ở Mục 5.2 tính từ mô hình đã chiết khấu:
+trong đó $i = 1,\dots,n$ chạy qua các lần cập nhật đã được chấp nhận của worker, nên trọng số $\gamma^{\,n-i}$ của một quan sát chỉ phụ thuộc vào số lần cập nhật worker đó nhận được sau nó. Số hạng $(1-\gamma)I_d$ khôi phục prior ridge ở mỗi bước; thiếu nó, số hạng điều chuẩn sẽ suy giảm cùng dữ liệu. Lúc dispatch, sau cửa sổ warm-start, điểm là điểm HG-LinUCB ở Mục 5.2 tính từ mô hình đã chiết khấu:
 
-$$p_{t,w} = \hat\theta_w^\top x_{t,w} + \alpha\sqrt{x_{t,w}^\top A_w^{-1} x_{t,w}} - \lambda\,\text{LoadRatio}_w, \qquad a_t = \arg\max_{w \in \mathcal{W}_t} p_{t,w}.$$
+$$Q_t(w) = \hat\theta_w^\top x_{t,w} + \alpha\sqrt{x_{t,w}^\top A_w^{-1} x_{t,w}} - \lambda\,\text{LoadRatio}_{t,w}, \qquad w_t = \arg\max_{w \in \mathcal{W}_t} Q_t(w).$$
 
-Ngữ cảnh được đóng băng lúc dispatch và dùng lại khi cập nhật (R1); warm-start, mức phạt tải và phần thưởng giống Mục 4.3 và 5.2. Với $\gamma = 1$, phép cập nhật trở về HG-LinUCB. Trong toàn bài, HG-LinUCB-D chỉ cấu hình đồng hồ theo từng worker (`--discount-mode=arm`) với bố cục 12 đặc trưng đầy đủ và không căn giữa phần thưởng.
+Vì dạng toàn phương giờ dùng ma trận đã chiết khấu, căn bậc hai của nó là độ rộng khám phá heuristic, không phải sai số chuẩn đã hiệu chuẩn của ước lượng chiết khấu. Ngữ cảnh được đóng băng lúc dispatch và dùng lại khi cập nhật (R1); warm-start, mức phạt tải và phần thưởng giống Mục 4.3 và 5.2. Với $\gamma = 1$, phép cập nhật trở về HG-LinUCB. Trong toàn bài, HG-LinUCB-D chỉ cấu hình đồng hồ theo từng worker (`--discount-mode=arm`) với bố cục 12 đặc trưng đầy đủ và không căn giữa phần thưởng.
 
 ### 7.2. Vì sao đồng hồ riêng cho từng worker
 
@@ -264,17 +285,17 @@ Lựa chọn này có cái giá, và chúng tôi nói thẳng. Nó không bảo 
 
 ### 7.3. Đọc γ như độ dài trí nhớ
 
-Hệ số chiết khấu quyết định bao nhiêu kết quả gần đây chi phối mô hình của một worker. Bảng 4 đưa ra ba cách đọc, tất cả tính theo đơn vị *kết quả của chính worker đó*, không phải số dispatch toàn cụm.
+Hệ số chiết khấu quyết định bao nhiêu kết quả gần đây chi phối mô hình của một worker. Bảng 4 đưa ra ba cách đọc, đều là tính chất của trọng số trên *các lần cập nhật của chính worker đó*, không phải số dispatch toàn cụm.
 
 **Bảng 4.** Trí nhớ ứng với hai hệ số chiết khấu được đánh giá ở Mục 8.
 
 | Đại lượng | γ = 0,80 | γ = 0,98 |
 |---|---|---|
 | Tổng trọng số quan sát tiệm cận $1/(1-\gamma)$ | 5 | 50 |
-| Chu kỳ bán rã $\log 0{,}5 / \log\gamma$ (kết quả) | 3,1 | 34,3 |
-| Cỡ mẫu hiệu dụng của trọng số $(1+\gamma)/(1-\gamma)$ | 9 | 99 |
+| Chu kỳ bán rã $\log 0{,}5 / \log\gamma$ (lần cập nhật) | 3,1 | 34,3 |
+| Cỡ mẫu hiệu dụng tiệm cận của trọng số $(1+\gamma)/(1-\gamma)$ | 9 | 99 |
 
-Đây là tính chất đại số của trọng số, không phải thời gian thích nghi. Với γ = 0,80, ba kết quả gần nhất chiếm khoảng 49% tổng trọng số quan sát tiệm cận; với γ = 0,98, một worker được dùng thường xuyên vẫn mang phần lớn lịch sử của một build 152 tác vụ khi build kết thúc. Mục 8 đo xem khác biệt đó làm gì với việc chọn worker trong một kịch bản; chúng tôi không khẳng định 0,80 là giá trị đúng ở nơi khác.
+Với $0<\gamma<1$ và $n\to\infty$, đại lượng thứ nhất là giới hạn của $\sum_i \gamma^{\,n-i}$, không tính số hạng ridge; chu kỳ bán rã là số lần cập nhật tiếp theo của cùng worker làm trọng số một quan sát giảm còn một nửa; cỡ mẫu hiệu dụng là giới hạn của $(\sum_i \gamma^{\,n-i})^2 / \sum_i \gamma^{\,2(n-i)}$, không phải số tác vụ đã quan sát. Đây là tính chất đại số của trọng số, không phải thời gian thích nghi. Với γ = 0,80, ba kết quả gần nhất chiếm khoảng 49% tổng trọng số quan sát tiệm cận; với γ = 0,98, một worker được dùng thường xuyên vẫn mang phần lớn lịch sử của một build 152 tác vụ khi build kết thúc. Mục 8 đo xem khác biệt đó làm gì với việc chọn worker trong một kịch bản; chúng tôi không khẳng định 0,80 là giá trị đúng ở nơi khác.
 
 ### 7.4. Thuật toán và chi phí
 
@@ -283,25 +304,26 @@ Thuật toán 1: HG-LinUCB-D (một quyết định dispatch và một kết qu�
 ──────────────────────────────────────────────────────────────────────
 Tham số: α (thưởng khám phá), N (cửa sổ warm-start), λ (trọng số phạt tải), γ (chiết khấu)
 Trạng thái mỗi worker w: A_w ∈ R^{d×d} (khởi tạo I_d), b_w ∈ R^d (khởi tạo 0), lưu sẵn A_w^{-1}
-Toàn cục: n = số lần dispatch tới nay
+Toàn cục: D = số quyết định tới nay (ban đầu bằng 0)
 
-SELECT(tác vụ τ, tập ứng viên khác rỗng W_τ):
-  1  n ← n + 1
-  2  nếu |W_τ| = 1: trả về worker duy nhất                  ▷ không có lựa chọn, không lưu ngữ cảnh
-  3  nếu n ≤ N:                                             ▷ warm-start thụ động
-  4      w* ← một ứng viên ít tải nhất;  x* ← BuildContext(τ, w*)
+SELECT(tác vụ t, tập ứng viên khác rỗng W_t):
+  1  D ← D + 1
+  2  nếu |W_t| = 1: trả về worker duy nhất                  ▷ không có lựa chọn, không lưu ngữ cảnh
+  3  nếu D ≤ N:                                             ▷ warm-start thụ động
+  4      w_t ← một ứng viên ít tải nhất;  x_{t,w_t} ← BuildContext(t, w_t)
   5  ngược lại:
-  6      với mỗi w ∈ W_τ:
-  7          x_w ← BuildContext(τ, w)                       ▷ Bảng 1, đọc trạng thái TẠI ĐÂY
-  8          p_w ← θ̂_wᵀx_w + α·sqrt(x_wᵀ A_w^{-1} x_w) − λ·LoadRatio(w)
-  9      w* ← argmax_{w ∈ W_τ} p_w;  x* ← x_{w*}
- 10  pending[τ.ID] ← x*;  trả về w*
+  6      với mỗi w ∈ W_t:
+  7          x_{t,w} ← BuildContext(t, w)                   ▷ Bảng 1, đọc trạng thái TẠI ĐÂY
+  8          Q_t(w) ← θ̂_wᵀx_{t,w} + α·sqrt(x_{t,w}ᵀ A_w^{-1} x_{t,w}) − λ·LoadRatio_{t,w}
+  9      w_t ← argmax_{w ∈ W_t} Q_t(w)
+ 10  pending[t] ← x_{t,w_t};  trả về w_t
 
-RECORDOUTCOME(worker w, phần thưởng r, success, ngữ cảnh tác vụ τ):
- 11  nếu không có pending[τ.ID]: trả về
- 12  x ← pending[τ.ID]; xóa mục này
- 13  A_w ← γ·A_w + (1−γ)·I_d + x xᵀ;   b_w ← γ·b_w + r·x     ▷ đồng hồ theo từng worker
- 14  A_w^{-1} ← nghịch đảo qua phân rã Cholesky của A_w      ▷ nếu thất bại, giữ mô hình cũ
+RECORDOUTCOME(worker w, phần thưởng r_t, success, tác vụ t):
+ 11  nếu r_t không hữu hạn hoặc không có pending[t]: trả về
+ 12  x ← pending[t]; xóa mục này
+ 13  A′ ← γ·A_w + (1−γ)·I_d + x xᵀ;   b′ ← γ·b_w + r_t·x     ▷ đồng hồ theo từng worker
+ 14  nếu A′, b′ hữu hạn và nghịch đảo Cholesky của A′ thành công, cho kết quả hữu hạn:
+         A_w ← A′;  b_w ← b′;  A_w^{-1} ← (A′)^{-1}               ▷ nếu không, giữ nguyên mô hình cũ
 ──────────────────────────────────────────────────────────────────────
 ```
 
@@ -324,7 +346,7 @@ $\hat\theta_w = A_w^{-1} b_w$ được tính lại khi worker được chấm đ
 
 **Phiên.** Mỗi ô là một phiên hai build liên tiếp trên cùng coordinator. Trạng thái của bộ học được giữ từ build 1 sang build 2: build 1 là build học, trong đó warm-start kết thúc và sự suy giảm bắt đầu, còn **build 2 là build được đo**. Coordinator khởi động lại cho mỗi ô, nên mọi bộ lập lịch bắt đầu mỗi phiên từ trạng thái lạnh. Thời điểm bắt đầu được ghi khi tải nền được xác nhận đang chạy, tại dispatch 105–108 ở S1 và 134–139 ở S2 trên các bộ lập lịch. Với γ = 0,80, đã có 44–46 (S1) và 13–16 (S2) lần dispatch diễn ra sau thời điểm xác nhận khi build 2 bắt đầu.
 
-**Thiết kế và phân tích.** Mỗi khối chạy cả năm bộ lập lịch đã đăng ký, mỗi bộ đúng một lần, theo thứ tự hình vuông Latin ngẫu nhiên 5 × 5 (mỗi bộ đứng ở mỗi vị trí đúng một lần trong mỗi nhóm năm khối); phần so sánh chính trình bày bốn bộ, với lý do lược bỏ được giải thích ở Mục 9.3. Mỗi kịch bản mở đầu bằng một ô làm nóng bị loại. Số đo chính là thời gian build 2. Với mỗi kịch bản, chúng tôi so HG-LinUCB-D (γ = 0,80) với LeastLoaded, SED và γ = 0,98 bằng kiểm định Wilcoxon dấu-hạng **hai phía** [18], hiệu chỉnh Holm [19] được áp dụng riêng cho từng kịch bản trên họ bốn so sánh ban đầu, gồm cả baseline được lược khỏi phần so sánh chính (Mục 9.3), rank-biserial ghép cặp $r$, và trung vị hiệu theo khối kèm khoảng tin cậy bootstrap 95% (10.000 lần lấy mẫu lại các hiệu ghép cặp theo khối; khoảng biên, không phải khoảng đồng thời đã hiệu chỉnh Holm). Phần trăm là trung vị hiệu ghép cặp chia cho trung vị của baseline. Quy tắc hợp lệ của ô và chạy lại được cố định trong bản đăng ký trước; mọi ô được báo cáo đều hoàn tất mà không có lỗi, chạy lại hay gián đoạn.
+**Thiết kế và phân tích.** Mỗi khối chạy cả năm bộ lập lịch đã đăng ký, mỗi bộ đúng một lần, theo thứ tự hình vuông Latin ngẫu nhiên 5 × 5 (mỗi bộ đứng ở mỗi vị trí đúng một lần trong mỗi nhóm năm khối); phần so sánh chính trình bày bốn bộ, với lý do lược bỏ được giải thích ở Mục 9.3. Mỗi kịch bản mở đầu bằng một ô làm nóng bị loại. Số đo chính là thời gian build 2. Với mỗi kịch bản, chúng tôi so HG-LinUCB-D (γ = 0,80) với LeastLoaded, SED và γ = 0,98 bằng kiểm định Wilcoxon dấu-hạng **hai phía** [18], hiệu chỉnh Holm [19] được áp dụng riêng cho từng kịch bản trên họ bốn so sánh ban đầu, gồm cả baseline được lược khỏi phần so sánh chính (Mục 9.3), hệ số tương quan rank-biserial ghép cặp $r_{\text{rb}}$, và trung vị hiệu theo khối kèm khoảng tin cậy bootstrap 95% (10.000 lần lấy mẫu lại các hiệu ghép cặp theo khối; khoảng biên, không phải khoảng đồng thời đã hiệu chỉnh Holm). Phần trăm là trung vị hiệu ghép cặp chia cho trung vị của baseline. Quy tắc hợp lệ của ô và chạy lại được cố định trong bản đăng ký trước; mọi ô được báo cáo đều hoàn tất mà không có lỗi, chạy lại hay gián đoạn.
 
 **Nguồn gốc.** Kịch bản và giá trị γ = 0,80 được chọn qua các lượt pilot khám phá trên cấu hình S1, trong đó đã thử bảy cấu hình HG-LinUCB-D khác mặc định cùng cấu hình mặc định; các pilot cũng thử ba thiết lập của baseline cục bộ được lược bỏ, và toàn bộ lịch sử tìm kiếm được ghi trong bản đăng ký. Dữ liệu pilot bị loại khỏi mọi kết quả ở đây. Cài đặt, tham số, kịch bản, số khối và phân tích sau đó được đóng băng trong một bản đăng ký trước (commit Hybrid-Grid `5c25935`) trước khi thu bất kỳ dữ liệu nào được báo cáo. S2 không được dùng để chọn, nhưng một lượt kiểm tra công cụ trên cấu hình của nó với hai bộ lập lịch đã được xem trước khi đóng băng, nên chúng tôi mô tả nó là xác nhận **giữ lại một phần** chứ không phải xác nhận mù.
 
@@ -341,9 +363,9 @@ Cả hai cấu hình HG-LinUCB-D dùng $\alpha = 0{,}5$, $N = 100$ và $\lambda 
 
 ### 8.3. Kết quả
 
-**Bảng 5.** Thời gian build 2, HG-LinUCB-D (γ = 0,80) so với từng baseline. Δ là trung vị hiệu theo khối (nghiệm thức trừ baseline; âm nghĩa là HG-LinUCB-D nhanh hơn), kèm khoảng tin cậy bootstrap 95%. $r = -1$ nghĩa là HG-LinUCB-D nhanh hơn ở mọi khối.
+**Bảng 5.** Thời gian build 2, HG-LinUCB-D (γ = 0,80) so với từng baseline. Δ là trung vị hiệu theo khối (nghiệm thức trừ baseline; âm nghĩa là HG-LinUCB-D nhanh hơn), kèm khoảng tin cậy bootstrap 95%. $r_{\text{rb}} = -1$ nghĩa là HG-LinUCB-D nhanh hơn ở mọi khối.
 
-| Kịch bản | Baseline | Trung vị baseline (s) | Δ (s) | KTC 95% | % | $p_{\text{Holm}}$ | $r$ | Số khối nhanh hơn |
+| Kịch bản | Baseline | Trung vị baseline (s) | Δ (s) | KTC 95% | % | $p_{\text{Holm}}$ | $r_{\text{rb}}$ | Số khối nhanh hơn |
 |---|---|---|---|---|---|---|---|---|
 | S1 (trung vị 104,2 s) | LeastLoaded | 134,7 | −29,21 | [−33,89; −26,85] | −21,7% | 0,00024 | −1 | 15/15 |
 | | SED | 147,8 | −44,13 | [−44,61; −41,54] | −29,9% | 0,00024 | −1 | 15/15 |
@@ -398,9 +420,13 @@ Cách phân bổ khác nhau giữa các chính sách. **LeastLoaded** gửi kho�
 
 Tới các dispatch 21–40 sau thời điểm xác nhận, tỉ lệ trung vị của γ = 0,80 là 5% ở cả hai kịch bản; các cửa sổ sau dao động 0–10% ở S1 và 0–2,5% ở S2. Phân bổ của γ = 0,98 giảm từ từ hơn, trong khi LeastLoaded và SED tiếp tục gửi khoảng một phần tư công việc trở lên tới cặp worker suy giảm. Trục là số dispatch chứ không phải giây, và các cửa sổ khá thô: bảng mô tả sự thay đổi phân bổ, không phải một thời gian thích nghi được đo chính thức.
 
-**Bộ học đã ước lượng gì.** Nhật ký chẩn đoán ghi giá trị học được $\mu_w = \hat\theta_w^\top x$ của từng ứng viên tại mỗi quyết định. Với mỗi quyết định có cả một worker khỏe và một worker suy giảm cùng rảnh, chúng tôi lấy khoảng cách giữa giá trị học được tốt nhất của nhóm khỏe và của nhóm suy giảm, $G = \max_{\text{khỏe}} \mu - \max_{\text{suy giảm}} \mu$. Khoảng cách dương nghĩa là mô hình ưu tiên một worker khỏe trước khi cộng số hạng khuyến khích khám phá và trừ mức phạt tải; giới hạn ở các worker rảnh loại mức phạt tải khỏi phép so sánh. Các quyết định như vậy chiếm 2.280 trên 2.280 (S1) và 1.513 trên 1.520 (S2) quyết định build 2 của γ = 0,80, và 2.166 và 1.386 của γ = 0,98.
+**Bộ học đã ước lượng gì.** Nhật ký chẩn đoán ghi giá trị học được $\mu_{t,w} = \hat\theta_w^\top x_{t,w}$ của từng ứng viên tại mỗi quyết định, đánh chỉ số theo tác vụ $t$. Với mỗi quyết định có cả một worker khỏe và một worker suy giảm cùng rảnh, chúng tôi lấy khoảng cách giữa giá trị học được tốt nhất của nhóm khỏe và của nhóm suy giảm:
 
-Trên build 2, trung vị khoảng cách là **0,0645** (S1) và **0,0600** (S2) với γ = 0,80, so với **0,0196** và **0,0262** với γ = 0,98 — lần lượt lớn gấp khoảng 3,3 và 2,3 lần khi trí nhớ ngắn hơn. Trên thang log-thời gian đã biến đổi ngược của mô hình, khoảng cách 0,06 và 0,02 tương ứng với tỉ số khoảng 2,0 và 1,3 của $1 + T_{\text{ms}}$. Đây là các tương phản do mô hình ngụ ý giữa ứng viên rảnh tốt nhất của mỗi nhóm, không phải dự đoán độ trễ trung bình số học, và chúng không so sánh trực tiếp được với tỉ số bốn lần ở Mục 8.1.
+$$G_t = \max_{w \in \mathcal{W}_t^{\text{healthy},0}} \mu_{t,w} - \max_{w \in \mathcal{W}_t^{\text{degraded},0}} \mu_{t,w},$$
+
+trong đó $\mathcal{W}_t^{\text{healthy},0}$ và $\mathcal{W}_t^{\text{degraded},0}$ là hai tập ứng viên đủ điều kiện, lần lượt thuộc nhóm khỏe và nhóm suy giảm, không có tác vụ nào đang chạy (cả hai tập đều khác rỗng), và $\mu_{t,w}$ tính trên thang phần thưởng. Khoảng cách dương nghĩa là mô hình ưu tiên một worker khỏe trước khi cộng số hạng khuyến khích khám phá và trừ mức phạt tải; giới hạn ở các worker rảnh loại mức phạt tải khỏi phép so sánh. Các quyết định như vậy chiếm 2.280 trên 2.280 (S1) và 1.513 trên 1.520 (S2) quyết định build 2 của γ = 0,80, và 2.166 và 1.386 của γ = 0,98.
+
+Trên build 2, trung vị khoảng cách là **0,0645** (S1) và **0,0600** (S2) với γ = 0,80, so với **0,0196** và **0,0262** với γ = 0,98 — lần lượt lớn gấp khoảng 3,3 và 2,3 lần khi trí nhớ ngắn hơn. Trên thang log-thời gian đã biến đổi ngược của mô hình, khoảng cách 0,06 và 0,02 tương ứng với tỉ số khoảng 2,0 và 1,3 của $1 + \widetilde{T}$, trong đó $\widetilde{T}_{t,w} = 120\,001^{-\mu_{t,w}} - 1$ là thời gian biên dịch do mô hình ngụ ý, tính bằng mili giây. Đây là các tương phản do mô hình ngụ ý giữa ứng viên rảnh tốt nhất của mỗi nhóm, không phải dự đoán độ trễ trung bình số học, và chúng không so sánh trực tiếp được với tỉ số bốn lần ở Mục 8.1.
 
 **Số hạng khuyến khích khám phá quyết định bao nhiêu lần.** Sau warm-start, chúng tôi đếm các quyết định mà việc cộng số hạng khuyến khích khám phá đã đổi người thắng: worker cực đại hóa giá trị học được trừ mức phạt tải không phải là worker cực đại hóa toàn bộ điểm. Ở build 2, điều này xảy ra ở **2,0%** (S1) và **1,6%** (S2) quyết định với γ = 0,80, và ở **18,4%** và **19,7%** với γ = 0,98. Khi giá trị học được tách các worker rõ ràng, số hạng khuyến khích khám phá hiếm khi lật ngược chúng; khi không, khoảng một trong năm quyết định do số hạng khuyến khích khám phá định đoạt. Một lần đổi người thắng có thể xảy ra giữa hai worker khỏe, nên thống kê này không đếm riêng việc khám phá vào worker suy giảm hay ước lượng chi phí của nó; và đây là phân rã các quyết định đã ghi, không phải phản thực tế, vì bỏ số hạng khuyến khích khám phá sẽ thay đổi cả quỹ đạo.
 
