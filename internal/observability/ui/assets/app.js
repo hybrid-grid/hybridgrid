@@ -22,6 +22,7 @@ function dashboard() {
         stats: {},
         workers: [],
         builds: [],
+        schedulerFilter: '',
         durationChartBuilds: [],
         events: [],
         recentTasks: [],
@@ -43,6 +44,16 @@ function dashboard() {
         consoleMissing: false,
         consoleLoading: false,
         themeQuery: null,
+
+        get schedulers() {
+            const seen = new Set(this.builds.map((b) => b.scheduler).filter(Boolean));
+            return [...seen].sort();
+        },
+
+        get visibleBuilds() {
+            if (!this.schedulerFilter) return this.builds;
+            return this.builds.filter((b) => b.scheduler === this.schedulerFilter);
+        },
 
         get cacheHitRate() {
             const hits = this.stats.cache_hits || 0;
@@ -270,7 +281,10 @@ function dashboard() {
             window.addEventListener('hashchange', () => this.handleRoute());
             this.handleRoute();
             this.fetchInitialData();
-            this.connectWebSocket();
+            // ?nows keeps the page quiet for deterministic headless
+            // captures: the websocket's reconnect timers otherwise
+            // starve Chromium's virtual clock.
+            if (!new URLSearchParams(location.search).has('nows')) this.connectWebSocket();
             if (window.matchMedia) {
                 this.themeQuery = window.matchMedia('(prefers-color-scheme: dark)');
                 const recreate = () => { destroyCharts(); this.renderRouteCharts(); };

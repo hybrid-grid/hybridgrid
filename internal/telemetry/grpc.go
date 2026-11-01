@@ -368,16 +368,18 @@ func taskToProto(t *TaskInfo) *pb.TelemetryTask {
 
 func buildToProto(b *BuildInfo) *pb.TelemetryBuild {
 	return &pb.TelemetryBuild{
-		Id:             b.ID,
-		BuildType:      b.BuildType,
-		Status:         b.Status,
-		TotalTasks:     int32(b.TotalTasks),
-		CompletedTasks: int32(b.CompletedTasks),
-		FailedTasks:    int32(b.FailedTasks),
-		RunningTasks:   int32(b.RunningTasks),
-		FromCacheCount: int32(b.FromCacheCount),
-		FirstTaskAtMs:  b.FirstTaskAtMs,
-		LastTaskAtMs:   b.LastTaskAtMs,
-		Truncated:      b.Truncated,
+		Id:              b.ID,
+		BuildType:       b.BuildType,
+		Status:          b.Status,
+		TotalTasks:      int32(b.TotalTasks),
+		CompletedTasks:  int32(b.CompletedTasks),
+		FailedTasks:     int32(b.FailedTasks),
+		RunningTasks:    int32(b.RunningTasks),
+		FromCacheCount:  int32(b.FromCacheCount),
+		FirstTaskAtMs:   b.FirstTaskAtMs,
+		LastTaskAtMs:    b.LastTaskAtMs,
+		Truncated:       b.Truncated,
+		Scheduler:       b.Scheduler,
+		SchedulerParams: b.SchedulerParams,
 	}
 }

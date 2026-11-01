@@ -45,6 +45,8 @@ P90_THRESHOLD="${P90_THRESHOLD:-}"
 # Coordinator per-compile deadline (e.g. 600s). Empty keeps the built-in 120s
 # and passes no flag, so Experiments 1-2 commands are unchanged.
 REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-}"
+# Extra flags appended to every coordinator command (e.g. --build-history=...).
+COORD_FLAGS="${COORD_FLAGS:-}"
 DRIFT="${DRIFT:-none}"
 DRIFT_AT="${DRIFT_AT:-120}"
 DRIFT_ON_MAX_SET=${DRIFT_ON_MAX+x}
@@ -225,7 +227,7 @@ services:
     build:
       context: ../..
       dockerfile: test/stress/Dockerfile.base
-    command: hg-coord serve --grpc-port=9000 --http-port=8080 $flags
+    command: hg-coord serve --grpc-port=9000 --http-port=8080 $flags $COORD_FLAGS
     volumes:
       - task-logs:/tmp
     ports:

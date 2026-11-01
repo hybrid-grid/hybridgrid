@@ -83,14 +83,19 @@
         </section>
 
         <section class="pane" id="build-history" aria-labelledby="build-history-heading">
-          <div class="pane-header"><h2 id="build-history-heading">Build History</h2></div>
+          <div class="pane-header"><h2 id="build-history-heading">Build History</h2>
+            <select class="scheduler-filter" x-model="schedulerFilter" x-show="schedulers.length > 1" aria-label="Filter builds by scheduler">
+              <option value="">all schedulers</option>
+              <template x-for="s in schedulers" :key="s"><option :value="s" x-text="s"></option></template>
+            </select>
+          </div>
           <div class="pane-body flush">
             <template x-if="builds.length === 0"><p class="empty-state">No builds yet — run <span class="mono">HG_BUILD_ID=&lt;id&gt; make -j5</span> to group a build</p></template>
             <div class="table-scroll" x-show="builds.length > 0">
               <table>
-                <thead><tr><th class="ball-cell"><span class="sr-only">Status</span></th><th>Build</th><th>Type</th><th>Tasks</th><th>Cached</th><th>Duration</th><th>Started</th><th>Last activity</th></tr></thead>
+                <thead><tr><th class="ball-cell"><span class="sr-only">Status</span></th><th>Build</th><th>Type</th><th>Scheduler</th><th>Tasks</th><th>Cached</th><th>Duration</th><th>Started</th><th>Last activity</th></tr></thead>
                 <tbody>
-                  <template x-for="build in builds" :key="build.id">
+                  <template x-for="build in visibleBuilds" :key="build.id">
                     <tr class="build-row">
                       <td class="ball-cell">
                         <svg class="status-ball" :class="'status-' + buildStatus(build)" viewBox="0 0 14 14" role="img" :aria-label="buildStatus(build)">
@@ -99,6 +104,7 @@
                       </td>
                       <td><a class="build-id" :href="'#/build/' + encodeURIComponent(build.id)" :title="build.id" x-text="build.id"></a></td>
                       <td class="muted" x-text="build.build_type || 'native'"></td>
+                      <td class="mono muted" x-text="build.scheduler || '—'" :title="build.scheduler_params || ''"></td>
                       <td class="progress-cell"><span class="task-count" x-text="`${build.completed_tasks + build.failed_tasks}/${build.total_tasks}`"></span><span class="thin-progress"><span :style="`width: ${buildProgress(build)}%`"></span></span></td>
                       <td x-text="build.from_cache_count || 0"></td>
                       <td class="mono muted" x-text="buildDurationLabel(build)"></td>
@@ -216,7 +222,7 @@
           <div class="pane-body flush">
             <template x-if="events.length === 0"><p class="empty-state">No events yet.</p></template>
             <ol class="event-list" x-show="events.length > 0">
-              <template x-for="(event, index) in events.slice().reverse()" :key="`${event.timestamp || index}-${event.type}`">
+              <template x-for="(event, index) in events.slice().reverse()" :key="`${event.timestamp || ''}-${event.type}-${index}`">
                 <li class="event-item"><time class="event-time" x-text="formatEventTime(event.timestamp)"></time><span class="event-badge" :class="'event-' + event.type" x-text="event.type"></span><span class="event-message" x-text="formatEventData(event)"></span></li>
               </template>
             </ol>
@@ -255,6 +261,8 @@
                 <dl class="meta-grid">
                   <div><dt>Status</dt><dd x-text="buildStatus(detail.build)"></dd></div>
                   <div><dt>Type</dt><dd x-text="detail.build.build_type || 'native'"></dd></div>
+                  <div><dt>Scheduler</dt><dd class="mono" x-text="detail.build.scheduler || '—'"></dd></div>
+                  <div x-show="detail.build.scheduler_params"><dt>Scheduler params</dt><dd class="mono" x-text="detail.build.scheduler_params"></dd></div>
                   <div><dt>Tasks</dt><dd x-text="`${detail.build.completed_tasks + detail.build.failed_tasks}/${detail.build.total_tasks}`"></dd></div>
                   <div><dt>Failed</dt><dd x-text="detail.build.failed_tasks"></dd></div>
                   <div><dt>From cache</dt><dd x-text="detail.build.from_cache_count"></dd></div>

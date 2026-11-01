@@ -121,6 +121,7 @@ button { cursor: pointer; }
 .dashboard-main { width: min(100%, 1400px); padding: 1.5rem; }
 .pane { margin-bottom: 1.5rem; overflow: hidden; background: var(--background); border: 1px solid var(--pane-border-color); border-radius: 3px; }
 .pane-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .6rem .85rem; background: var(--pane-header-bg); border-bottom: 1px solid var(--pane-border-color); }
+.scheduler-filter { margin-left: auto; font: inherit; font-size: var(--font-size-sm); padding: .25rem .5rem; border-radius: 6px; border: 1px solid var(--pane-border-color); background: var(--surface, transparent); color: inherit; }
 .pane-header h2 { margin: 0; font-size: var(--font-size-sm); font-weight: var(--pane-header-font-weight); letter-spacing: .025em; text-transform: uppercase; }
 .pane-body { padding: 1rem; }
 .pane-body.flush { padding: 0; }
