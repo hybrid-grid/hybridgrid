@@ -122,6 +122,26 @@ docker compose up -d --scale worker=4
 open http://localhost:8080
 ```
 
+### Standalone Frontend Image
+
+Build the dashboard frontend as an independent static image:
+
+```bash
+docker build --target hg-dashboard-web -t hybridgrid-dashboard-web .
+```
+
+At runtime, set `API_BACKEND_URL` to the HTTP address of `hg-dashboard` (the service that exposes `/api/v1/*` and `/ws`), not the coordinator's gRPC port:
+
+```bash
+docker run --rm -p 3000:8080 \
+  -e API_BACKEND_URL=http://host.docker.internal:8081 \
+  hybridgrid-dashboard-web
+
+open http://localhost:3000
+```
+
+`API_BACKEND_URL` must be an `http://` or `https://` origin reachable from inside the container, without a path. On Linux, add `--add-host=host.docker.internal:host-gateway` when `hg-dashboard` runs directly on the host.
+
 ### Using Binaries
 
 ```bash
@@ -554,6 +574,15 @@ golangci-lint run
 # Generate proto
 protoc --go_out=. --go-grpc_out=. proto/build.proto
 ```
+
+## Extending Hybridgrid (plugins)
+
+Hybridgrid is extensible at four seams — see **[docs/plugins.md](docs/plugins.md)** for contracts, versioning, and the security model:
+
+- **Builder plugins**: add a build type by dropping an `hg-exec-<id>` executable in the worker's `--builder-dir` (any language). Submit with `hgbuild build -t <id> <dir> -- <args>`.
+- **Scheduler plugins**: replace the coordinator's scheduling policy with an external gRPC process: `hg-coord serve --scheduler=external --scheduler-plugin-addr=host:port`.
+- **Event webhooks**: receive `task_started`/`task_completed` JSON at your HTTP endpoints: `hg-coord serve --event-webhook https://...`.
+- **Telemetry consumers**: any process can consume cluster telemetry over the gRPC `TelemetryService` (the bundled dashboard is just one consumer).
 
 ## License
 

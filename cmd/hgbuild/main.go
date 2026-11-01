@@ -1,8 +1,11 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +22,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/build"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/flutter"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/output"
+	"github.com/h3nr1-d14z/hybridgrid/internal/cli/sourcearchive"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/taskid"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/unity"
 	"github.com/h3nr1-d14z/hybridgrid/internal/compiler"
@@ -320,11 +324,28 @@ Examples:
   hgbuild build *.c -o myapp              Compile multiple files`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Unknown build types are plugin-builder ids: route the
+			// project through the custom-builder path instead of the
+			// per-TU compile loop.
+			if !isCoreBuildType(buildType) {
+				return runCustomBuild(buildType, args)
+			}
 			c, err := client.New(newClientConfig(coordinator, 5*time.Minute))
 			if err != nil {
 				return fmt.Errorf("failed to connect: %w", err)
 			}
 			defer c.Close()
+
+			// Client cache: same store and key space the Service path uses.
+			// A cache failure only disables reuse; the build still runs.
+			buildCfg := build.DefaultConfig()
+			cacheStore, err := cache.NewStore(buildCfg.CacheDir, buildCfg.CacheMaxSize, buildCfg.CacheTTLHours)
+			if err != nil {
+				log.Warn().Err(err).Msg("Client cache disabled")
+			} else {
+				// Persist hit counters for `hgbuild cache stats`.
+				defer cacheStore.Close()
+			}
 
 			// One build session per invocation: all files submitted below
 			// share it, and the wrapping make's HG_BUILD_ID groups the
@@ -337,6 +358,7 @@ Examples:
 			// Process each file
 			successCount := 0
 			failCount := 0
+			var cacheHits int32
 
 			for _, file := range args {
 				// Read source file
@@ -353,6 +375,30 @@ Examples:
 					comp = detectCompiler(file)
 				}
 
+				// Parse target architecture
+				arch := parseArch(targetArch)
+
+				// Cache key covers raw source, compiler, flags and target
+				// arch — the same bytes the Service path would hash.
+				cacheKey := cacheKeyFor(comp, compArgs, arch, source)
+
+				// Cross-arch: local preprocessing would bake this machine's
+				// headers into the .i — silently wrong on the other arch
+				// (jmp_buf/bits macros resolve for the wrong target). Send raw
+				// source plus project includes; the worker's own toolchain
+				// preprocesses with arch-correct headers.
+				rawCrossArch := arch != pb.Architecture_ARCH_UNSPECIFIED && arch != clientArch()
+
+				var includeFiles map[string][]byte
+				if rawCrossArch {
+					includeFiles = collectCrossArchIncludes(compArgs)
+				} else if prep := preprocessLocal(file, comp, compArgs); prep != nil {
+					// Same-arch: preprocess locally so workers receive a
+					// self-contained translation unit (mirrors the Service
+					// path in internal/cli/build). Falls back to raw source.
+					source = prep
+				}
+
 				// Generate task ID
 				taskID := taskid.NewTaskID()
 
@@ -362,26 +408,47 @@ Examples:
 					outFile = strings.TrimSuffix(file, filepath.Ext(file)) + ".o"
 				}
 
-				// Parse target architecture
-				arch := parseArch(targetArch)
-
 				if verbose {
 					fmt.Printf("Compiling %s → %s (compiler: %s)\n", file, outFile, comp)
 				} else {
 					fmt.Printf("Compiling %s...", file)
 				}
 
+				// Cache hit: the object bytes are already local, so skip the
+				// network entirely. Report it so the dashboard counts it.
+				if cacheKey != "" && cacheStore != nil {
+					if obj, ok := cacheStore.GetBytes(cacheKey); ok {
+						if err := os.WriteFile(outFile, obj, 0644); err != nil { // #nosec G703 -- outFile is the compiler's own -o argument, exactly like gcc writing it
+							fmt.Printf(" FAILED (write error: %v)\n", err)
+							failCount++
+							continue
+						}
+						fmt.Printf(" OK (cached)\n")
+						cacheHits++
+						successCount++
+						continue
+					}
+				}
+
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 
 				// Create compile request
 				req := &pb.CompileRequest{
-					TaskId:             taskID,
-					BuildId:            buildID,
-					Compiler:           comp,
-					CompilerArgs:       compArgs,
-					PreprocessedSource: source,
-					TargetArch:         arch,
-					TimeoutSeconds:     300,
+					TaskId:         taskID,
+					BuildId:        buildID,
+					Compiler:       comp,
+					CompilerArgs:   compArgs,
+					TargetArch:     arch,
+					TimeoutSeconds: 300,
+				}
+				if rawCrossArch {
+					req.RawSource = source
+					req.SourceFilename = filepath.Base(file)
+					req.IncludeFiles = includeFiles
+					req.ClientOs = runtime.GOOS
+					req.ClientArch = clientArch()
+				} else {
+					req.PreprocessedSource = source
 				}
 
 				// Send to coordinator
@@ -403,6 +470,14 @@ Examples:
 						continue
 					}
 
+					// Store only successful objects; a cache write failure
+					// must never fail the build.
+					if cacheKey != "" && cacheStore != nil && len(resp.ObjectFile) > 0 {
+						if err := cacheStore.PutBytes(cacheKey, resp.ObjectFile); err != nil && verbose {
+							fmt.Printf("  [cache] store failed: %v\n", err)
+						}
+					}
+
 					duration := time.Since(start)
 					if verbose {
 						fmt.Printf(" OK (%.2fs, %d bytes, queue: %dms, compile: %dms)\n",
@@ -421,6 +496,12 @@ Examples:
 				}
 			}
 
+			// One report per invocation: a per-file RPC costs a full RTT each
+			// and would defeat the point of a local cache hit.
+			if cacheHits > 0 {
+				_ = c.ReportCacheHit(context.Background(), cacheHits)
+			}
+
 			// Summary
 			fmt.Printf("\nResults: %d succeeded, %d failed\n", successCount, failCount)
 
@@ -431,7 +512,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVarP(&buildType, "type", "t", "cpp", "build type (cpp, flutter, unity, rust, go)")
+	cmd.Flags().StringVarP(&buildType, "type", "t", "cpp", "build type (cpp, flutter, unity, rust, go, or any plugin builder id)")
 	cmd.Flags().StringVarP(&output, "output", "o", "", "output file (for single file builds)")
 	cmd.Flags().StringVar(&compiler, "compiler", "", "compiler to use (auto-detect if empty)")
 	cmd.Flags().StringSliceVar(&compArgs, "args", nil, "compiler arguments")
@@ -467,6 +548,165 @@ func newUnityCmd() *cobra.Command {
 	}
 
 	return unity.NewCommand(deps)
+}
+
+// isCoreBuildType reports whether buildType names a built-in type the
+// build command handles itself (cpp compiles per-TU; flutter and unity
+// have dedicated subcommands). Everything else is a plugin-builder id.
+func isCoreBuildType(buildType string) bool {
+	switch buildType {
+	case "cpp", "flutter", "unity", "rust", "go":
+		return true
+	}
+	return false
+}
+
+// customSourceExclude keeps VCS metadata, dependency caches, and stale
+// build outputs out of the plugin-builder source archive.
+func customSourceExclude(relPath string, isDir bool) bool {
+	relPath = strings.TrimPrefix(relPath, "./")
+	if relPath == "" {
+		return false
+	}
+	for _, part := range strings.Split(relPath, "/") {
+		switch part {
+		case ".git", ".hg", ".svn", "node_modules", "__pycache__",
+			".venv", "venv", "dist", "out", "build", "target", "bin", "obj":
+			return true
+		}
+	}
+	return strings.HasSuffix(relPath, ".DS_Store")
+}
+
+// runCustomBuild submits a whole-project build to a plugin builder:
+// archive the project, send it with the builder id, then unpack the
+// returned artifacts into outDir (default "hybridgrid-out").
+func runCustomBuild(builderID string, args []string) error {
+	project := "."
+	if len(args) > 0 {
+		project = args[0]
+	}
+
+	archive, hash, err := sourcearchive.Create(project, customSourceExclude)
+	if err != nil {
+		return fmt.Errorf("failed to archive project: %w", err)
+	}
+
+	c, err := client.New(newClientConfig(coordinator, 30*time.Minute))
+	if err != nil {
+		return fmt.Errorf("failed to connect: %w", err)
+	}
+	defer c.Close()
+
+	buildID := taskid.BuildSessionID()
+	taskID := taskid.NewTaskID()
+	fmt.Printf("Custom build %q (session %s, task %s, source %d bytes)\n",
+		builderID, buildID, taskID, len(archive))
+
+	// Builder args come from the positional args after the project
+	// path, so `hgbuild build -t mytool . --release --verbose` passes
+	// --release --verbose straight through to the plugin.
+	var builderArgs []string
+	if len(args) > 1 {
+		builderArgs = args[1:]
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	resp, err := c.Build(ctx, &pb.BuildRequest{
+		TaskId:        taskID,
+		BuildId:       buildID,
+		SourceHash:    hash,
+		SourceArchive: archive,
+		CustomBuilder: builderID,
+		Config: &pb.BuildRequest_CustomConfig{
+			CustomConfig: &pb.CustomConfig{Args: builderArgs},
+		},
+		TimeoutSeconds: 1800,
+	})
+	if err != nil {
+		return fmt.Errorf("build failed: %w", err)
+	}
+
+	if resp.Stdout != "" {
+		fmt.Print(resp.Stdout)
+		if !strings.HasSuffix(resp.Stdout, "\n") {
+			fmt.Println()
+		}
+	}
+
+	if resp.Status != pb.TaskStatus_STATUS_COMPLETED {
+		if resp.Stderr != "" {
+			fmt.Fprintf(os.Stderr, "builder stderr:\n%s\n", resp.Stderr)
+		}
+		return fmt.Errorf("builder %q failed (exit %d)", builderID, resp.ExitCode)
+	}
+
+	if len(resp.Artifacts) == 0 {
+		fmt.Println("Build succeeded (no artifacts).")
+		return nil
+	}
+
+	outDir := "hybridgrid-out"
+	if err := extractArtifactArchive(outDir, resp.Artifacts); err != nil {
+		return fmt.Errorf("failed to unpack artifacts: %w", err)
+	}
+	fmt.Printf("Artifacts written to %s:\n", outDir)
+	for _, a := range resp.ArtifactList {
+		checksum := a.Checksum
+		if len(checksum) > 12 {
+			checksum = checksum[:12]
+		}
+		fmt.Printf("  %-40s %8d bytes  sha256:%s…\n", a.Path, a.SizeBytes, checksum)
+	}
+	return nil
+}
+
+// extractArtifactArchive unpacks a plain-tar artifact archive into dir,
+// refusing entries that escape dir (path traversal).
+func extractArtifactArchive(dir string, data []byte) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	reader := tar.NewReader(bytes.NewReader(data))
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if header.Typeflag != tar.TypeReg {
+			continue
+		}
+		target := filepath.Join(absDir, filepath.Clean(filepath.FromSlash(header.Name)))
+		if !strings.HasPrefix(target, absDir+string(os.PathSeparator)) {
+			return fmt.Errorf("artifact %q escapes the output directory", header.Name)
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		if err := writeTarFile(target, reader, header); err != nil {
+			return err
+		}
+	}
+}
+
+// writeTarFile streams one tar entry to disk with its declared mode.
+func writeTarFile(target string, reader io.Reader, header *tar.Header) error {
+	file, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode&0o777))
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = io.Copy(file, reader)
+	return err
 }
 
 // detectCompiler returns an appropriate compiler based on file extension.
@@ -946,6 +1186,7 @@ func runCompiler(defaultCompiler, envVar string, args []string) error {
 	// Build request
 	req := &build.Request{
 		TaskID:     taskid.NewTaskID(),
+		BuildID:    wrappedBuildID(),
 		SourceFile: parsed.InputFiles[0],
 		OutputFile: outputFile,
 		Args:       parsed,
@@ -1260,8 +1501,9 @@ func wrapBuildCommand(command string, args []string) error {
 		return err
 	}
 
-	// Build environment
-	env := os.Environ()
+	// Build environment. Every translation unit the wrapped tool compiles
+	// inherits one HG_BUILD_ID, so the coordinator groups them as one build.
+	env := ensureBuildSession(os.Environ())
 
 	// Set CC and CXX environment variables (for build systems that respect them)
 	env = setEnv(env, "CC", ccValue)
@@ -1336,6 +1578,37 @@ func createCompilerWrapper(dir, name, self, modeEnv string) (string, error) {
 }
 
 // setEnv sets an environment variable in the env slice.
+// ensureBuildSession returns env with HG_BUILD_ID set, generating a fresh
+// session id when the caller did not export one.
+func ensureBuildSession(env []string) []string {
+	if envValue(env, taskid.BuildIDEnvVar) != "" {
+		return env
+	}
+	return setEnv(env, taskid.BuildIDEnvVar, taskid.BuildSessionID())
+}
+
+// wrappedBuildID is the build session for a single cc/c++ invocation. It is
+// only set when HG_BUILD_ID is exported (by `hgbuild make` or the user): a
+// lone compiler call must not mint its own one-task "build", which would
+// crowd real builds out of the coordinator's bounded build history.
+func wrappedBuildID() string {
+	if os.Getenv(taskid.BuildIDEnvVar) == "" {
+		return ""
+	}
+	return taskid.BuildSessionID()
+}
+
+// envValue returns the value of key in an os.Environ-style slice.
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			return strings.TrimPrefix(e, prefix)
+		}
+	}
+	return ""
+}
+
 func setEnv(env []string, key, value string) []string {
 	prefix := key + "="
 	for i, e := range env {
@@ -1403,4 +1676,65 @@ func newClientConfig(address string, requestTimeout time.Duration) client.Config
 	}
 
 	return clientCfg
+}
+
+// preprocessLocal expands #include directives with the local toolchain
+// so the worker compiles a self-contained unit. Returns nil on failure;
+// the caller then falls back to sending raw source.
+func preprocessLocal(file, comp string, compArgs []string) []byte {
+	parsed := compiler.Parse(append([]string{comp}, compArgs...))
+	if parsed == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	res, err := compiler.NewPreprocessor(compiler.DefaultPreprocessorConfig()).Preprocess(ctx, parsed, file)
+	if err != nil {
+		fmt.Printf(" (local preprocess failed: %v; sending raw source)", err)
+		return nil
+	}
+	return res.PreprocessedSource
+}
+
+// cacheKeyFor builds the client-side cache key for one translation unit.
+// Package-level because the compile command shadows the compiler package
+// name with its --compiler flag variable.
+func cacheKeyFor(comp string, compArgs []string, arch pb.Architecture, source []byte) string {
+	parsed := compiler.Parse(append([]string{comp}, compArgs...))
+	if parsed == nil {
+		return ""
+	}
+	return build.CacheKeyRaw(parsed, arch, source)
+}
+
+// clientArch returns the machine architecture as the protobuf enum.
+func clientArch() pb.Architecture {
+	switch runtime.GOARCH {
+	case "amd64":
+		return pb.Architecture_ARCH_X86_64
+	case "arm64":
+		return pb.Architecture_ARCH_ARM64
+	case "arm":
+		return pb.Architecture_ARCH_ARMV7
+	default:
+		return pb.Architecture_ARCH_UNSPECIFIED
+	}
+}
+
+// collectCrossArchIncludes bundles project-local headers (-I paths) so a
+// raw-source cross-arch request can carry them. The worker's own toolchain
+// supplies system headers for its architecture. Returns nil on failure —
+// the build proceeds without project includes and likely fails loudly at
+// the worker rather than silently miscompiling.
+func collectCrossArchIncludes(compArgs []string) map[string][]byte {
+	parsed := compiler.Parse(append([]string{"cc"}, compArgs...))
+	if parsed == nil {
+		return nil
+	}
+	incs, err := build.CollectIncludeFiles(parsed)
+	if err != nil {
+		log.Warn().Err(err).Msg("collecting include files for cross-arch build; continuing without them")
+		return nil
+	}
+	return incs
 }

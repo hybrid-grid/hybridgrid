@@ -16,7 +16,6 @@ import (
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cache"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/fallback"
-	"github.com/h3nr1-d14z/hybridgrid/internal/cli/taskid"
 	"github.com/h3nr1-d14z/hybridgrid/internal/compiler"
 	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/client"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
@@ -52,8 +51,8 @@ func DefaultConfig() Config {
 	home, _ := os.UserHomeDir()
 	return Config{
 		CacheDir:        filepath.Join(home, ".hybridgrid", "cache"),
-		CacheMaxSize:    10 * 1024 * 1024 * 1024, // 10GB
-		CacheTTLHours:   168,                     // 1 week
+		CacheMaxSize:    10 * 1024, // 10GB, in megabytes — cache.NewStore takes MB
+		CacheTTLHours:   168,       // 1 week
 		CoordinatorAddr: "localhost:9000",
 		Insecure:        true,
 		Timeout:         5 * time.Minute,
@@ -99,6 +98,11 @@ func (s *Service) SetClient(c *client.Client) {
 
 // Close closes the build service.
 func (s *Service) Close() error {
+	// Persist hit counters: this process exits right after one compile, so
+	// without a flush the cache stats would never see its hits.
+	if s.cache != nil {
+		_ = s.cache.Close()
+	}
 	if s.client != nil {
 		return s.client.Close()
 	}
@@ -107,7 +111,10 @@ func (s *Service) Close() error {
 
 // Request represents a build request.
 type Request struct {
-	TaskID     string
+	TaskID string
+	// BuildID groups this compile with the other translation units of one
+	// logical build (HG_BUILD_ID). Empty means "not part of a build".
+	BuildID    string
 	SourceFile string
 	OutputFile string
 	Args       *compiler.ParsedArgs
@@ -142,7 +149,7 @@ func (s *Service) Build(ctx context.Context, req *Request) (*Result, error) {
 	}
 
 	// Collect project include files from -I paths
-	includeFiles, err := s.collectIncludeFiles(req.Args)
+	includeFiles, err := CollectIncludeFiles(req.Args)
 	if err != nil {
 		log.Warn().Err(err).Msg("Failed to collect include files, continuing without them")
 		includeFiles = nil
@@ -160,11 +167,6 @@ func (s *Service) Build(ctx context.Context, req *Request) (*Result, error) {
 	cacheKey := s.generateCacheKeyRaw(req, rawSource)
 	if s.cache != nil {
 		if cached, ok := s.cache.GetBytes(cacheKey); ok {
-			if req.Args.GeneratesDependencies() {
-				if _, err := s.preprocessor.Preprocess(ctx, req.Args, req.SourceFile); err != nil {
-					return nil, fmt.Errorf("failed to generate dependencies for cached object: %w", err)
-				}
-			}
 			result.ObjectFile = cached
 			result.CacheHit = true
 			result.ExitCode = 0
@@ -320,14 +322,13 @@ func (s *Service) buildRemoteArgs(args *compiler.ParsedArgs) []string {
 	// Add compile-only flag
 	remoteArgs = append(remoteArgs, "-c")
 
-	// Keep code generation flags; include paths and dependency output belong to
-	// the client's preprocessing step.
-	remoteArgs = append(remoteArgs, args.CompileFlags()...)
-	switch args.Language {
-	case "c":
-		remoteArgs = append(remoteArgs, "-x", "cpp-output")
-	case "c++":
-		remoteArgs = append(remoteArgs, "-x", "c++-cpp-output")
+	// Add optimization and other flags (but not -I, -D since source is preprocessed)
+	for _, flag := range args.Flags {
+		// Skip flags that were only needed for preprocessing
+		if strings.HasPrefix(flag, "-I") || strings.HasPrefix(flag, "-D") {
+			continue
+		}
+		remoteArgs = append(remoteArgs, flag)
 	}
 
 	// Add standard if specified
@@ -390,10 +391,11 @@ func getClientArch() pb.Architecture {
 // compileRemotePreprocessed sends preprocessed source to a remote worker.
 // Preprocessed source is self-contained (all #includes resolved), so any worker
 // can compile it, even on a different OS via Docker.
-func (s *Service) compileRemotePreprocessed(ctx context.Context, req *Request, preprocessed []byte) (*remoteResult, error) {
-	compileReq := &pb.CompileRequest{
+// newPreprocessedRequest builds the wire request for a preprocessed compile.
+func (s *Service) newPreprocessedRequest(req *Request, preprocessed []byte) *pb.CompileRequest {
+	return &pb.CompileRequest{
 		TaskId:             req.TaskID,
-		BuildId:            taskid.BuildSessionID(),
+		BuildId:            req.BuildID,
 		Compiler:           req.Args.Compiler,
 		CompilerArgs:       s.buildRemoteArgs(req.Args),
 		PreprocessedSource: preprocessed,
@@ -403,6 +405,10 @@ func (s *Service) compileRemotePreprocessed(ctx context.Context, req *Request, p
 		ClientOs:           getClientOS(),
 		ClientArch:         getClientArch(),
 	}
+}
+
+func (s *Service) compileRemotePreprocessed(ctx context.Context, req *Request, preprocessed []byte) (*remoteResult, error) {
+	compileReq := s.newPreprocessedRequest(req, preprocessed)
 
 	var lastErr error
 	delay := s.retryDelay
@@ -453,10 +459,11 @@ func (s *Service) compileRemotePreprocessed(ctx context.Context, req *Request, p
 }
 
 // compileRemoteRaw sends raw source to a remote worker for cross-compilation.
-func (s *Service) compileRemoteRaw(ctx context.Context, req *Request, rawSource []byte, includeFiles map[string][]byte) (*remoteResult, error) {
-	compileReq := &pb.CompileRequest{
+// newRawRequest builds the wire request for a raw-source compile.
+func (s *Service) newRawRequest(req *Request, rawSource []byte, includeFiles map[string][]byte) *pb.CompileRequest {
+	return &pb.CompileRequest{
 		TaskId:         req.TaskID,
-		BuildId:        taskid.BuildSessionID(),
+		BuildId:        req.BuildID,
 		Compiler:       req.Args.Compiler,
 		CompilerArgs:   s.buildRemoteArgsForRaw(req.Args),
 		RawSource:      rawSource,
@@ -467,6 +474,10 @@ func (s *Service) compileRemoteRaw(ctx context.Context, req *Request, rawSource 
 		ClientOs:       getClientOS(),
 		ClientArch:     getClientArch(),
 	}
+}
+
+func (s *Service) compileRemoteRaw(ctx context.Context, req *Request, rawSource []byte, includeFiles map[string][]byte) (*remoteResult, error) {
+	compileReq := s.newRawRequest(req, rawSource, includeFiles)
 
 	var lastErr error
 	delay := s.retryDelay
@@ -527,10 +538,7 @@ func (s *Service) buildRemoteArgsForRaw(args *compiler.ParsedArgs) []string {
 	remoteArgs = append(remoteArgs, "-c")
 
 	// Keep all flags including -I and -D (needed for raw source compilation)
-	remoteArgs = append(remoteArgs, args.RawCompileFlags()...)
-	if args.Language != "" {
-		remoteArgs = append(remoteArgs, "-x", args.Language)
-	}
+	remoteArgs = append(remoteArgs, args.Flags...)
 
 	// Add standard if specified
 	if args.Standard != "" {
@@ -540,22 +548,25 @@ func (s *Service) buildRemoteArgsForRaw(args *compiler.ParsedArgs) []string {
 	return remoteArgs
 }
 
-// collectIncludeFiles collects header files from project -I paths.
-// Only includes project-local headers, not system headers.
-func (s *Service) collectIncludeFiles(args *compiler.ParsedArgs) (map[string][]byte, error) {
+// CollectIncludeFiles gathers project-local headers referenced via -I paths so
+// raw-source (cross-arch) requests can carry them. Package-level: the hgbuild
+// CLI reuses it for its cross-arch path. System paths (/usr, /opt, ...) are
+// skipped — the worker's own toolchain provides system headers.
+func CollectIncludeFiles(args *compiler.ParsedArgs) (map[string][]byte, error) {
 	includeFiles := make(map[string][]byte)
 
+	// Include paths arrive in two forms: bare "-I<dir>" flags kept in
+	// Flags, and dirs the parser already split into IncludeDirs (both
+	// "-I<dir>" and "-I <dir>"). Union both so every -I form is bundled.
+	includePaths := make([]string, 0, len(args.Flags)+len(args.IncludeDirs))
 	for _, flag := range args.Flags {
-		if !strings.HasPrefix(flag, "-I") {
-			continue
+		if strings.HasPrefix(flag, "-I") && flag != "-I" {
+			includePaths = append(includePaths, strings.TrimPrefix(flag, "-I"))
 		}
+	}
+	includePaths = append(includePaths, args.IncludeDirs...)
 
-		var includePath string
-		if flag == "-I" {
-			continue // Skip if path is separate (we'd need to track next arg)
-		}
-		includePath = strings.TrimPrefix(flag, "-I")
-
+	for _, includePath := range includePaths {
 		// Skip system paths
 		if strings.HasPrefix(includePath, "/usr") ||
 			strings.HasPrefix(includePath, "/opt") ||
@@ -612,17 +623,21 @@ func (s *Service) collectIncludeFiles(args *compiler.ParsedArgs) (map[string][]b
 	return includeFiles, nil
 }
 
-// generateCacheKeyRaw generates a cache key from raw source.
-func (s *Service) generateCacheKeyRaw(req *Request, rawSource []byte) string {
-	// CompilationKey sorts Flags and Defines. Hash the ordered preprocessing
-	// stream separately so -D FOO -U FOO cannot reuse -U FOO -D FOO.
-	preprocessHash := cache.HashStrings(req.Args.PreprocessFlags...)
+// CacheKeyRaw builds the client-side cache key for one compilation from
+// its raw source. Exported so the CLI compile loop shares the Service's
+// key space instead of inventing a second hashing convention.
+func CacheKeyRaw(args *compiler.ParsedArgs, arch pb.Architecture, rawSource []byte) string {
 	key := &cache.CompilationKey{
-		Compiler:   req.Args.Compiler,
-		TargetArch: req.TargetArch.String(),
-		Flags:      req.Args.Flags,
-		Defines:    req.Args.Defines,
-		SourceHash: cache.HashStrings(cache.HashBytes(rawSource), preprocessHash),
+		Compiler:   args.Compiler,
+		TargetArch: arch.String(),
+		Flags:      args.Flags,
+		Defines:    args.Defines,
+		SourceHash: cache.HashBytes(rawSource),
 	}
 	return key.Build()
+}
+
+// generateCacheKeyRaw generates a cache key from raw source.
+func (s *Service) generateCacheKeyRaw(req *Request, rawSource []byte) string {
+	return CacheKeyRaw(req.Args, req.TargetArch, rawSource)
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/logging"
 	observabilitymetrics "github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
+	"github.com/h3nr1-d14z/hybridgrid/internal/worker/builders"
 	workerserver "github.com/h3nr1-d14z/hybridgrid/internal/worker/server"
 )
 
@@ -199,11 +200,31 @@ It executes build tasks received from the coordinator.`,
 				log.Debug().Msg("TLS disabled")
 			}
 
+			// Discover plugin builders (hg-exec-<id> executables) and
+			// advertise them as custom build types.
+			var builderIDs []string
+			builderDir, _ := cmd.Flags().GetString("builder-dir")
+			if builderDir != "" {
+				registry := builders.NewRegistry()
+				builderIDs = registry.Discover(builderDir)
+				if len(builderIDs) > 0 {
+					cfg.Builders = registry
+					log.Info().Strs("builders", builderIDs).Str("dir", builderDir).
+						Msg("Plugin builders discovered")
+				} else {
+					log.Info().Str("dir", builderDir).
+						Msg("No plugin builders discovered")
+				}
+			}
+
 			srv := workerserver.New(cfg)
 			caps := srv.Capabilities()
 			caps.WorkerId = fmt.Sprintf("worker-%s", hostname)
 			caps.MaxParallelTasks = int32(maxParallel)
 			caps.Version = version
+			if len(builderIDs) > 0 {
+				caps.CustomBuilders = builderIDs
+			}
 
 			// Connect to coordinator
 			cli, err := client.New(client.Config{
@@ -339,6 +360,7 @@ It executes build tasks received from the coordinator.`,
 	serveCmd.Flags().String("tls-cert", "", "Path to TLS certificate file (PEM format)")
 	serveCmd.Flags().String("tls-key", "", "Path to TLS private key file (PEM format)")
 	serveCmd.Flags().String("tls-ca", "", "Path to CA certificate for client verification (mTLS)")
+	serveCmd.Flags().String("builder-dir", "", "Directory containing plugin builder executables (hg-exec-<id>)")
 	serveCmd.Flags().Bool("tls-require-client-cert", false, "Require client certificates (mTLS)")
 	serveCmd.Flags().Bool("tracing-enable", false, "Enable OpenTelemetry tracing")
 	serveCmd.Flags().String("tracing-endpoint", "localhost:4317", "OTLP gRPC endpoint")

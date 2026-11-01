@@ -2,10 +2,10 @@ package main
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/h3nr1-d14z/hybridgrid/internal/cli/taskid"
 )
 
 func TestFallbackEnabled_Default(t *testing.T) {
@@ -143,64 +143,37 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestInstallWrappers(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "bin")
-	if err := installWrappers(dir); err != nil {
-		t.Fatalf("installWrappers failed: %v", err)
-	}
-	for _, tt := range []struct {
-		name string
-		mode string
+func TestEnsureBuildSession(t *testing.T) {
+	tests := []struct {
+		name      string
+		env       []string
+		wantExact string
 	}{
-		{"hgcc", wrapperCCEnv},
-		{"hgcxx", wrapperCXXEnv},
-	} {
+		{"keeps an explicit id", []string{"PATH=/bin", "HG_BUILD_ID=release-42"}, "release-42"},
+		{"generates one when missing", []string{"PATH=/bin"}, ""},
+		{"replaces an empty value", []string{"HG_BUILD_ID="}, ""},
+	}
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			path := filepath.Join(dir, tt.name)
-			info, err := os.Stat(path)
-			if err != nil {
-				t.Fatalf("wrapper missing: %v", err)
+			got := envValue(ensureBuildSession(tt.env), taskid.BuildIDEnvVar)
+			if tt.wantExact != "" && got != tt.wantExact {
+				t.Fatalf("HG_BUILD_ID = %q, want %q", got, tt.wantExact)
 			}
-			if info.Mode().Perm()&0111 == 0 {
-				t.Errorf("wrapper %s is not executable", path)
-			}
-			data, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("read wrapper: %v", err)
-			}
-			if !strings.Contains(string(data), "export "+tt.mode+"=1") || !strings.Contains(string(data), "exec ") {
-				t.Errorf("wrapper does not select compiler mode: %s", data)
+			if tt.wantExact == "" && !strings.HasPrefix(got, "build-") {
+				t.Fatalf("HG_BUILD_ID = %q, want a generated build- id", got)
 			}
 		})
 	}
 }
 
-func TestCompileTimeout_EnvOverride(t *testing.T) {
-	saved := timeout
-	defer func() { timeout = saved }()
-	timeout = 2 * time.Minute
-
-	tests := []struct {
-		name        string
-		env         string
-		wantCompile time.Duration
-		wantWorker  time.Duration
-	}{
-		{name: "unset keeps flag and 5m worker deadline", env: "", wantCompile: 2 * time.Minute, wantWorker: 5 * time.Minute},
-		{name: "longer value raises both", env: "660s", wantCompile: 660 * time.Second, wantWorker: 660 * time.Second},
-		{name: "shorter value keeps 5m worker floor", env: "3m", wantCompile: 3 * time.Minute, wantWorker: 5 * time.Minute},
-		{name: "invalid falls back to flag", env: "soon", wantCompile: 2 * time.Minute, wantWorker: 5 * time.Minute},
-		{name: "non-positive falls back to flag", env: "0s", wantCompile: 2 * time.Minute, wantWorker: 5 * time.Minute},
+func TestWrappedBuildID(t *testing.T) {
+	t.Setenv(taskid.BuildIDEnvVar, "")
+	if got := wrappedBuildID(); got != "" {
+		t.Fatalf("without HG_BUILD_ID got %q, want empty so lone cc calls do not each become a build", got)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv(timeoutEnv, tt.env)
-			if got := compileTimeout(); got != tt.wantCompile {
-				t.Errorf("compileTimeout() = %v, want %v", got, tt.wantCompile)
-			}
-			if got := workerTimeout(); got != tt.wantWorker {
-				t.Errorf("workerTimeout() = %v, want %v", got, tt.wantWorker)
-			}
-		})
+
+	t.Setenv(taskid.BuildIDEnvVar, "demo-1")
+	if got := wrappedBuildID(); got != "demo-1" {
+		t.Fatalf("got %q, want demo-1", got)
 	}
 }

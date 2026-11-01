@@ -16,10 +16,12 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/opshttp"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/scheduler"
 	coordserver "github.com/h3nr1-d14z/hybridgrid/internal/coordinator/server"
+	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/webhook"
 	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
 	"github.com/h3nr1-d14z/hybridgrid/internal/logging"
 	observabilitymetrics "github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
+	hgtls "github.com/h3nr1-d14z/hybridgrid/internal/security/tls"
 	"github.com/h3nr1-d14z/hybridgrid/internal/telemetry"
 )
 
@@ -79,6 +81,13 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			epsilonValue, _ := cmd.Flags().GetFloat64("epsilon")
 			alphaValue, _ := cmd.Flags().GetFloat64("alpha")
 			warmStart, _ := cmd.Flags().GetInt("warm-start")
+			schedulerPluginAddr, _ := cmd.Flags().GetString("scheduler-plugin-addr")
+			eventWebhooks, _ := cmd.Flags().GetStringSlice("event-webhook")
+			eventWebhookSecret, _ := cmd.Flags().GetString("event-webhook-secret")
+			schedulerPluginTimeout, _ := cmd.Flags().GetDuration("scheduler-plugin-timeout")
+			schedulerPluginCA, _ := cmd.Flags().GetString("scheduler-plugin-ca")
+			schedulerPluginCert, _ := cmd.Flags().GetString("scheduler-plugin-cert")
+			schedulerPluginKey, _ := cmd.Flags().GetString("scheduler-plugin-key")
 			loadPenalty, _ := cmd.Flags().GetFloat64("load-penalty")
 			discount, _ := cmd.Flags().GetFloat64("discount")
 			discountMode, _ := cmd.Flags().GetString("discount-mode")
@@ -88,9 +97,18 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			diagCandidates, _ := cmd.Flags().GetBool("diag-candidates")
 
 			// Validate scheduler choice (fail fast rather than silent fallback).
-			validSchedulers := map[string]bool{"leastloaded": true, "simple": true, "p2c": true, "epsilon-greedy": true, "linucb": true, "hybrid-linucb": true, "hybrid-linucb-d": true, "heft": true, "icecc-fastest": true, "sed": true, "p90": true, "sed-p90": true, "ewma": true}
+			validSchedulers := map[string]bool{"leastloaded": true, "simple": true, "p2c": true, "epsilon-greedy": true, "linucb": true, "hybrid-linucb": true, "hybrid-linucb-d": true, "heft": true, "icecc-fastest": true, "sed": true, "p90": true, "sed-p90": true, "ewma": true, "external": true}
 			if !validSchedulers[schedulerType] {
-				return fmt.Errorf("invalid --scheduler %q; must be one of: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, hybrid-linucb-d, heft, icecc-fastest, sed, p90, sed-p90, ewma", schedulerType)
+				return fmt.Errorf("invalid --scheduler %q; must be one of: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, hybrid-linucb-d, heft, icecc-fastest, sed, p90, sed-p90, ewma, external", schedulerType)
+			}
+			if schedulerType == "external" && schedulerPluginAddr == "" {
+				return fmt.Errorf("--scheduler=external requires --scheduler-plugin-addr")
+			}
+			// Plugin mTLS is all-or-nothing: the coordinator both
+			// verifies the plugin (CA) and proves itself (cert+key).
+			pluginTLSGiven := schedulerPluginCA != "" || schedulerPluginCert != "" || schedulerPluginKey != ""
+			if pluginTLSGiven && (schedulerPluginCA == "" || schedulerPluginCert == "" || schedulerPluginKey == "") {
+				return fmt.Errorf("--scheduler-plugin-ca, --scheduler-plugin-cert and --scheduler-plugin-key must be set together")
 			}
 			if err := validateSizeThreshold(schedulerType, sizeThreshold); err != nil {
 				return err
@@ -205,6 +223,8 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			cfg.FeatureSetValue = featureSet
 			cfg.EwmaAlphaValue = ewmaAlpha
 			cfg.DiagCandidates = diagCandidates
+			cfg.SchedulerPluginAddr = schedulerPluginAddr
+			cfg.SchedulerPluginTimeout = schedulerPluginTimeout
 			cfg.Tracing.Enable = tracingEnable
 			cfg.Tracing.Endpoint = tracingEndpoint
 			cfg.Tracing.ServiceName = tracingServiceName
@@ -233,6 +253,22 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 					Msg("TLS enabled")
 			} else {
 				log.Debug().Msg("TLS disabled")
+			}
+
+			if pluginTLSGiven {
+				pluginTLS, err := hgtls.LoadClientTLS(hgtls.Config{
+					Enabled:  true,
+					CertFile: schedulerPluginCert,
+					KeyFile:  schedulerPluginKey,
+					ClientCA: schedulerPluginCA,
+				})
+				if err != nil {
+					return fmt.Errorf("failed to load scheduler plugin TLS config: %w", err)
+				}
+				cfg.SchedulerPluginTLS = pluginTLS
+				log.Info().
+					Str("plugin_addr", schedulerPluginAddr).
+					Msg("Scheduler plugin TLS (mTLS) enabled")
 			}
 
 			// Initialize Prometheus metrics
@@ -270,15 +306,31 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
+			// Event webhooks: fan task events out to HTTP endpoints
+			// alongside the telemetry notifier.
+			var eventNotifier coordserver.EventNotifier
+			if len(eventWebhooks) > 0 {
+				eventNotifier = webhook.New(webhook.Config{Endpoints: eventWebhooks, Secret: eventWebhookSecret})
+				defer func() {
+					if c, ok := eventNotifier.(*webhook.Notifier); ok {
+						c.Close()
+					}
+				}()
+			}
+
 			// Wire task events from the coordinator to the telemetry
 			// service; the standalone dashboard binary consumes them
 			// over gRPC StreamEvents, so the coordinator no longer
 			// needs an in-process event fan-out.
 			teleStart, teleComplete := teleSvc.CreateEventNotifier()
-			srv.SetEventNotifier(&eventNotifierWrapper{
+			notifier := coordserver.EventNotifier(&eventNotifierWrapper{
 				onStart:    teleStart,
 				onComplete: teleComplete,
 			})
+			if eventNotifier != nil {
+				notifier = &fanoutNotifier{primary: notifier, secondary: eventNotifier}
+			}
+			srv.SetEventNotifier(notifier)
 
 			errCh := make(chan error, 2)
 			go func() {
@@ -336,8 +388,15 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 	serveCmd.Flags().Int("grpc-port", 9000, "gRPC server port")
 	serveCmd.Flags().Int("http-port", 8080, "HTTP ops port (health, metrics, log-level)")
 	serveCmd.Flags().Bool("no-mdns", false, "Disable mDNS advertisement")
-	serveCmd.Flags().String("scheduler", "leastloaded", "Scheduler type: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, hybrid-linucb-d, heft, icecc-fastest, sed, p90, sed-p90, ewma")
+	serveCmd.Flags().String("scheduler", "leastloaded", "Scheduler type: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, hybrid-linucb-d, heft, icecc-fastest, sed, p90, sed-p90, ewma, external")
 	serveCmd.Flags().Int("size-threshold", 0, "Source size cutoff in bytes (> 0 for p90 and sed-p90; ignored otherwise)")
+	serveCmd.Flags().String("scheduler-plugin-addr", "", "External scheduler plugin gRPC endpoint (used with --scheduler=external)")
+	serveCmd.Flags().Duration("scheduler-plugin-timeout", 50*time.Millisecond, "Per-Select timeout for the external scheduler plugin")
+	serveCmd.Flags().String("scheduler-plugin-ca", "", "CA certificate verifying the scheduler plugin (set with cert+key for plugin mTLS)")
+	serveCmd.Flags().String("scheduler-plugin-cert", "", "Client certificate the coordinator presents to the scheduler plugin (mTLS)")
+	serveCmd.Flags().String("scheduler-plugin-key", "", "Private key for the scheduler plugin client certificate (mTLS)")
+	serveCmd.Flags().StringSlice("event-webhook", nil, "HTTP webhook URL(s) receiving task events (repeatable)")
+	serveCmd.Flags().String("event-webhook-secret", "", "Shared secret HMAC-SHA256-signing every webhook delivery (X-Hybridgrid-Signature header)")
 	serveCmd.Flags().String("task-log", "", "Path to per-task JSON Lines log file (default: stdout)")
 	serveCmd.Flags().String("build-history", "", "Persist build history to this JSON file and reload it on start (default: off)")
 	serveCmd.Flags().Float64("epsilon", 0.1, "Exploration rate for epsilon-greedy scheduler (in [0, 1]; ignored otherwise)")
@@ -447,4 +506,22 @@ func (w *eventNotifierWrapper) NotifyTaskCompleted(event *coordserver.TaskEvent)
 	if w.onComplete != nil {
 		w.onComplete(event.ID, event.BuildID, event.BuildType, event.Status, event.WorkerID, event.StartedAtMs, event.CompletedAtMs, event.DurationMs, event.QueueTimeMs, event.CompileTimeMs, event.ExitCode, event.ErrorMessage)
 	}
+}
+
+// fanoutNotifier delivers task events to two notifiers (telemetry +
+// webhooks). The secondary (webhook) notifier is non-blocking by
+// contract, so the telemetry path never waits on HTTP delivery.
+type fanoutNotifier struct {
+	primary   coordserver.EventNotifier
+	secondary coordserver.EventNotifier
+}
+
+func (f *fanoutNotifier) NotifyTaskStarted(event *coordserver.TaskEvent) {
+	f.primary.NotifyTaskStarted(event)
+	f.secondary.NotifyTaskStarted(event)
+}
+
+func (f *fanoutNotifier) NotifyTaskCompleted(event *coordserver.TaskEvent) {
+	f.primary.NotifyTaskCompleted(event)
+	f.secondary.NotifyTaskCompleted(event)
 }

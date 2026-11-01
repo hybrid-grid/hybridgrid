@@ -1,0 +1,32 @@
+---
+import '../styles/landing.css';
+import Nav from '../components/Nav.astro';
+import Hero from '../components/Hero.astro';
+import Features from '../components/Features.astro';
+import Architecture from '../components/Architecture.astro';
+import DashboardPreview from '../components/DashboardPreview.astro';
+import Footer from '../components/Footer.astro';
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Hybrid-Grid — distributed builds for C/C++, Flutter, and Unity</title>
+    <meta
+      name="description"
+      content="A distributed build system that spreads C/C++, Flutter, and Unity compilation across every machine on your network."
+    />
+  </head>
+  <body>
+    <Nav />
+    <main>
+      <Hero />
+      <Features />
+      <Architecture />
+      <DashboardPreview />
+    </main>
+    <Footer />
+  </body>
+</html>

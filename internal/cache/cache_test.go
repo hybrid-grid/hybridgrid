@@ -684,3 +684,105 @@ func TestStore_GetNonExistent(t *testing.T) {
 		t.Error("GetBytes non-existent key should return false")
 	}
 }
+
+func TestStore_StaleIndexFallsBackToDisk(t *testing.T) {
+	dir := t.TempDir()
+	writer, err := NewStore(dir, 10, 1)
+	if err != nil {
+		t.Fatalf("NewStore writer: %v", err)
+	}
+	// Reader loads the index before the writer saves, exactly what parallel
+	// `hgbuild cc` processes see under make -jN.
+	reader, err := NewStore(dir, 10, 1)
+	if err != nil {
+		t.Fatalf("NewStore reader: %v", err)
+	}
+
+	key := "stale-index-key"
+	if err := writer.PutBytes(key, []byte("object-bytes")); err != nil {
+		t.Fatalf("PutBytes: %v", err)
+	}
+
+	got, ok := reader.GetBytes(key)
+	if !ok {
+		t.Fatal("stale-index reader missed an entry that exists on disk")
+	}
+	if string(got) != "object-bytes" {
+		t.Fatalf("got %q, want %q", got, "object-bytes")
+	}
+}
+
+func TestStore_SaveIndexMergesConcurrentWriters(t *testing.T) {
+	dir := t.TempDir()
+	a, err := NewStore(dir, 10, 1)
+	if err != nil {
+		t.Fatalf("NewStore a: %v", err)
+	}
+	b, err := NewStore(dir, 10, 1)
+	if err != nil {
+		t.Fatalf("NewStore b: %v", err)
+	}
+
+	if err := a.PutBytes("aaa-key", []byte("one")); err != nil {
+		t.Fatalf("a.PutBytes: %v", err)
+	}
+	// b only knows its own entry; saving must not drop a's.
+	if err := b.PutBytes("bbb-key", []byte("two")); err != nil {
+		t.Fatalf("b.PutBytes: %v", err)
+	}
+
+	c, err := NewStore(dir, 10, 1)
+	if err != nil {
+		t.Fatalf("NewStore c: %v", err)
+	}
+	if got := c.Stats().Entries; got != 2 {
+		t.Fatalf("index lost an entry: got %d entries, want 2", got)
+	}
+}
+
+func TestStore_ClearDropsIndexEntries(t *testing.T) {
+	dir := t.TempDir()
+	a, err := NewStore(dir, 10, 1)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	if err := a.PutBytes("clear-key", []byte("data")); err != nil {
+		t.Fatalf("PutBytes: %v", err)
+	}
+	if err := a.Clear(); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+
+	b, err := NewStore(dir, 10, 1)
+	if err != nil {
+		t.Fatalf("NewStore after clear: %v", err)
+	}
+	if got := b.Stats().Entries; got != 0 {
+		t.Fatalf("Clear left %d entries in the index, want 0", got)
+	}
+	if _, ok := b.GetBytes("clear-key"); ok {
+		t.Fatal("cleared entry is still readable")
+	}
+}
+
+func TestStore_DeleteDoesNotResurrect(t *testing.T) {
+	dir := t.TempDir()
+	a, err := NewStore(dir, 10, 1)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	if err := a.PutBytes("del-key", []byte("data")); err != nil {
+		t.Fatalf("PutBytes: %v", err)
+	}
+	if err := a.Delete("del-key"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	b, err := NewStore(dir, 10, 1)
+	if err != nil {
+		t.Fatalf("NewStore after delete: %v", err)
+	}
+	if got := b.Stats().Entries; got != 0 {
+		t.Fatalf("Delete left %d entries in the index, want 0", got)
+	}
+}

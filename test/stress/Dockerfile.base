@@ -1,10 +1,20 @@
+# Build the dashboard frontend: hg-dashboard's go:embed needs web/dist,
+# which is gitignored and therefore absent after COPY . .
+FROM node:20-alpine AS ui-builder
+WORKDIR /app/internal/observability/ui/web
+COPY internal/observability/ui/web/package.json internal/observability/ui/web/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --no-fund --no-audit
+COPY internal/observability/ui/web/ ./
+RUN npm run build
+
 # Base image with build tools and hybridgrid binaries
-FROM golang:1.25-bookworm AS builder
+FROM golang:1.27-bookworm AS builder
 
 ENV GOTOOLCHAIN=auto
 
 WORKDIR /src
 COPY . .
+COPY --from=ui-builder /app/internal/observability/ui/web/dist ./internal/observability/ui/web/dist
 RUN go build -o /bin/hg-coord ./cmd/hg-coord && \
     go build -o /bin/hg-worker ./cmd/hg-worker && \
     go build -o /bin/hgbuild ./cmd/hgbuild && \

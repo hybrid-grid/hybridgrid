@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"curl -s -i localhost:8081/api/v1/workers | head -20; docker ps --format '{{.Names}} {{.Status}}'\",\"description\":\"Inspect dashboard API response\"}",
+  "error": "Exit code 1\nCannot connect to the Docker daemon at unix:///Users/n0x/.docker/run/docker.sock. Is the docker daemon running?",
+  "timestamp": "2026-10-18T12:30:25.271Z",
+  "retry_count": 2
+}

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"math"
@@ -90,17 +91,23 @@ const maxQueuedCompiles = 256
 // compiles, which still run concurrently across all workers exactly as
 // before; only the brief "who gets this file" moment is serialized.
 //
-// Scope: only the C/C++ Compile() path is routed through this queue.
-// The Flutter/Unity build paths (selectFlutterWorker/selectUnityWorker)
-// use the plain scheduler.Select (not the learning-aware SelectWith)
-// and are outside this benchmark's scope per the paper's own stated
-// scope; they are not touched here.
+// The Flutter/Unity build paths also route through this queue via
+// filter-mode requests (see filter below): they share the same
+// backpressure discipline and the same atomic select-then-book
+// guarantee as Compile().
 type dispatchRequest struct {
 	buildType pb.BuildType
 	arch      pb.Architecture
 	clientOS  string
 	ctx       scheduler.TaskContext
-	result    chan dispatchResult
+	// filter/label: when filter is non-nil this is a filter-mode
+	// request (flutter, unity, and custom-builder paths): dispatchLoop
+	// picks the least-loaded healthy worker with spare capacity that
+	// matches the predicate instead of consulting the learning
+	// scheduler.
+	filter func(*registry.WorkerInfo) bool
+	label  string
+	result chan dispatchResult
 }
 
 // dispatchResult is dispatchLoop's answer to a dispatchRequest.
@@ -128,12 +135,22 @@ type dispatchResult struct {
 // in Stop(). See dispatchRequest's doc comment for why this exists.
 func (s *Server) dispatchLoop() {
 	for req := range s.dispatchCh {
-		candidates := s.snapshotCandidates(req.buildType, req.arch, req.clientOS)
-		worker, info, err := scheduler.SelectWith(s.scheduler, req.buildType, req.arch, req.clientOS, req.ctx)
+		var (
+			worker     *registry.WorkerInfo
+			info       scheduler.DispatchInfo
+			err        error
+			candidates []DispatchCandidate
+		)
+		if req.filter != nil {
+			worker, err = s.selectByFilter(req.filter, req.label)
+		} else {
+			candidates = s.snapshotCandidates(req.buildType, req.arch, req.clientOS)
+			worker, info, err = scheduler.SelectWith(s.scheduler, req.buildType, req.arch, req.clientOS, req.ctx)
+		}
 		result := dispatchResult{worker: worker, info: info, candidates: candidates, err: err}
 		if err == nil {
 			// Read-then-book, both on this single goroutine: no other
-			// goroutine can interleave a SelectWith between this read
+			// goroutine can interleave a selection between this read
 			// and the IncrementTasks call below, because dispatchLoop
 			// is the only caller of either for the Compile() path.
 			result.activeAtDispatch = worker.ActiveTasks
@@ -195,6 +212,31 @@ func matchesDispatchCapability(caps *pb.WorkerCapabilities, buildType pb.BuildTy
 	default:
 		return true
 	}
+}
+
+// selectByFilter picks the matching worker with the fewest active
+// tasks. Spare capacity is part of the match, so a full worker never
+// wins a dispatch and the backpressure queue engages instead. Must
+// only be called from dispatchLoop, where selection and the
+// IncrementTasks booking are atomic with respect to every other
+// dispatch.
+func (s *Server) selectByFilter(filter func(*registry.WorkerInfo) bool, label string) (*registry.WorkerInfo, error) {
+	var best *registry.WorkerInfo
+	for _, w := range s.registry.List() {
+		if !w.IsHealthy(s.config.HeartbeatTTL) || !filter(w) {
+			continue
+		}
+		if w.MaxParallel > 0 && w.ActiveTasks >= w.MaxParallel {
+			continue
+		}
+		if best == nil || w.ActiveTasks < best.ActiveTasks {
+			best = w
+		}
+	}
+	if best == nil {
+		return nil, fmt.Errorf("no worker available for %s build", label)
+	}
+	return best, nil
 }
 
 // dispatch submits a selection request to dispatchLoop and blocks for
@@ -309,6 +351,77 @@ func (s *Server) leaveDispatchQueue() {
 	atomic.AddInt64(&s.queuedCompiles, -1)
 }
 
+// dispatchFiltered submits a filter-mode request to dispatchLoop and
+// blocks for its result. See dispatchRequest.filter for the semantics.
+func (s *Server) dispatchFiltered(filter func(*registry.WorkerInfo) bool, label string) (*registry.WorkerInfo, error) {
+	s.dispatchWG.Add(1)
+	defer s.dispatchWG.Done()
+
+	req := dispatchRequest{
+		filter: filter,
+		label:  label,
+		result: make(chan dispatchResult, 1),
+	}
+	s.dispatchCh <- &req
+	res := <-req.result
+	return res.worker, res.err
+}
+
+// selectBuildWorker runs filter-based worker selection for the
+// archive-based build paths (flutter, unity, and custom builders)
+// under the same backpressure discipline as Compile(): a fast retry
+// budget first, then the bounded dispatch queue when every matching
+// worker is at capacity, so a burst larger than the matching capacity
+// stretches over time instead of hard-failing. Returns the queue wait
+// so callers can report the coordinator-side queue_ms — the worker's
+// own queue field is always zero on this path.
+func (s *Server) selectBuildWorker(ctx context.Context, filter func(*registry.WorkerInfo) bool, label string) (*registry.WorkerInfo, time.Duration, error) {
+	const maxAttempts = 8
+	var (
+		queued        bool
+		queueDeadline time.Time
+		queueStart    time.Time
+	)
+	for attempt := 1; ; attempt++ {
+		worker, err := s.dispatchFiltered(filter, label)
+		if err == nil {
+			var queueWait time.Duration
+			if queued {
+				queueWait = time.Since(queueStart)
+			}
+			return worker, queueWait, nil
+		}
+		if attempt < maxAttempts {
+			time.Sleep(time.Duration(attempt) * 25 * time.Millisecond)
+			continue
+		}
+		// Fast budget exhausted (~700 ms): queue instead of failing,
+		// bounded by DispatchQueueTimeout and the caller's context.
+		if s.config.DispatchQueueTimeout > 0 && !queued {
+			if s.enterDispatchQueue() {
+				queued = true
+				defer s.leaveDispatchQueue()
+				queueStart = time.Now()
+				queueDeadline = queueStart.Add(s.config.DispatchQueueTimeout)
+				log.Warn().
+					Str("build", label).
+					Dur("timeout", s.config.DispatchQueueTimeout).
+					Msg("All matching workers at capacity; queued for dispatch")
+				attempt = 0
+				continue
+			}
+		}
+		if queued {
+			if !s.awaitDispatchCapacity(ctx, queueDeadline) {
+				return nil, 0, fmt.Errorf("dispatch queue timeout (%v) exceeded: no worker capacity became available: %w", s.config.DispatchQueueTimeout, err)
+			}
+			attempt = 0
+			continue
+		}
+		return nil, 0, err
+	}
+}
+
 // connPool caches gRPC client connections to workers by address.
 type connPool struct {
 	mu       sync.Mutex
@@ -411,6 +524,18 @@ type Config struct {
 	// "no worker available" failure. 0 disables queueing entirely
 	// (ablation: the pre-backpressure reject-after-budget behavior).
 	DispatchQueueTimeout time.Duration
+	// SchedulerPluginAddr is the gRPC endpoint of an external scheduler
+	// plugin (contract schedulerv1alpha1). Used when SchedulerType is
+	// "external"; the plugin decides dispatches within
+	// SchedulerPluginTimeout and the in-process fallback (leastloaded)
+	// answers when it fails, times out, or returns an unknown worker.
+	SchedulerPluginAddr string
+	// SchedulerPluginTLS enables TLS/mTLS to the external scheduler
+	// plugin. Nil dials plaintext (local socket).
+	SchedulerPluginTLS *tls.Config
+	// SchedulerPluginTimeout bounds each plugin Select call. Default
+	// 50ms when zero.
+	SchedulerPluginTimeout time.Duration
 }
 
 // DefaultConfig returns sensible defaults.
@@ -531,6 +656,20 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 			Registry:       reg,
 			CircuitChecker: cm,
 		})
+	case "external":
+		plugin, err := scheduler.NewPluginScheduler(scheduler.PluginConfig{
+			Address:   cfg.SchedulerPluginAddr,
+			Timeout:   cfg.SchedulerPluginTimeout,
+			Inner:     scheduler.NewLeastLoadedScheduler(reg),
+			Registry:  reg,
+			Circuit:   cm,
+			TLSConfig: cfg.SchedulerPluginTLS,
+		})
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to connect scheduler plugin; using leastloaded")
+			return scheduler.NewLeastLoadedScheduler(reg)
+		}
+		return plugin
 	case "leastloaded", "":
 		return scheduler.NewLeastLoadedScheduler(reg)
 	default:
@@ -781,6 +920,11 @@ func (s *Server) Stop() {
 	}
 	if reg, ok := s.registry.(*registry.InMemoryRegistry); ok {
 		reg.Stop()
+	}
+	// An external scheduler plugin owns a gRPC connection and a
+	// feedback pump goroutine; both stop here.
+	if ps, ok := s.scheduler.(*scheduler.PluginScheduler); ok {
+		ps.Close()
 	}
 	if s.taskLogger != nil {
 		_ = s.taskLogger.Close()
@@ -1352,6 +1496,10 @@ func (s *Server) Build(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResp
 		return nil, status.Error(codes.InvalidArgument, "task_id required")
 	}
 
+	if req.CustomBuilder != "" {
+		return s.handleCustomBuild(ctx, req, buildID)
+	}
+
 	if req.GetFlutterConfig() != nil {
 		return s.handleFlutterBuild(ctx, req, buildID)
 	}
@@ -1427,7 +1575,8 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest, b
 	atomic.AddInt64(&s.queuedTasks, 1)
 	defer atomic.AddInt64(&s.queuedTasks, -1)
 
-	worker, err := s.selectFlutterWorker(req.TargetPlatform)
+	worker, queueWait, err := s.selectBuildWorker(ctx,
+		func(w *registry.WorkerInfo) bool { return workerSupportsFlutterPlatform(w, req.TargetPlatform) }, "flutter")
 	if err != nil {
 		atomic.AddInt64(&s.totalTasks, 1)
 		atomic.AddInt64(&s.failedTasks, 1)
@@ -1477,7 +1626,6 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest, b
 		}, nil
 	}
 
-	s.registry.IncrementTasks(worker.ID)
 	atomic.AddInt64(&s.activeTasks, 1)
 	atomic.AddInt64(&s.totalTasks, 1)
 	atomic.AddInt64(&s.flutterBuilds, 1)
@@ -1546,7 +1694,7 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest, b
 			StartedAtMs:   taskStartTime.UnixMilli(),
 			CompletedAtMs: taskCompletedTime.UnixMilli(),
 			DurationMs:    taskCompletedTime.Sub(taskStartTime).Milliseconds(),
-			QueueTimeMs:   buildResp.GetQueueTimeMs(),
+			QueueTimeMs:   queueWait.Milliseconds(),
 			CompileTimeMs: buildResp.GetBuildTimeMs(),
 			FromCache:     false,
 		}
@@ -1645,7 +1793,8 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 	atomic.AddInt64(&s.queuedTasks, 1)
 	defer atomic.AddInt64(&s.queuedTasks, -1)
 
-	worker, err := s.selectUnityWorker(req.TargetPlatform)
+	worker, queueWait, err := s.selectBuildWorker(ctx,
+		func(w *registry.WorkerInfo) bool { return workerSupportsUnityPlatform(w, req.TargetPlatform) }, "unity")
 	if err != nil {
 		atomic.AddInt64(&s.totalTasks, 1)
 		atomic.AddInt64(&s.failedTasks, 1)
@@ -1695,7 +1844,6 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 		}, nil
 	}
 
-	s.registry.IncrementTasks(worker.ID)
 	atomic.AddInt64(&s.activeTasks, 1)
 	atomic.AddInt64(&s.totalTasks, 1)
 	atomic.AddInt64(&s.unityBuilds, 1)
@@ -1763,7 +1911,7 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 			StartedAtMs:   taskStartTime.UnixMilli(),
 			CompletedAtMs: taskCompletedTime.UnixMilli(),
 			DurationMs:    taskCompletedTime.Sub(taskStartTime).Milliseconds(),
-			QueueTimeMs:   buildResp.GetQueueTimeMs(),
+			QueueTimeMs:   queueWait.Milliseconds(),
 			CompileTimeMs: buildResp.GetBuildTimeMs(),
 			FromCache:     false,
 		}
@@ -1800,6 +1948,172 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 	}
 
 	return buildResp, nil
+}
+
+// handleCustomBuild routes a plugin-builder build (BuildRequest.
+// custom_builder) to a worker advertising that builder, under the same
+// backpressure discipline as the other archive builds. There is
+// deliberately no coordinator-side result cache for custom builders:
+// cache keys are builder-specific semantics, so v1 leaves caching to
+// the builder itself (it owns its outputs and can fingerprint them).
+func (s *Server) handleCustomBuild(ctx context.Context, req *pb.BuildRequest, buildID string) (*pb.BuildResponse, error) {
+	start := time.Now()
+	m := metrics.Default()
+
+	builderID := req.CustomBuilder
+	atomic.AddInt64(&s.queuedTasks, 1)
+	defer atomic.AddInt64(&s.queuedTasks, -1)
+
+	worker, queueWait, err := s.selectBuildWorker(ctx,
+		func(w *registry.WorkerInfo) bool {
+			return w != nil && w.Capabilities != nil &&
+				containsString(w.Capabilities.GetCustomBuilders(), builderID)
+		}, builderID)
+	if err != nil {
+		atomic.AddInt64(&s.totalTasks, 1)
+		atomic.AddInt64(&s.failedTasks, 1)
+		log.Error().Err(err).Str("task_id", req.TaskId).
+			Str("builder", builderID).
+			Msg("No worker available for custom build")
+
+		if s.eventNotifier != nil {
+			taskStartMs := start.UnixMilli()
+			s.eventNotifier.NotifyTaskStarted(&TaskEvent{
+				ID:          req.TaskId,
+				BuildType:   builderID,
+				BuildID:     buildID,
+				Status:      "running",
+				WorkerID:    "",
+				StartedAtMs: taskStartMs,
+			})
+			s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
+				ID:            req.TaskId,
+				BuildType:     builderID,
+				BuildID:       buildID,
+				Status:        "failed",
+				WorkerID:      "",
+				StartedAtMs:   taskStartMs,
+				CompletedAtMs: time.Now().UnixMilli(),
+				DurationMs:    0,
+				ExitCode:      1,
+				ErrorMessage:  fmt.Sprintf("no worker available: %v", err),
+			})
+		}
+
+		return &pb.BuildResponse{
+			Status:   pb.TaskStatus_STATUS_FAILED,
+			ExitCode: 1,
+			Stderr:   fmt.Sprintf("no worker available: %v", err),
+		}, nil
+	}
+
+	conn, err := s.workerConns.get(ctx, worker.Address)
+	if err != nil {
+		log.Error().Err(err).Str("worker", worker.ID).Msg("Failed to connect to worker")
+		return &pb.BuildResponse{
+			Status:   pb.TaskStatus_STATUS_FAILED,
+			ExitCode: 1,
+			Stderr:   fmt.Sprintf("failed to connect to worker: %v", err),
+		}, nil
+	}
+
+	atomic.AddInt64(&s.activeTasks, 1)
+	atomic.AddInt64(&s.totalTasks, 1)
+
+	val, _ := s.activeTasksByWorker.LoadOrStore(worker.ID, new(int64))
+	count := atomic.AddInt64(val.(*int64), 1)
+	m.SetActiveTaskCount(worker.ID, float64(count))
+
+	defer func() {
+		atomic.AddInt64(&s.activeTasks, -1)
+		if val, ok := s.activeTasksByWorker.Load(worker.ID); ok {
+			c := atomic.AddInt64(val.(*int64), -1)
+			m.SetActiveTaskCount(worker.ID, float64(c))
+		}
+	}()
+
+	taskStartTime := time.Now()
+
+	if s.eventNotifier != nil {
+		s.eventNotifier.NotifyTaskStarted(&TaskEvent{
+			ID:          req.TaskId,
+			BuildType:   builderID,
+			BuildID:     buildID,
+			Status:      "running",
+			WorkerID:    worker.ID,
+			StartedAtMs: taskStartTime.UnixMilli(),
+		})
+	}
+
+	client := pb.NewBuildServiceClient(conn)
+	buildResp, err := client.Build(ctx, req)
+
+	success := err == nil && buildResp != nil && buildResp.Status == pb.TaskStatus_STATUS_COMPLETED
+
+	s.registry.DecrementTasks(worker.ID, success, time.Duration(0))
+	s.signalDispatchCapacity()
+
+	taskCompletedTime := time.Now()
+
+	if success {
+		atomic.AddInt64(&s.successTasks, 1)
+	} else {
+		atomic.AddInt64(&s.failedTasks, 1)
+	}
+
+	if buildResp != nil {
+		s.console.Put(req.TaskId, buildResp.Stdout, buildResp.Stderr)
+	}
+	if s.eventNotifier != nil {
+		event := &TaskEvent{
+			ID:            req.TaskId,
+			BuildType:     builderID,
+			BuildID:       buildID,
+			WorkerID:      worker.ID,
+			StartedAtMs:   taskStartTime.UnixMilli(),
+			CompletedAtMs: taskCompletedTime.UnixMilli(),
+			DurationMs:    taskCompletedTime.Sub(taskStartTime).Milliseconds(),
+			QueueTimeMs:   queueWait.Milliseconds(),
+			CompileTimeMs: buildResp.GetBuildTimeMs(),
+			FromCache:     false,
+		}
+		if success {
+			event.Status = "completed"
+			event.ExitCode = buildResp.ExitCode
+		} else {
+			event.Status = "failed"
+			event.ExitCode = 1
+			if err != nil {
+				event.ErrorMessage = err.Error()
+			} else {
+				event.ExitCode = buildResp.GetExitCode()
+				event.ErrorMessage = buildResp.Stderr
+			}
+		}
+		s.eventNotifier.NotifyTaskCompleted(event)
+	}
+
+	if err != nil {
+		log.Error().Err(err).Str("task_id", req.TaskId).Str("worker", worker.ID).
+			Msg("Worker custom build failed")
+		return &pb.BuildResponse{
+			Status:   pb.TaskStatus_STATUS_FAILED,
+			ExitCode: 1,
+			Stderr:   fmt.Sprintf("worker error: %v", err),
+		}, nil
+	}
+
+	return buildResp, nil
+}
+
+// containsString reports whether s contains v.
+func containsString(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
 
 // StreamBuild handles streaming build requests.
@@ -1950,18 +2264,6 @@ func (s *Server) setFlutterCache(key string, resp *pb.BuildResponse) {
 	s.flutterCacheMu.Unlock()
 }
 
-func (s *Server) selectFlutterWorker(targetPlatform pb.TargetPlatform) (*registry.WorkerInfo, error) {
-	workers := s.registry.List()
-	for _, w := range workers {
-		if workerSupportsFlutterPlatform(w, targetPlatform) {
-			if w.IsHealthy(s.config.HeartbeatTTL) {
-				return w, nil
-			}
-		}
-	}
-	return nil, fmt.Errorf("no flutter worker available for platform %s", targetPlatform)
-}
-
 func workerSupportsFlutterPlatform(worker *registry.WorkerInfo, platform pb.TargetPlatform) bool {
 	if worker == nil || worker.Capabilities == nil || worker.Capabilities.Flutter == nil {
 		return false
@@ -1995,18 +2297,6 @@ func (s *Server) setUnityCache(key string, resp *pb.BuildResponse) {
 	s.unityCacheMu.Lock()
 	s.unityCache[key] = entry
 	s.unityCacheMu.Unlock()
-}
-
-func (s *Server) selectUnityWorker(targetPlatform pb.TargetPlatform) (*registry.WorkerInfo, error) {
-	workers := s.registry.List()
-	for _, w := range workers {
-		if workerSupportsUnityPlatform(w, targetPlatform) {
-			if w.IsHealthy(s.config.HeartbeatTTL) {
-				return w, nil
-			}
-		}
-	}
-	return nil, fmt.Errorf("no unity worker available for platform %s", targetPlatform)
 }
 
 func workerSupportsUnityPlatform(worker *registry.WorkerInfo, platform pb.TargetPlatform) bool {

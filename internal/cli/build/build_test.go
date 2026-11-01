@@ -80,8 +80,8 @@ func TestCompileRemote_BuildIDPropagated(t *testing.T) {
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.CacheMaxSize != 10*1024*1024*1024 {
-		t.Errorf("expected 10GB cache size, got %d", cfg.CacheMaxSize)
+	if cfg.CacheMaxSize != 10*1024 {
+		t.Errorf("expected 10240 MB (10GB) cache size, got %d", cfg.CacheMaxSize)
 	}
 	if cfg.CacheTTLHours != 168 {
 		t.Errorf("expected 168 hours TTL, got %d", cfg.CacheTTLHours)
@@ -779,12 +779,12 @@ func TestCollectIncludeFiles(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			files, err := svc.collectIncludeFiles(tt.args)
+			files, err := CollectIncludeFiles(tt.args)
 			if err != nil {
-				t.Fatalf("collectIncludeFiles failed: %v", err)
+				t.Fatalf("CollectIncludeFiles failed: %v", err)
 			}
 			if len(files) != tt.wantFiles {
-				t.Errorf("collectIncludeFiles() collected %d files, want %d", len(files), tt.wantFiles)
+				t.Errorf("CollectIncludeFiles() collected %d files, want %d", len(files), tt.wantFiles)
 			}
 		})
 	}
@@ -1111,5 +1111,65 @@ func TestService_Build_RemoteFailureFallsBack(t *testing.T) {
 	}
 	if result.ExitCode != 0 {
 		t.Fatalf("unexpected exit code %d: %s", result.ExitCode, result.Stderr)
+	}
+}
+
+func TestRemoteCompileRequests_CarryBuildID(t *testing.T) {
+	svc := &Service{}
+	req := &Request{
+		TaskID:     "task-1",
+		BuildID:    "build-abc",
+		SourceFile: "src/main.c",
+		Args:       &compiler.ParsedArgs{Compiler: "gcc", Flags: []string{"-O2"}},
+		TargetArch: pb.Architecture_ARCH_ARM64,
+		Timeout:    time.Minute,
+	}
+
+	tests := []struct {
+		name string
+		got  *pb.CompileRequest
+	}{
+		{"preprocessed", svc.newPreprocessedRequest(req, []byte("int x;"))},
+		{"raw", svc.newRawRequest(req, []byte("int x;"), nil)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.got.GetBuildId() != "build-abc" {
+				t.Errorf("BuildId = %q, want %q", tt.got.GetBuildId(), "build-abc")
+			}
+			if tt.got.GetTaskId() != "task-1" {
+				t.Errorf("TaskId = %q, want %q", tt.got.GetTaskId(), "task-1")
+			}
+			if tt.got.GetSourceFilename() != "main.c" {
+				t.Errorf("SourceFilename = %q, want %q", tt.got.GetSourceFilename(), "main.c")
+			}
+		})
+	}
+}
+
+func TestCacheKeyRaw_DistinguishesInputs(t *testing.T) {
+	args := &compiler.ParsedArgs{Compiler: "gcc", Flags: []string{"-O2"}, Defines: []string{"A=1"}}
+	src := []byte("int f(void){return 1;}")
+
+	base := CacheKeyRaw(args, pb.Architecture_ARCH_X86_64, src)
+	if base == "" {
+		t.Fatal("empty cache key")
+	}
+	if again := CacheKeyRaw(args, pb.Architecture_ARCH_X86_64, src); again != base {
+		t.Fatalf("key not deterministic: %q != %q", base, again)
+	}
+
+	// A wrong-arch or wrong-source hit would silently deliver a bad object,
+	// so neither may collide with the base key.
+	if arm := CacheKeyRaw(args, pb.Architecture_ARCH_ARM64, src); arm == base {
+		t.Fatal("cache key must differ by target arch")
+	}
+	other := []byte("int f(void){return 2;}")
+	if k := CacheKeyRaw(args, pb.Architecture_ARCH_X86_64, other); k == base {
+		t.Fatal("cache key must differ by source")
+	}
+	flags := &compiler.ParsedArgs{Compiler: "gcc", Flags: []string{"-O0"}, Defines: []string{"A=1"}}
+	if k := CacheKeyRaw(flags, pb.Architecture_ARCH_X86_64, src); k == base {
+		t.Fatal("cache key must differ by flags")
 	}
 }
