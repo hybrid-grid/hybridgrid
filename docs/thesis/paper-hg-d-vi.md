@@ -472,7 +472,7 @@ Các thí nghiệm dùng commit Hybrid-Grid `04130fdcafb8504b6bafbcd833086911808
 
 ## Lời cảm ơn
 
-Các tác giả cảm ơn Nguyễn Trọng Khánh đã định hướng công trình về bài toán lập lịch — hướng đi định hình toàn bộ bài báo — và đã góp ý qua nhiều bản thảo.
+Các tác giả cảm ơn PGS. TS. Nguyễn Trọng Khánh đã định hướng công trình về bài toán lập lịch — hướng đi định hình toàn bộ bài báo — và đã góp ý qua nhiều bản thảo.
 
 ## Tuyên bố về việc sử dụng AI tạo sinh và công nghệ hỗ trợ bởi AI trong quá trình viết
 

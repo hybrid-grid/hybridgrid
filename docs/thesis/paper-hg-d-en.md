@@ -472,7 +472,7 @@ The experiments used Hybrid-Grid commit `04130fdcafb8504b6bafbcd833086911808c03f
 
 ## Acknowledgements
 
-The authors thank Nguyen Trong Khanh for steering this work toward the scheduling problem — the direction that shaped the entire paper — and for feedback on successive drafts.
+The authors thank Assoc. Prof. Dr. Nguyen Trong Khanh for steering this work toward the scheduling problem — the direction that shaped the entire paper — and for feedback on successive drafts.
 
 ## Declaration of Generative AI and AI-assisted technologies in the writing process
 
