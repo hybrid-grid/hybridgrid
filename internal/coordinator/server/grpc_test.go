@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"sync/atomic"
 	"testing"
@@ -1334,4 +1335,125 @@ func TestCompile_WorkerUnreachable(t *testing.T) {
 
 	assert.Len(t, notifier.completed, 1)
 	assert.Equal(t, "failed", notifier.completed[0].Status)
+}
+
+// TestBuild_Custom_BuilderCache verifies the per-builder result cache:
+// the first build reaches the worker, an identical repeat is served
+// from the cache without touching the worker again.
+func TestBuild_Custom_BuilderCache(t *testing.T) {
+	var workerCalls int32
+	addr, workerCleanup := setupTestWorker(t, func(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+		atomic.AddInt32(&workerCalls, 1)
+		return &pb.BuildResponse{
+			Status:      pb.TaskStatus_STATUS_COMPLETED,
+			ExitCode:    0,
+			Stdout:      "fresh build",
+			Artifacts:   []byte("artifact"),
+			BuildTimeMs: 7,
+		}, nil
+	})
+	defer workerCleanup()
+
+	dir := t.TempDir()
+	s, client, cleanup := setupTestServer(t, Config{
+		Port:            0,
+		HeartbeatTTL:    30 * time.Second,
+		RequestTimeout:  30 * time.Second,
+		BuilderCacheDir: dir,
+	})
+	defer cleanup()
+
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "cached-worker",
+		Address: addr,
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch:            pb.Architecture_ARCH_X86_64,
+			CustomBuilders:        []string{"demo"},
+			CustomBuilderVersions: map[string]string{"demo": "hash-v1"},
+		},
+		MaxParallel: 2,
+	}))
+
+	buildReq := func(id string) *pb.BuildRequest {
+		return &pb.BuildRequest{
+			TaskId:        id,
+			SourceHash:    "deadbeef",
+			SourceArchive: []byte("fake-tar"),
+			CustomBuilder: "demo",
+		}
+	}
+
+	resp1, err := client.Build(context.Background(), buildReq("custom-cache-1"))
+	require.NoError(t, err)
+	require.Equal(t, pb.TaskStatus_STATUS_COMPLETED, resp1.Status)
+	assert.False(t, resp1.FromCache)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&workerCalls))
+
+	resp2, err := client.Build(context.Background(), buildReq("custom-cache-2"))
+	require.NoError(t, err)
+	require.Equal(t, pb.TaskStatus_STATUS_COMPLETED, resp2.Status)
+	assert.True(t, resp2.FromCache, "identical repeat must be served from cache")
+	assert.Equal(t, "fresh build", resp2.Stdout)
+	assert.Equal(t, []byte("artifact"), resp2.Artifacts)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&workerCalls), "cached repeat must not reach the worker")
+}
+
+// TestBuild_Custom_BuilderCacheInvalidatedByVersion verifies that
+// bumping the advertised builder version invalidates cached entries:
+// the same source rebuilds through the worker after the builder
+// changes.
+func TestBuild_Custom_BuilderCacheInvalidatedByVersion(t *testing.T) {
+	var workerCalls int32
+	addr, workerCleanup := setupTestWorker(t, func(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+		atomic.AddInt32(&workerCalls, 1)
+		return &pb.BuildResponse{
+			Status:      pb.TaskStatus_STATUS_COMPLETED,
+			ExitCode:    0,
+			Stdout:      fmt.Sprintf("build #%d", atomic.LoadInt32(&workerCalls)),
+			BuildTimeMs: 7,
+		}, nil
+	})
+	defer workerCleanup()
+
+	s, client, cleanup := setupTestServer(t, Config{
+		Port:            0,
+		HeartbeatTTL:    30 * time.Second,
+		RequestTimeout:  30 * time.Second,
+		BuilderCacheDir: t.TempDir(),
+	})
+	defer cleanup()
+
+	info := &registry.WorkerInfo{
+		ID:      "versioned-worker",
+		Address: addr,
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch:            pb.Architecture_ARCH_X86_64,
+			CustomBuilders:        []string{"demo"},
+			CustomBuilderVersions: map[string]string{"demo": "hash-v1"},
+		},
+		MaxParallel: 2,
+	}
+	require.NoError(t, s.registry.Add(info))
+
+	req := &pb.BuildRequest{
+		TaskId:        "custom-versioned",
+		SourceHash:    "cafe",
+		SourceArchive: []byte("fake-tar"),
+		CustomBuilder: "demo",
+	}
+	resp1, err := client.Build(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, pb.TaskStatus_STATUS_COMPLETED, resp1.Status)
+	assert.False(t, resp1.FromCache)
+
+	// Builder update on the worker: same id, new content hash.
+	info.Capabilities.CustomBuilderVersions = map[string]string{"demo": "hash-v2"}
+	require.NoError(t, s.registry.Add(info))
+
+	resp2, err := client.Build(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, pb.TaskStatus_STATUS_COMPLETED, resp2.Status)
+	assert.False(t, resp2.FromCache, "builder version bump must invalidate the cache")
+	assert.Equal(t, "build #2", resp2.Stdout)
+	assert.Equal(t, int32(2), atomic.LoadInt32(&workerCalls))
 }

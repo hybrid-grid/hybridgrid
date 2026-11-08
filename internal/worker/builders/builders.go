@@ -9,11 +9,16 @@ package builders
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -59,6 +64,10 @@ type Builder struct {
 	Path     string // absolute path to the hg-exec-<id> binary
 	Desc     string
 	ProbedAt time.Time
+	// Hash is the sha256 of the builder binary plus its sibling asset
+	// files (hg-build.sh and friends). Coordinator result caches key on
+	// it so editing a builder or its script invalidates cached output.
+	Hash string
 }
 
 // Registry holds the builders discovered on this worker.
@@ -79,6 +88,20 @@ func (r *Registry) IDs() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return append([]string(nil), r.order...)
+}
+
+// Versions returns the per-builder content hash map for capabilities
+// advertisement.
+func (r *Registry) Versions() map[string]string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make(map[string]string, len(r.byID))
+	for id, b := range r.byID {
+		if b.Hash != "" {
+			out[id] = b.Hash
+		}
+	}
+	return out
 }
 
 // Get looks a builder up by id.
@@ -143,10 +166,69 @@ func (r *Registry) Discover(dir string) []string {
 			fmt.Fprintf(os.Stderr, "builders: skip %s: capability id %q does not match filename\n", name, cap.ID)
 			continue
 		}
-		r.add(Builder{ID: id, Path: path, Desc: cap.Description, ProbedAt: time.Now()})
+		hash, err := hashBuilder(dir, name)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "builders: skip %s: hash: %v\n", name, err)
+			continue
+		}
+		r.add(Builder{ID: id, Path: path, Desc: cap.Description, ProbedAt: time.Now(), Hash: hash})
 		registered = append(registered, id)
 	}
 	return registered
+}
+
+// hashBuilder hashes the builder binary plus every other regular file
+// in dir except sibling hg-exec-* binaries. Shared asset files landing
+// in another builder's hash too only costs extra cache misses — never
+// stale hits.
+func hashBuilder(dir, bin string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || e.Name() == bin {
+			continue
+		}
+		// Other plugin binaries live in the same directory; their
+		// bytes belong to their own hashes, not this one.
+		if e.Name() != bin && strings.HasPrefix(e.Name(), "hg-exec-") {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+
+	h := sha256.New()
+	binPath := filepath.Join(dir, bin)
+	f, err := os.Open(binPath)
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(h, f); err != nil {
+		f.Close()
+		return "", err
+	}
+	f.Close()
+
+	for _, name := range names {
+		p := filepath.Join(dir, name)
+		info, err := os.Stat(p)
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		f, err := os.Open(p)
+		if err != nil {
+			return "", err
+		}
+		if _, err := io.Copy(h, f); err != nil {
+			f.Close()
+			return "", err
+		}
+		f.Close()
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // validID enforces the plugin id charset.

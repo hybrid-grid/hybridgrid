@@ -245,3 +245,37 @@ func TestRun_InvalidResultJSON(t *testing.T) {
 		t.Errorf("console: %q", console)
 	}
 }
+
+// TestDiscover_VersionHashChangesWithAssets verifies the per-builder
+// content hash: stable for identical content, changed when a sibling
+// asset script is edited — the invalidation signal the coordinator's
+// builder cache keys on.
+func TestDiscover_VersionHashChangesWithAssets(t *testing.T) {
+	dir := fixtureDir(t, "ok")
+	r := NewRegistry()
+	if ids := r.Discover(dir); len(ids) != 1 {
+		t.Fatalf("expected [fixture], got %v", ids)
+	}
+	b1, ok := r.Get("fixture")
+	if !ok || b1.Hash == "" {
+		t.Fatalf("builder hash empty: %+v", b1)
+	}
+
+	asset := filepath.Join(dir, "hg-build.sh")
+	if err := os.WriteFile(asset, []byte("echo v2\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r2 := NewRegistry()
+	r2.Discover(dir)
+	b2, _ := r2.Get("fixture")
+	if b2.Hash == b1.Hash {
+		t.Fatal("hash did not change after asset edit")
+	}
+
+	r3 := NewRegistry()
+	r3.Discover(dir)
+	b3, _ := r3.Get("fixture")
+	if b3.Hash != b2.Hash {
+		t.Fatalf("hash unstable for identical content: %s vs %s", b3.Hash, b2.Hash)
+	}
+}

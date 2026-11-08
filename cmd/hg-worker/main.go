@@ -224,6 +224,9 @@ It executes build tasks received from the coordinator.`,
 			caps.Version = version
 			if len(builderIDs) > 0 {
 				caps.CustomBuilders = builderIDs
+				if versions := srv.BuilderVersions(); len(versions) > 0 {
+					caps.CustomBuilderVersions = versions
+				}
 			}
 
 			// Connect to coordinator

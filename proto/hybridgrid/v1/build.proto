@@ -189,6 +189,12 @@ message WorkerCapabilities {
   // advertise the builder ids here; BuildRequest.custom_builder routes
   // a build to one.
   repeated string custom_builders = 27;
+
+  // Sha256 of each builder's binary plus its asset files (hg-build.sh
+  // and friends), keyed by builder id. The coordinator keys per-builder
+  // result caches on it so editing a builder script invalidates the
+  // cache instead of serving stale output.
+  map<string, string> custom_builder_versions = 28;
 }
 
 // ============================================================
