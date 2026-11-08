@@ -37,6 +37,11 @@ type Config struct {
 	// --builder-dir. May be nil: the worker then serves no custom
 	// builders (requests name one fail with a clear message).
 	Builders *builders.Registry
+
+	// DockerImages overrides the default per-arch Docker compile images
+	// (nil keeps the dockcross defaults). Lets an operator pin the
+	// exact toolchain version clients expect, e.g. --docker-image-x86.
+	DockerImages map[pb.Architecture]string
 }
 
 // DefaultConfig returns sensible defaults.
@@ -75,7 +80,7 @@ func New(cfg Config) *Server {
 	return &Server{
 		config:       cfg,
 		capabilities: caps,
-		executor:     executor.NewManager(caps.NativeArch, caps.DockerAvailable),
+		executor:     executor.NewManager(caps.NativeArch, caps.DockerAvailable, cfg.DockerImages),
 		builders:     cfg.Builders,
 	}
 }

@@ -204,6 +204,18 @@ It executes build tasks received from the coordinator.`,
 			// advertise them as custom build types.
 			var builderIDs []string
 			builderDir, _ := cmd.Flags().GetString("builder-dir")
+			dockerImages := map[pb.Architecture]string{}
+			for arch, flag := range map[pb.Architecture]string{
+				pb.Architecture_ARCH_X86_64: "docker-image-x86",
+				pb.Architecture_ARCH_ARM64:  "docker-image-arm64",
+			} {
+				if image, _ := cmd.Flags().GetString(flag); image != "" {
+					dockerImages[arch] = image
+				}
+			}
+			if len(dockerImages) > 0 {
+				cfg.DockerImages = dockerImages
+			}
 			if builderDir != "" {
 				registry := builders.NewRegistry()
 				builderIDs = registry.Discover(builderDir)
@@ -361,6 +373,8 @@ It executes build tasks received from the coordinator.`,
 	serveCmd.Flags().String("tls-key", "", "Path to TLS private key file (PEM format)")
 	serveCmd.Flags().String("tls-ca", "", "Path to CA certificate for client verification (mTLS)")
 	serveCmd.Flags().String("builder-dir", "", "Directory containing plugin builder executables (hg-exec-<id>)")
+	serveCmd.Flags().String("docker-image-x86", "", "Override compile image for x86_64 targets (default: dockcross/linux-x64)")
+	serveCmd.Flags().String("docker-image-arm64", "", "Override compile image for arm64 targets (default: dockcross/linux-arm64)")
 	serveCmd.Flags().Bool("tls-require-client-cert", false, "Require client certificates (mTLS)")
 	serveCmd.Flags().Bool("tracing-enable", false, "Enable OpenTelemetry tracing")
 	serveCmd.Flags().String("tracing-endpoint", "localhost:4317", "OTLP gRPC endpoint")
