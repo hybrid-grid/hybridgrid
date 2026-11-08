@@ -19,11 +19,15 @@ func TestPersistenceRoundtrip(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	s2 := NewStore()
 	if err := s2.EnablePersistence(ctx, path); err != nil {
 		t.Fatalf("EnablePersistence: %v", err)
 	}
+	// Stop the loop before TempDir cleanup: the final flush writes into
+	// the same directory and Windows cannot unlink freshly recreated
+	// files mid-RemoveAll.
+	cancel()
+	s2.WaitPersistLoop()
 
 	builds := s2.Builds()
 	if len(builds) != 2 {

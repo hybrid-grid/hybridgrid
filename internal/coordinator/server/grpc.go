@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"math"
@@ -2043,9 +2044,11 @@ func containsString(s []string, v string) bool {
 
 // builderCacheKey builds the per-builder result cache key from the
 // builder id, the advertising worker's builder content hash, and the
-// source hash (falling back to hashing the uploaded archive). Empty
-// when the cache is off or no version/hash is known — both mean "do
-// not cache".
+// source hash (falling back to hashing the uploaded archive). The
+// components are hashed together: the raw composite contains ":"
+// separators and arbitrary client hashes, which the Windows cache-key
+// validator rejects. Empty when the cache is off or no version/hash is
+// known — both mean "do not cache".
 func (s *Server) builderCacheKey(builderID, sourceHash string, archive []byte) string {
 	if s.builderCache == nil {
 		return ""
@@ -2069,7 +2072,8 @@ func (s *Server) builderCacheKey(builderID, sourceHash string, archive []byte) s
 	if version == "" {
 		return ""
 	}
-	return fmt.Sprintf("builder-cache:%s:%s:%s", builderID, version, sourceHash)
+	h := sha256.Sum256([]byte(builderID + "\x00" + version + "\x00" + sourceHash))
+	return "builder-cache_" + hex.EncodeToString(h[:])
 }
 
 // builderCacheLookup returns a cached BuildResponse for key.
