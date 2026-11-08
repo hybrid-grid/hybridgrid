@@ -12,6 +12,10 @@ import "sync"
 type Store struct {
 	mu sync.RWMutex
 
+	// persistWG tracks the background persistence loop started by
+	// EnablePersistence so tests can wait for its final flush.
+	persistWG sync.WaitGroup
+
 	tasks          map[string]*TaskInfo
 	taskOrder      []string
 	buildTasks     map[string][]string

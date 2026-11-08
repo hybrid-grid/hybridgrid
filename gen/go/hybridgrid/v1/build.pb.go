@@ -1244,8 +1244,13 @@ type WorkerCapabilities struct {
 	// advertise the builder ids here; BuildRequest.custom_builder routes
 	// a build to one.
 	CustomBuilders []string `protobuf:"bytes,27,rep,name=custom_builders,json=customBuilders,proto3" json:"custom_builders,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Sha256 of each builder's binary plus its asset files (hg-build.sh
+	// and friends), keyed by builder id. The coordinator keys per-builder
+	// result caches on it so editing a builder script invalidates the
+	// cache instead of serving stale output.
+	CustomBuilderVersions map[string]string `protobuf:"bytes,28,rep,name=custom_builder_versions,json=customBuilderVersions,proto3" json:"custom_builder_versions,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *WorkerCapabilities) Reset() {
@@ -1414,6 +1419,13 @@ func (x *WorkerCapabilities) GetNodejs() *NodeCapability {
 func (x *WorkerCapabilities) GetCustomBuilders() []string {
 	if x != nil {
 		return x.CustomBuilders
+	}
+	return nil
+}
+
+func (x *WorkerCapabilities) GetCustomBuilderVersions() map[string]string {
+	if x != nil {
+		return x.CustomBuilderVersions
 	}
 	return nil
 }
@@ -2885,7 +2897,7 @@ type WorkerStatusResponse_WorkerInfo struct {
 
 func (x *WorkerStatusResponse_WorkerInfo) Reset() {
 	*x = WorkerStatusResponse_WorkerInfo{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[40]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2897,7 +2909,7 @@ func (x *WorkerStatusResponse_WorkerInfo) String() string {
 func (*WorkerStatusResponse_WorkerInfo) ProtoMessage() {}
 
 func (x *WorkerStatusResponse_WorkerInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[40]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3097,7 +3109,7 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\rcross_compile\x18\x02 \x01(\bR\fcrossCompile\"W\n" +
 	"\x0eNodeCapability\x12\x1a\n" +
 	"\bversions\x18\x01 \x03(\tR\bversions\x12)\n" +
-	"\x10package_managers\x18\x02 \x03(\tR\x0fpackageManagers\"\xd4\x06\n" +
+	"\x10package_managers\x18\x02 \x03(\tR\x0fpackageManagers\"\x94\b\n" +
 	"\x12WorkerCapabilities\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\tR\bworkerId\x12\x1a\n" +
 	"\bhostname\x18\x02 \x01(\tR\bhostname\x12\x1b\n" +
@@ -3121,7 +3133,11 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\x04rust\x18\x18 \x01(\v2\x1d.hybridgrid.v1.RustCapabilityR\x04rust\x12+\n" +
 	"\x02go\x18\x19 \x01(\v2\x1b.hybridgrid.v1.GoCapabilityR\x02go\x125\n" +
 	"\x06nodejs\x18\x1a \x01(\v2\x1d.hybridgrid.v1.NodeCapabilityR\x06nodejs\x12'\n" +
-	"\x0fcustom_builders\x18\x1b \x03(\tR\x0ecustomBuilders\"\x9f\x01\n" +
+	"\x0fcustom_builders\x18\x1b \x03(\tR\x0ecustomBuilders\x12t\n" +
+	"\x17custom_builder_versions\x18\x1c \x03(\v2<.hybridgrid.v1.WorkerCapabilities.CustomBuilderVersionsEntryR\x15customBuilderVersions\x1aH\n" +
+	"\x1aCustomBuilderVersionsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9f\x01\n" +
 	"\x10HandshakeRequest\x12E\n" +
 	"\fcapabilities\x18\x01 \x01(\v2!.hybridgrid.v1.WorkerCapabilitiesR\fcapabilities\x12\x1d\n" +
 	"\n" +
@@ -3327,7 +3343,7 @@ func file_hybridgrid_v1_build_proto_rawDescGZIP() []byte {
 }
 
 var file_hybridgrid_v1_build_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_hybridgrid_v1_build_proto_msgTypes = make([]protoimpl.MessageInfo, 41)
+var file_hybridgrid_v1_build_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
 var file_hybridgrid_v1_build_proto_goTypes = []any{
 	(Architecture)(0),                       // 0: hybridgrid.v1.Architecture
 	(BuildType)(0),                          // 1: hybridgrid.v1.BuildType
@@ -3372,8 +3388,9 @@ var file_hybridgrid_v1_build_proto_goTypes = []any{
 	nil,                                     // 40: hybridgrid.v1.GoConfig.LdflagsEntry
 	nil,                                     // 41: hybridgrid.v1.NodeConfig.EnvVarsEntry
 	nil,                                     // 42: hybridgrid.v1.CustomConfig.EnvEntry
-	nil,                                     // 43: hybridgrid.v1.CompileRequest.IncludeFilesEntry
-	(*WorkerStatusResponse_WorkerInfo)(nil), // 44: hybridgrid.v1.WorkerStatusResponse.WorkerInfo
+	nil,                                     // 43: hybridgrid.v1.WorkerCapabilities.CustomBuilderVersionsEntry
+	nil,                                     // 44: hybridgrid.v1.CompileRequest.IncludeFilesEntry
+	(*WorkerStatusResponse_WorkerInfo)(nil), // 45: hybridgrid.v1.WorkerStatusResponse.WorkerInfo
 }
 var file_hybridgrid_v1_build_proto_depIdxs = []int32{
 	0,  // 0: hybridgrid.v1.CppConfig.target_arch:type_name -> hybridgrid.v1.Architecture
@@ -3394,51 +3411,52 @@ var file_hybridgrid_v1_build_proto_depIdxs = []int32{
 	16, // 15: hybridgrid.v1.WorkerCapabilities.rust:type_name -> hybridgrid.v1.RustCapability
 	17, // 16: hybridgrid.v1.WorkerCapabilities.go:type_name -> hybridgrid.v1.GoCapability
 	18, // 17: hybridgrid.v1.WorkerCapabilities.nodejs:type_name -> hybridgrid.v1.NodeCapability
-	19, // 18: hybridgrid.v1.HandshakeRequest.capabilities:type_name -> hybridgrid.v1.WorkerCapabilities
-	1,  // 19: hybridgrid.v1.BuildRequest.build_type:type_name -> hybridgrid.v1.BuildType
-	2,  // 20: hybridgrid.v1.BuildRequest.target_platform:type_name -> hybridgrid.v1.TargetPlatform
-	4,  // 21: hybridgrid.v1.BuildRequest.cpp_config:type_name -> hybridgrid.v1.CppConfig
-	5,  // 22: hybridgrid.v1.BuildRequest.flutter_config:type_name -> hybridgrid.v1.FlutterConfig
-	6,  // 23: hybridgrid.v1.BuildRequest.unity_config:type_name -> hybridgrid.v1.UnityConfig
-	7,  // 24: hybridgrid.v1.BuildRequest.cocos_config:type_name -> hybridgrid.v1.CocosConfig
-	8,  // 25: hybridgrid.v1.BuildRequest.rust_config:type_name -> hybridgrid.v1.RustConfig
-	9,  // 26: hybridgrid.v1.BuildRequest.go_config:type_name -> hybridgrid.v1.GoConfig
-	10, // 27: hybridgrid.v1.BuildRequest.node_config:type_name -> hybridgrid.v1.NodeConfig
-	11, // 28: hybridgrid.v1.BuildRequest.custom_config:type_name -> hybridgrid.v1.CustomConfig
-	3,  // 29: hybridgrid.v1.BuildResponse.status:type_name -> hybridgrid.v1.TaskStatus
-	23, // 30: hybridgrid.v1.BuildResponse.artifact_list:type_name -> hybridgrid.v1.ArtifactInfo
-	26, // 31: hybridgrid.v1.BuildChunk.metadata:type_name -> hybridgrid.v1.BuildMetadata
-	1,  // 32: hybridgrid.v1.BuildMetadata.build_type:type_name -> hybridgrid.v1.BuildType
-	2,  // 33: hybridgrid.v1.BuildMetadata.target_platform:type_name -> hybridgrid.v1.TargetPlatform
-	0,  // 34: hybridgrid.v1.CompileRequest.target_arch:type_name -> hybridgrid.v1.Architecture
-	0,  // 35: hybridgrid.v1.CompileRequest.client_arch:type_name -> hybridgrid.v1.Architecture
-	43, // 36: hybridgrid.v1.CompileRequest.include_files:type_name -> hybridgrid.v1.CompileRequest.IncludeFilesEntry
-	3,  // 37: hybridgrid.v1.CompileResponse.status:type_name -> hybridgrid.v1.TaskStatus
-	44, // 38: hybridgrid.v1.WorkerStatusResponse.workers:type_name -> hybridgrid.v1.WorkerStatusResponse.WorkerInfo
-	1,  // 39: hybridgrid.v1.WorkersForBuildRequest.build_type:type_name -> hybridgrid.v1.BuildType
-	2,  // 40: hybridgrid.v1.WorkersForBuildRequest.target_platform:type_name -> hybridgrid.v1.TargetPlatform
-	0,  // 41: hybridgrid.v1.WorkerStatusResponse.WorkerInfo.native_arch:type_name -> hybridgrid.v1.Architecture
-	20, // 42: hybridgrid.v1.BuildService.Handshake:input_type -> hybridgrid.v1.HandshakeRequest
-	22, // 43: hybridgrid.v1.BuildService.Build:input_type -> hybridgrid.v1.BuildRequest
-	25, // 44: hybridgrid.v1.BuildService.StreamBuild:input_type -> hybridgrid.v1.BuildChunk
-	27, // 45: hybridgrid.v1.BuildService.Compile:input_type -> hybridgrid.v1.CompileRequest
-	29, // 46: hybridgrid.v1.BuildService.HealthCheck:input_type -> hybridgrid.v1.HealthRequest
-	31, // 47: hybridgrid.v1.BuildService.GetWorkerStatus:input_type -> hybridgrid.v1.WorkerStatusRequest
-	33, // 48: hybridgrid.v1.BuildService.GetWorkersForBuild:input_type -> hybridgrid.v1.WorkersForBuildRequest
-	35, // 49: hybridgrid.v1.BuildService.ReportCacheHit:input_type -> hybridgrid.v1.ReportCacheHitRequest
-	21, // 50: hybridgrid.v1.BuildService.Handshake:output_type -> hybridgrid.v1.HandshakeResponse
-	24, // 51: hybridgrid.v1.BuildService.Build:output_type -> hybridgrid.v1.BuildResponse
-	24, // 52: hybridgrid.v1.BuildService.StreamBuild:output_type -> hybridgrid.v1.BuildResponse
-	28, // 53: hybridgrid.v1.BuildService.Compile:output_type -> hybridgrid.v1.CompileResponse
-	30, // 54: hybridgrid.v1.BuildService.HealthCheck:output_type -> hybridgrid.v1.HealthResponse
-	32, // 55: hybridgrid.v1.BuildService.GetWorkerStatus:output_type -> hybridgrid.v1.WorkerStatusResponse
-	34, // 56: hybridgrid.v1.BuildService.GetWorkersForBuild:output_type -> hybridgrid.v1.WorkersForBuildResponse
-	36, // 57: hybridgrid.v1.BuildService.ReportCacheHit:output_type -> hybridgrid.v1.ReportCacheHitResponse
-	50, // [50:58] is the sub-list for method output_type
-	42, // [42:50] is the sub-list for method input_type
-	42, // [42:42] is the sub-list for extension type_name
-	42, // [42:42] is the sub-list for extension extendee
-	0,  // [0:42] is the sub-list for field type_name
+	43, // 18: hybridgrid.v1.WorkerCapabilities.custom_builder_versions:type_name -> hybridgrid.v1.WorkerCapabilities.CustomBuilderVersionsEntry
+	19, // 19: hybridgrid.v1.HandshakeRequest.capabilities:type_name -> hybridgrid.v1.WorkerCapabilities
+	1,  // 20: hybridgrid.v1.BuildRequest.build_type:type_name -> hybridgrid.v1.BuildType
+	2,  // 21: hybridgrid.v1.BuildRequest.target_platform:type_name -> hybridgrid.v1.TargetPlatform
+	4,  // 22: hybridgrid.v1.BuildRequest.cpp_config:type_name -> hybridgrid.v1.CppConfig
+	5,  // 23: hybridgrid.v1.BuildRequest.flutter_config:type_name -> hybridgrid.v1.FlutterConfig
+	6,  // 24: hybridgrid.v1.BuildRequest.unity_config:type_name -> hybridgrid.v1.UnityConfig
+	7,  // 25: hybridgrid.v1.BuildRequest.cocos_config:type_name -> hybridgrid.v1.CocosConfig
+	8,  // 26: hybridgrid.v1.BuildRequest.rust_config:type_name -> hybridgrid.v1.RustConfig
+	9,  // 27: hybridgrid.v1.BuildRequest.go_config:type_name -> hybridgrid.v1.GoConfig
+	10, // 28: hybridgrid.v1.BuildRequest.node_config:type_name -> hybridgrid.v1.NodeConfig
+	11, // 29: hybridgrid.v1.BuildRequest.custom_config:type_name -> hybridgrid.v1.CustomConfig
+	3,  // 30: hybridgrid.v1.BuildResponse.status:type_name -> hybridgrid.v1.TaskStatus
+	23, // 31: hybridgrid.v1.BuildResponse.artifact_list:type_name -> hybridgrid.v1.ArtifactInfo
+	26, // 32: hybridgrid.v1.BuildChunk.metadata:type_name -> hybridgrid.v1.BuildMetadata
+	1,  // 33: hybridgrid.v1.BuildMetadata.build_type:type_name -> hybridgrid.v1.BuildType
+	2,  // 34: hybridgrid.v1.BuildMetadata.target_platform:type_name -> hybridgrid.v1.TargetPlatform
+	0,  // 35: hybridgrid.v1.CompileRequest.target_arch:type_name -> hybridgrid.v1.Architecture
+	0,  // 36: hybridgrid.v1.CompileRequest.client_arch:type_name -> hybridgrid.v1.Architecture
+	44, // 37: hybridgrid.v1.CompileRequest.include_files:type_name -> hybridgrid.v1.CompileRequest.IncludeFilesEntry
+	3,  // 38: hybridgrid.v1.CompileResponse.status:type_name -> hybridgrid.v1.TaskStatus
+	45, // 39: hybridgrid.v1.WorkerStatusResponse.workers:type_name -> hybridgrid.v1.WorkerStatusResponse.WorkerInfo
+	1,  // 40: hybridgrid.v1.WorkersForBuildRequest.build_type:type_name -> hybridgrid.v1.BuildType
+	2,  // 41: hybridgrid.v1.WorkersForBuildRequest.target_platform:type_name -> hybridgrid.v1.TargetPlatform
+	0,  // 42: hybridgrid.v1.WorkerStatusResponse.WorkerInfo.native_arch:type_name -> hybridgrid.v1.Architecture
+	20, // 43: hybridgrid.v1.BuildService.Handshake:input_type -> hybridgrid.v1.HandshakeRequest
+	22, // 44: hybridgrid.v1.BuildService.Build:input_type -> hybridgrid.v1.BuildRequest
+	25, // 45: hybridgrid.v1.BuildService.StreamBuild:input_type -> hybridgrid.v1.BuildChunk
+	27, // 46: hybridgrid.v1.BuildService.Compile:input_type -> hybridgrid.v1.CompileRequest
+	29, // 47: hybridgrid.v1.BuildService.HealthCheck:input_type -> hybridgrid.v1.HealthRequest
+	31, // 48: hybridgrid.v1.BuildService.GetWorkerStatus:input_type -> hybridgrid.v1.WorkerStatusRequest
+	33, // 49: hybridgrid.v1.BuildService.GetWorkersForBuild:input_type -> hybridgrid.v1.WorkersForBuildRequest
+	35, // 50: hybridgrid.v1.BuildService.ReportCacheHit:input_type -> hybridgrid.v1.ReportCacheHitRequest
+	21, // 51: hybridgrid.v1.BuildService.Handshake:output_type -> hybridgrid.v1.HandshakeResponse
+	24, // 52: hybridgrid.v1.BuildService.Build:output_type -> hybridgrid.v1.BuildResponse
+	24, // 53: hybridgrid.v1.BuildService.StreamBuild:output_type -> hybridgrid.v1.BuildResponse
+	28, // 54: hybridgrid.v1.BuildService.Compile:output_type -> hybridgrid.v1.CompileResponse
+	30, // 55: hybridgrid.v1.BuildService.HealthCheck:output_type -> hybridgrid.v1.HealthResponse
+	32, // 56: hybridgrid.v1.BuildService.GetWorkerStatus:output_type -> hybridgrid.v1.WorkerStatusResponse
+	34, // 57: hybridgrid.v1.BuildService.GetWorkersForBuild:output_type -> hybridgrid.v1.WorkersForBuildResponse
+	36, // 58: hybridgrid.v1.BuildService.ReportCacheHit:output_type -> hybridgrid.v1.ReportCacheHitResponse
+	51, // [51:59] is the sub-list for method output_type
+	43, // [43:51] is the sub-list for method input_type
+	43, // [43:43] is the sub-list for extension type_name
+	43, // [43:43] is the sub-list for extension extendee
+	0,  // [0:43] is the sub-list for field type_name
 }
 
 func init() { file_hybridgrid_v1_build_proto_init() }
@@ -3466,7 +3484,7 @@ func file_hybridgrid_v1_build_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_hybridgrid_v1_build_proto_rawDesc), len(file_hybridgrid_v1_build_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   41,
+			NumMessages:   42,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

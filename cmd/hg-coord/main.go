@@ -74,6 +74,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			schedulerType, _ := cmd.Flags().GetString("scheduler")
 			taskLogPath, _ := cmd.Flags().GetString("task-log")
 			buildHistoryPath, _ := cmd.Flags().GetString("build-history")
+			builderCacheDir, _ := cmd.Flags().GetString("builder-cache-dir")
 			dispatchQueueTimeout, _ := cmd.Flags().GetDuration("dispatch-queue-timeout")
 			epsilonValue, _ := cmd.Flags().GetFloat64("epsilon")
 			alphaValue, _ := cmd.Flags().GetFloat64("alpha")
@@ -190,6 +191,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			cfg.SchedulerType = schedulerType
 			cfg.TaskLogPath = taskLogPath
 			cfg.DispatchQueueTimeout = dispatchQueueTimeout
+			cfg.BuilderCacheDir = builderCacheDir
 			cfg.EpsilonValue = epsilonValue
 			cfg.AlphaValue = alphaValue
 			cfg.WarmStartTasks = warmStart
@@ -369,6 +371,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 	serveCmd.Flags().String("event-webhook-secret", "", "Shared secret HMAC-SHA256-signing every webhook delivery (X-Hybridgrid-Signature header)")
 	serveCmd.Flags().String("task-log", "", "Path to per-task JSON Lines log file (default: stdout)")
 	serveCmd.Flags().String("build-history", "", "Persist build history to this JSON file and reload it on start (default: off)")
+	serveCmd.Flags().String("builder-cache-dir", "", "Cache per-builder (plugin builder) build results in this directory, keyed by builder version + source hash (default: off)")
 	serveCmd.Flags().Float64("epsilon", 0.1, "Exploration rate for epsilon-greedy scheduler (in [0, 1]; ignored otherwise)")
 	serveCmd.Flags().Float64("alpha", 1.0, "LinUCB exploration coefficient α (in [0, 10]; ignored for other schedulers)")
 	serveCmd.Flags().Int("warm-start", 100, "Hybrid-LinUCB warm-start dispatch count (>= 0; ignored for other schedulers)")

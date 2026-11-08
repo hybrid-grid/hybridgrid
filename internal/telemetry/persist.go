@@ -81,9 +81,15 @@ func (s *Store) EnablePersistence(ctx context.Context, path string) error {
 		return fmt.Errorf("cannot read build history %s: %w", path, err)
 	}
 
+	s.persistWG.Add(1)
 	go s.persistLoop(ctx)
 	return nil
 }
+
+// WaitPersistLoop blocks until the persistence loop exits. Tests
+// cancel the context then wait here so the final flush cannot race
+// TempDir cleanup (Windows cannot delete open/recreated files).
+func (s *Store) WaitPersistLoop() { s.persistWG.Wait() }
 
 func (s *Store) disablePersistence() {
 	s.mu.Lock()
@@ -94,6 +100,7 @@ func (s *Store) disablePersistence() {
 // persistLoop writes the snapshot when the store changed and flushes
 // once more on shutdown.
 func (s *Store) persistLoop(ctx context.Context) {
+	defer s.persistWG.Done()
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {

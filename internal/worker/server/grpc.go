@@ -90,6 +90,15 @@ func (s *Server) Capabilities() *pb.WorkerCapabilities {
 	return s.capabilities
 }
 
+// BuilderVersions returns the per-builder content hash map for
+// capabilities advertisement.
+func (s *Server) BuilderVersions() map[string]string {
+	if s.builders == nil {
+		return nil
+	}
+	return s.builders.Versions()
+}
+
 // Start starts the gRPC server.
 func (s *Server) Start() error {
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", s.config.Port))

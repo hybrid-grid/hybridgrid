@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"math"
@@ -18,6 +20,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cache"
@@ -426,6 +429,11 @@ type Config struct {
 	// "no worker available" failure. 0 disables queueing entirely
 	// (ablation: the pre-backpressure reject-after-budget behavior).
 	DispatchQueueTimeout time.Duration
+	// BuilderCacheDir persists per-builder build results (keyed by
+	// builder id + builder content hash + source hash) so repeat
+	// plugin-builder runs with unchanged inputs skip the worker.
+	// Empty disables the cache (default: off).
+	BuilderCacheDir string
 	// SchedulerPluginAddr is the gRPC endpoint of an external scheduler
 	// plugin (contract schedulerv1alpha1). Used when SchedulerType is
 	// "external"; the plugin decides dispatches within
@@ -602,6 +610,11 @@ type Server struct {
 	unityCacheMu        sync.RWMutex
 	unityCache          map[string]*unityCacheEntry
 	activeTasksByWorker sync.Map
+
+	// builderCache persists per-builder results when BuilderCacheDir
+	// is configured; nil means the cache is off.
+	builderCache     *cache.Store
+	builderCacheHits int64
 }
 
 type flutterCacheEntry struct {
@@ -698,6 +711,18 @@ func New(cfg Config) *Server {
 		unityCache:      make(map[string]*unityCacheEntry),
 		dispatchCh:      make(chan *dispatchRequest, dispatchQueueSize),
 		dispatchSignal:  make(chan struct{}),
+	}
+	if cfg.BuilderCacheDir != "" {
+		// 512MB / 30 days mirrors the CLI cache defaults; builder
+		// outputs (archives + artifacts) are small relative to .o files.
+		store, err := cache.NewStore(cfg.BuilderCacheDir, 512, 24*30)
+		if err != nil {
+			log.Warn().Err(err).Str("dir", cfg.BuilderCacheDir).
+				Msg("Builder cache disabled; starting without it")
+		} else {
+			s.builderCache = store
+			log.Info().Str("dir", cfg.BuilderCacheDir).Msg("Builder cache enabled")
+		}
 	}
 	go s.dispatchLoop()
 	return s
@@ -1813,6 +1838,51 @@ func (s *Server) handleCustomBuild(ctx context.Context, req *pb.BuildRequest, bu
 	atomic.AddInt64(&s.queuedTasks, 1)
 	defer atomic.AddInt64(&s.queuedTasks, -1)
 
+	// Per-builder result cache: keyed on builder id + the worker-side
+	// builder content hash + source hash, so a repeat run with the
+	// same project and builder version skips the worker entirely.
+	cacheKey := s.builderCacheKey(builderID, req.SourceHash, req.SourceArchive)
+	if cacheKey != "" {
+		if cached, ok := s.builderCacheLookup(cacheKey); ok {
+			atomic.AddInt64(&s.cacheHits, 1)
+			atomic.AddInt64(&s.builderCacheHits, 1)
+			atomic.AddInt64(&s.totalTasks, 1)
+			atomic.AddInt64(&s.successTasks, 1)
+			taskStartMs := start.UnixMilli()
+			if s.eventNotifier != nil {
+				s.eventNotifier.NotifyTaskStarted(&TaskEvent{
+					ID:          req.TaskId,
+					BuildType:   builderID,
+					BuildID:     buildID,
+					Status:      "running",
+					WorkerID:    "",
+					StartedAtMs: taskStartMs,
+				})
+				s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
+					ID:            req.TaskId,
+					BuildType:     builderID,
+					BuildID:       buildID,
+					Status:        "completed",
+					WorkerID:      "",
+					StartedAtMs:   taskStartMs,
+					CompletedAtMs: time.Now().UnixMilli(),
+					DurationMs:    cached.GetBuildTimeMs(),
+					QueueTimeMs:   0,
+					CompileTimeMs: cached.GetBuildTimeMs(),
+					ExitCode:      0,
+					FromCache:     true,
+				})
+			}
+			log.Info().Str("builder", builderID).Str("task_id", req.TaskId).
+				Msg("Custom build served from builder cache")
+			// The stored response has FromCache unset (the worker
+			// built it); mark the replay so dashboards count it.
+			cached.FromCache = true
+			return cached, nil
+		}
+		atomic.AddInt64(&s.cacheMisses, 1)
+	}
+
 	worker, queueWait, err := s.selectBuildWorker(ctx,
 		func(w *registry.WorkerInfo) bool {
 			return w != nil && w.Capabilities != nil &&
@@ -1952,6 +2022,13 @@ func (s *Server) handleCustomBuild(ctx context.Context, req *pb.BuildRequest, bu
 		}, nil
 	}
 
+	// Success with an active cache key: persist for future identical
+	// runs. Only completed responses are cached — partial failures
+	// must not poison the key.
+	if cacheKey != "" && buildResp != nil && buildResp.Status == pb.TaskStatus_STATUS_COMPLETED && buildResp.ExitCode == 0 {
+		s.builderCacheStore(cacheKey, buildResp)
+	}
+
 	return buildResp, nil
 }
 
@@ -1963,6 +2040,66 @@ func containsString(s []string, v string) bool {
 		}
 	}
 	return false
+}
+
+// builderCacheKey builds the per-builder result cache key from the
+// builder id, the advertising worker's builder content hash, and the
+// source hash (falling back to hashing the uploaded archive). The
+// components are hashed together: the raw composite contains ":"
+// separators and arbitrary client hashes, which the Windows cache-key
+// validator rejects. Empty when the cache is off or no version/hash is
+// known — both mean "do not cache".
+func (s *Server) builderCacheKey(builderID, sourceHash string, archive []byte) string {
+	if s.builderCache == nil {
+		return ""
+	}
+	if sourceHash == "" && len(archive) > 0 {
+		sourceHash = fmt.Sprintf("%x", sha256.Sum256(archive))
+	}
+	if sourceHash == "" {
+		return ""
+	}
+	version := ""
+	for _, w := range s.registry.List() {
+		if w.Capabilities == nil || !containsString(w.Capabilities.GetCustomBuilders(), builderID) {
+			continue
+		}
+		if v := w.Capabilities.GetCustomBuilderVersions()[builderID]; v != "" {
+			version = v
+			break
+		}
+	}
+	if version == "" {
+		return ""
+	}
+	h := sha256.Sum256([]byte(builderID + "\x00" + version + "\x00" + sourceHash))
+	return "builder-cache_" + hex.EncodeToString(h[:])
+}
+
+// builderCacheLookup returns a cached BuildResponse for key.
+func (s *Server) builderCacheLookup(key string) (*pb.BuildResponse, bool) {
+	data, ok := s.builderCache.GetBytes(key)
+	if !ok {
+		return nil, false
+	}
+	var resp pb.BuildResponse
+	if err := (protojson.UnmarshalOptions{}).Unmarshal(data, &resp); err != nil {
+		log.Warn().Err(err).Str("key", key).Msg("Builder cache entry unreadable; treating as miss")
+		return nil, false
+	}
+	return &resp, true
+}
+
+// builderCacheStore persists a successful BuildResponse under key.
+func (s *Server) builderCacheStore(key string, resp *pb.BuildResponse) {
+	data, err := (protojson.MarshalOptions{}).Marshal(resp)
+	if err != nil {
+		log.Warn().Err(err).Str("key", key).Msg("Builder cache store failed to marshal")
+		return
+	}
+	if err := s.builderCache.PutBytes(key, data); err != nil {
+		log.Warn().Err(err).Str("key", key).Msg("Builder cache store failed")
+	}
 }
 
 // StreamBuild handles streaming build requests.
