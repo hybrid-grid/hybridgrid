@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { BuildDurationsChart } from '@/components/BuildDurationsChart'
 import { BuildsTable } from '@/components/BuildsTable'
+import { MenuSelect } from '@/components/FilterControls'
 import { PageHeader } from '@/components/PageHeader'
 import { Panel } from '@/components/Panel'
 import { StatStrip, type StatCell } from '@/components/StatStrip'
@@ -18,6 +20,9 @@ function BuildsList() {
   const t = useT()
   const { data, isLoading } = useBuilds()
   const builds = data?.builds ?? []
+  const [scheduler, setScheduler] = useState('')
+  const schedulers = [...new Set(builds.map((b) => b.scheduler).filter((s): s is string => Boolean(s)))].sort()
+  const visible = scheduler ? builds.filter((b) => b.scheduler === scheduler) : builds
 
   return (
     <div className="flex flex-col gap-4">
@@ -29,8 +34,22 @@ function BuildsList() {
         <BuildDurationsChart builds={builds} />
       </Panel>
 
+      {schedulers.length > 1 && (
+        <div className="flex items-center gap-2">
+          <MenuSelect
+            label={t('builds.schedulerFilter')}
+            value={scheduler}
+            onChange={setScheduler}
+            options={[
+              { value: '', label: t('builds.schedulerAll') },
+              ...schedulers.map((s) => ({ value: s, label: s })),
+            ]}
+          />
+        </div>
+      )}
+
       <Panel padded={false} className="overflow-hidden">
-        <BuildsTable builds={builds} loading={isLoading} />
+        <BuildsTable builds={visible} loading={isLoading} />
       </Panel>
     </div>
   )

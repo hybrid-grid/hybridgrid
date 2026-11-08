@@ -19,16 +19,17 @@ interface BuildsTableProps {
 /** Build history table shared by the builds page and the overview's "latest builds" panel. */
 export function BuildsTable({ builds, loading = false, compact = false }: BuildsTableProps) {
   const t = useT()
-  const columnCount = compact ? 6 : 8
+  const columnCount = compact ? 6 : 9
 
   return (
     <div className="overflow-x-auto">
-      <table className={cn('w-full border-collapse text-left text-[12px]', compact ? 'min-w-[600px]' : 'min-w-[880px]')}>
+      <table className={cn('w-full border-collapse text-left text-[12px]', compact ? 'min-w-[600px]' : 'min-w-[980px]')}>
         <thead>
           <tr className="border-b border-(--color-hairline) text-[10px] uppercase tracking-[0.06em] text-(--color-ink-faint)">
             <th className="w-8 py-2 pl-4" aria-label={t('builds.colStatus')} />
             <th className="px-3 py-2 font-medium">{t('builds.colBuild')}</th>
             {!compact && <th className="px-3 py-2 font-medium">{t('builds.colType')}</th>}
+            {!compact && <th className="px-3 py-2 font-medium">{t('builds.colScheduler')}</th>}
             <th className="px-3 py-2 font-medium">{t('builds.colProgress')}</th>
             <th className="px-3 py-2 text-right font-medium">{t('builds.colCache')}</th>
             <th className="px-3 py-2 text-right font-medium">{t('builds.colDuration')}</th>
@@ -83,6 +84,11 @@ function BuildRow({ build, compact }: { build: BuildInfo; compact: boolean }) {
         </Link>
       </td>
       {!compact && <td className="px-3 py-2.5 text-(--color-ink-muted)">{build.build_type || 'native'}</td>}
+      {!compact && (
+        <td className="max-w-[180px] px-3 py-2.5 font-mono text-(--color-ink-secondary)" title={build.scheduler_params}>
+          {build.scheduler || '—'}
+        </td>
+      )}
       <td className="px-3 py-2.5">
         <div className="flex items-center gap-2.5">
           <span className="w-16 font-tabular text-(--color-ink-secondary)">

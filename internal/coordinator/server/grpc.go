@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -559,19 +560,20 @@ type EventNotifier interface {
 type Server struct {
 	pb.UnimplementedBuildServiceServer
 
-	config         Config
-	server         *grpc.Server
-	registry       registry.Registry
-	scheduler      scheduler.Scheduler
-	circuitManager *resilience.CircuitManager
-	eventNotifier  EventNotifier
-	telemetry      *telemetry.Service
-	workerConns    *connPool
-	taskLogger     *TaskLogger
-	console        *consoleStore
-	dispatchCh     chan *dispatchRequest
-	dispatchWG     sync.WaitGroup
-	dispatchOnce   sync.Once
+	config          Config
+	server          *grpc.Server
+	registry        registry.Registry
+	scheduler       scheduler.Scheduler
+	schedulerParams string
+	circuitManager  *resilience.CircuitManager
+	eventNotifier   EventNotifier
+	telemetry       *telemetry.Service
+	workerConns     *connPool
+	taskLogger      *TaskLogger
+	console         *consoleStore
+	dispatchCh      chan *dispatchRequest
+	dispatchWG      sync.WaitGroup
+	dispatchOnce    sync.Once
 
 	// dispatchSignal broadcasts "a slot may have freed" to Compile()
 	// calls waiting in the dispatch queue (backpressure path). It is
@@ -623,6 +625,24 @@ func New(cfg Config) *Server {
 	reg := registry.NewInMemoryRegistry(cfg.HeartbeatTTL)
 	circuitMgr := resilience.NewCircuitManager(resilience.DefaultCircuitConfig())
 	sched := newScheduler(cfg, reg, circuitMgr)
+	// Scheduler params for provenance display. Main's scheduler set is
+	// narrower than exp3's, so derive from cfg instead of a Params()
+	// interface; the exp3 branch carries the richer format
+	// (discount/features/reward_center).
+	var schedulerParams string
+	switch cfg.SchedulerType {
+	case "linucb", "hybrid-linucb":
+		schedulerParams = fmt.Sprintf("alpha=%s warm_start=%d load_penalty=%s",
+			strconv.FormatFloat(cfg.AlphaValue, 'g', -1, 64),
+			cfg.WarmStartTasks,
+			strconv.FormatFloat(cfg.LoadPenaltyValue, 'g', -1, 64))
+	case "epsilon-greedy":
+		eps := cfg.EpsilonValue
+		if eps == 0 {
+			eps = 0.1 // Sutton & Barto §2.3 default, same as newScheduler
+		}
+		schedulerParams = "epsilon=" + strconv.FormatFloat(eps, 'g', -1, 64)
+	}
 	log.Info().Str("scheduler", cfg.SchedulerType).Msg("Scheduler initialized")
 
 	taskLogger, err := NewTaskLogger(cfg.TaskLogPath)
@@ -666,17 +686,18 @@ func New(cfg Config) *Server {
 	}
 
 	s := &Server{
-		config:         cfg,
-		registry:       reg,
-		scheduler:      sched,
-		circuitManager: circuitMgr,
-		workerConns:    newConnPool(dialOpts),
-		taskLogger:     taskLogger,
-		console:        newConsoleStore(),
-		flutterCache:   make(map[string]*flutterCacheEntry),
-		unityCache:     make(map[string]*unityCacheEntry),
-		dispatchCh:     make(chan *dispatchRequest, dispatchQueueSize),
-		dispatchSignal: make(chan struct{}),
+		config:          cfg,
+		registry:        reg,
+		scheduler:       sched,
+		schedulerParams: schedulerParams,
+		circuitManager:  circuitMgr,
+		workerConns:     newConnPool(dialOpts),
+		taskLogger:      taskLogger,
+		console:         newConsoleStore(),
+		flutterCache:    make(map[string]*flutterCacheEntry),
+		unityCache:      make(map[string]*unityCacheEntry),
+		dispatchCh:      make(chan *dispatchRequest, dispatchQueueSize),
+		dispatchSignal:  make(chan struct{}),
 	}
 	go s.dispatchLoop()
 	return s
@@ -779,6 +800,14 @@ func (s *Server) Registry() registry.Registry {
 // SetEventNotifier sets the event notifier for task events.
 func (s *Server) SetEventNotifier(notifier EventNotifier) {
 	s.eventNotifier = notifier
+}
+
+// SchedulerInfo reports the active scheduler type and its parameter
+// string — the same values the task log records — so out-of-process
+// consumers (telemetry, dashboard) can label builds with the policy
+// that produced them.
+func (s *Server) SchedulerInfo() (string, string) {
+	return s.config.SchedulerType, s.schedulerParams
 }
 
 // SetTelemetry attaches a telemetry service to the coordinator gRPC
