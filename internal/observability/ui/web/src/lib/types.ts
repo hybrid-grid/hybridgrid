@@ -92,6 +92,8 @@ export interface BuildInfo {
   first_task_at_ms: number
   last_task_at_ms: number
   truncated: boolean
+  scheduler?: string
+  scheduler_params?: string
 }
 
 export interface BuildDetail {

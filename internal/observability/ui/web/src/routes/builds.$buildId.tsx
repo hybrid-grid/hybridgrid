@@ -153,6 +153,8 @@ function BuildMeta({ build, tasks }: { build: BuildInfo; tasks: TaskInfo[] }) {
       />
       <MetaRow label={t('buildDetail.metaCache')} value={build.from_cache_count} lead />
       <MetaRow label={t('buildDetail.metaType')} value={build.build_type || 'native'} />
+      <MetaRow label={t('buildDetail.metaScheduler')} value={build.scheduler || '—'} mono />
+      <MetaRow label={t('buildDetail.metaSchedulerParams')} value={build.scheduler_params || '—'} mono />
       <MetaRow label={t('buildDetail.metaFirstTask')} value={formatClock(build.first_task_at_ms)} mono />
       <MetaRow label={t('buildDetail.metaLastActivity')} value={formatClock(build.last_task_at_ms)} mono />
       <MetaRow label={t('buildDetail.metaWorkers')} value={workerCount} />
