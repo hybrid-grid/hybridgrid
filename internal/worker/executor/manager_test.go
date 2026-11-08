@@ -63,7 +63,7 @@ func TestManager_NewManager(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := NewManager(tt.nativeArch, tt.dockerAvailable)
+			m := NewManager(tt.nativeArch, tt.dockerAvailable, nil)
 
 			if m == nil {
 				t.Fatal("NewManager returned nil")
@@ -118,7 +118,7 @@ func TestManager_SelectArchitectures(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := NewManager(tt.nativeArch, tt.dockerAvailable)
+			m := NewManager(tt.nativeArch, tt.dockerAvailable, nil)
 			executor := m.Select(tt.targetArch)
 
 			if executor == nil {
@@ -188,7 +188,7 @@ func TestManager_SelectForRequest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := NewManager(tt.nativeArch, false)
+			m := NewManager(tt.nativeArch, false, nil)
 			executor := m.SelectForRequest(tt.req)
 
 			if executor == nil {
@@ -266,7 +266,7 @@ func TestManager_SelectForCompiler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := NewManager(tt.nativeArch, false)
+			m := NewManager(tt.nativeArch, false, nil)
 			executor := m.SelectForCompiler(tt.compiler, tt.targetArch)
 
 			if executor == nil {
@@ -338,7 +338,7 @@ func TestManager_Close(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := NewManager(pb.Architecture_ARCH_X86_64, tt.dockerAvailable)
+			m := NewManager(pb.Architecture_ARCH_X86_64, tt.dockerAvailable, nil)
 
 			err := m.Close()
 			if tt.dockerAvailable && m.docker != nil && err != nil {
@@ -362,7 +362,7 @@ func TestManager_Close_PropagatesDockerCloserError(t *testing.T) {
 
 // TestManager_GetMSVC tests MSVC executor retrieval
 func TestManager_GetMSVC(t *testing.T) {
-	m := NewManager(pb.Architecture_ARCH_X86_64, false)
+	m := NewManager(pb.Architecture_ARCH_X86_64, false, nil)
 	msvc := m.GetMSVC()
 
 	if runtime.GOOS == "windows" {
@@ -382,7 +382,7 @@ func TestManager_Execute(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	m := NewManager(pb.Architecture_ARCH_X86_64, false)
+	m := NewManager(pb.Architecture_ARCH_X86_64, false, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -442,5 +442,28 @@ func TestManager_Execute_FailedResultWithoutError(t *testing.T) {
 	}
 	if result == nil || result.Success {
 		t.Fatalf("Execute() result = %#v, want failed result", result)
+	}
+}
+
+// TestManager_DockerImageOverride verifies dockerImages overrides the
+// default per-arch images so an operator can pin an exact toolchain
+// version while untouched arches keep the dockcross defaults.
+func TestManager_DockerImageOverride(t *testing.T) {
+	if _, err := NewDockerExecutor(); err != nil {
+		t.Skipf("Docker not available: %v", err)
+	}
+
+	m := NewManager(pb.Architecture_ARCH_X86_64, true, map[pb.Architecture]string{
+		pb.Architecture_ARCH_X86_64: "registry.example.com/gcc16:latest",
+	})
+	docker, ok := m.docker.(*DockerExecutor)
+	if !ok {
+		t.Skip("Docker executor not initialized (likely Docker daemon unavailable)")
+	}
+	if got := docker.images[pb.Architecture_ARCH_X86_64]; got != "registry.example.com/gcc16:latest" {
+		t.Fatalf("x86 image = %q, want override", got)
+	}
+	if got := docker.images[pb.Architecture_ARCH_ARM64]; got != defaultImages[pb.Architecture_ARCH_ARM64] {
+		t.Fatalf("arm64 image = %q, want default preserved", got)
 	}
 }

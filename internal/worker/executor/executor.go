@@ -77,8 +77,9 @@ type Manager struct {
 	nativeArch pb.Architecture
 }
 
-// NewManager creates a new executor manager.
-func NewManager(nativeArch pb.Architecture, dockerAvailable bool) *Manager {
+// NewManager creates a new executor manager. dockerImages overrides the
+// default per-arch Docker images (nil keeps the dockcross defaults).
+func NewManager(nativeArch pb.Architecture, dockerAvailable bool, dockerImages map[pb.Architecture]string) *Manager {
 	m := &Manager{
 		nativeArch: nativeArch,
 		native:     NewNativeExecutor(),
@@ -87,6 +88,9 @@ func NewManager(nativeArch pb.Architecture, dockerAvailable bool) *Manager {
 	if dockerAvailable {
 		docker, err := NewDockerExecutor()
 		if err == nil {
+			for arch, image := range dockerImages {
+				docker.SetImage(arch, image)
+			}
 			m.docker = docker
 		}
 	}
