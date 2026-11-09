@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -298,6 +299,11 @@ func TestCompile_ConcurrentRequests(t *testing.T) {
 // write the -logFile (embedded into Stdout), and produce the APK artifact
 // collected from <project>/Build.
 func TestBuild_Unity_Completed(t *testing.T) {
+	// The stub editor is a POSIX shell script on PATH; Windows resolves
+	// LookPath("Unity") through PATHEXT and needs a different fixture.
+	if runtime.GOOS == "windows" {
+		t.Skip("stub Unity editor fixture is POSIX-only")
+	}
 	binDir := t.TempDir()
 	stub := `#!/bin/sh
 prev=""
