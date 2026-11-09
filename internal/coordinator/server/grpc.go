@@ -1712,7 +1712,7 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 	defer atomic.AddInt64(&s.queuedTasks, -1)
 
 	worker, queueWait, err := s.selectBuildWorker(ctx,
-		func(w *registry.WorkerInfo) bool { return workerSupportsUnityPlatform(w, req.TargetPlatform) }, "unity")
+		func(w *registry.WorkerInfo) bool { return workerSupportsUnity(w, req.TargetPlatform, unityVersion) }, "unity")
 	if err != nil {
 		atomic.AddInt64(&s.totalTasks, 1)
 		atomic.AddInt64(&s.failedTasks, 1)
@@ -2329,14 +2329,30 @@ func (s *Server) setUnityCache(key string, resp *pb.BuildResponse) {
 	s.unityCacheMu.Unlock()
 }
 
-func workerSupportsUnityPlatform(worker *registry.WorkerInfo, platform pb.TargetPlatform) bool {
+// workerSupportsUnity checks platform and, when the request pins an editor
+// version, that the worker advertises it. A worker with no versions listed
+// can only be vetted by platform, so it passes the version check.
+func workerSupportsUnity(worker *registry.WorkerInfo, platform pb.TargetPlatform, version string) bool {
 	if worker == nil || worker.Capabilities == nil || worker.Capabilities.Unity == nil {
 		return false
 	}
-	if len(worker.Capabilities.Unity.BuildTargets) == 0 {
+	caps := worker.Capabilities.Unity
+	if version != "" && len(caps.Versions) > 0 {
+		found := false
+		for _, v := range caps.Versions {
+			if v == version {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	if len(caps.BuildTargets) == 0 {
 		return true
 	}
-	for _, p := range worker.Capabilities.Unity.BuildTargets {
+	for _, p := range caps.BuildTargets {
 		if p == platform {
 			return true
 		}
