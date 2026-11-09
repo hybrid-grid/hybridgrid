@@ -1457,3 +1457,62 @@ func TestBuild_Custom_BuilderCacheInvalidatedByVersion(t *testing.T) {
 	assert.Equal(t, "build #2", resp2.Stdout)
 	assert.Equal(t, int32(2), atomic.LoadInt32(&workerCalls))
 }
+
+// TestCompile_ResourceExhaustedQueuesThenCompletes: the fast reselect
+// budget can run dry while every selected worker rejects at its own
+// admission control (registry lag under a burst). The task must enter
+// the dispatch queue and complete once a slot frees — not fail with
+// ResourceExhausted like the pre-backpressure behavior.
+func TestCompile_ResourceExhaustedQueuesThenCompletes(t *testing.T) {
+	var rejections atomic.Int32
+	// Gate the worker's own admission control open after two rejects;
+	// the coordinator releases admission when the compile finishes.
+	workerLis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	workerSrv := grpc.NewServer()
+	pb.RegisterBuildServiceServer(workerSrv, &mockWorkerBuildService{
+		compileFn: func(ctx context.Context, req *pb.CompileRequest) (*pb.CompileResponse, error) {
+			if rejections.Add(1) <= 2 {
+				return nil, status.Error(codes.ResourceExhausted, "too many concurrent tasks")
+			}
+			return &pb.CompileResponse{Status: pb.TaskStatus_STATUS_COMPLETED, ObjectFile: []byte("obj")}, nil
+		},
+	})
+	go func() { _ = workerSrv.Serve(workerLis) }()
+	defer workerSrv.Stop()
+
+	s, client, cleanup := setupTestServer(t, Config{
+		Port:                 0,
+		HeartbeatTTL:         30 * time.Second,
+		RequestTimeout:       30 * time.Second,
+		DispatchQueueTimeout: 5 * time.Second,
+	})
+	defer cleanup()
+
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "worker-queued-rx",
+		Address: workerLis.Addr().String(),
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch: pb.Architecture_ARCH_X86_64,
+			Cpp:        &pb.CppCapability{Compilers: []string{"gcc"}},
+		},
+		MaxParallel: 8,
+	}))
+
+	done := make(chan *pb.CompileResponse, 1)
+	go func() {
+		resp, err := client.Compile(context.Background(), &pb.CompileRequest{
+			TaskId:             "task-rx-queued",
+			PreprocessedSource: []byte("int main() {}"),
+			Compiler:           "gcc",
+		})
+		require.NoError(t, err)
+		done <- resp
+	}()
+
+	resp := <-done
+	assert.Equal(t, pb.TaskStatus_STATUS_COMPLETED, resp.Status,
+		"task rejected at worker capacity must queue and complete, got stderr: %s", resp.Stderr)
+	assert.GreaterOrEqual(t, rejections.Load(), int32(3), "worker must have been retried after queueing")
+	assert.Equal(t, int64(0), atomic.LoadInt64(&s.queuedCompiles), "queue admission must be released")
+}
