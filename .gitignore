@@ -98,3 +98,6 @@ docs/thesis/*.pdf
 # not source; was accidentally committed once in e953795, see .gitignore
 # history if you need to recover it.
 scratch/
+
+# omp session state
+.omo/
