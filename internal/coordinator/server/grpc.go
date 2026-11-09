@@ -1146,7 +1146,7 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 		m.RecordWorkerLatency(worker.ID, float64(workerLatency.Milliseconds()))
 		tracing.AddEvent(ctx, "forward.done")
 
-		if err != nil && status.Code(err) == codes.ResourceExhausted && attempt < maxDispatchAttempts {
+		if err != nil && status.Code(err) == codes.ResourceExhausted {
 			s.registry.DecrementTasks(worker.ID, false, 0)
 			if v, ok := s.activeTasksByWorker.Load(worker.ID); ok {
 				c := atomic.AddInt64(v.(*int64), -1)
@@ -1159,8 +1159,46 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 				Msg("Worker at capacity; reselecting")
 			// Brief backoff lets the racing bookings land in the
 			// registry before the next Select reads it.
-			time.Sleep(time.Duration(attempt) * 25 * time.Millisecond)
-			continue
+			if attempt < maxDispatchAttempts {
+				time.Sleep(time.Duration(attempt) * 25 * time.Millisecond)
+				continue
+			}
+			// Fast budget exhausted while every selected worker rejects
+			// at its own admission control: queue like the
+			// no-eligible-worker path — a completion frees a slot and a
+			// fresh budget retries, bounded by DispatchQueueTimeout.
+			if s.config.DispatchQueueTimeout > 0 && !queued {
+				if s.enterDispatchQueue() {
+					queued = true
+					defer s.leaveDispatchQueue()
+					queueDeadline = time.Now().Add(s.config.DispatchQueueTimeout)
+					log.Warn().
+						Str("task_id", req.TaskId).
+						Dur("timeout", s.config.DispatchQueueTimeout).
+						Msg("Workers kept rejecting at capacity; queued for dispatch")
+					attempt = 0
+					continue
+				}
+			}
+			if queued {
+				if !s.awaitDispatchCapacity(ctx, queueDeadline) {
+					span.SetStatus(otelcodes.Error, "dispatch queue timeout")
+					tracing.RecordError(ctx, err)
+					log.Error().Err(err).
+						Str("task_id", req.TaskId).
+						Msg("Dispatch queue timeout exceeded while workers rejected at capacity")
+					return &pb.CompileResponse{
+						Status:   pb.TaskStatus_STATUS_FAILED,
+						ExitCode: 1,
+						Stderr:   fmt.Sprintf("dispatch queue timeout (%v) exceeded: no worker capacity became available: %v", s.config.DispatchQueueTimeout, err),
+					}, nil
+				}
+				// A slot may have freed: retry with a fresh fast budget.
+				attempt = 0
+				continue
+			}
+			// Queue disabled (ablation): pre-backpressure reject.
+			break
 		}
 		break
 	}
