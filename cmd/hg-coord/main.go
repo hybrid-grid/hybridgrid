@@ -70,6 +70,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			grpcPort, _ := cmd.Flags().GetInt("grpc-port")
 			httpPort, _ := cmd.Flags().GetInt("http-port")
 			token, _ := cmd.Flags().GetString("token")
+			requestTimeout, _ := cmd.Flags().GetDuration("request-timeout")
 			noMdns, _ := cmd.Flags().GetBool("no-mdns")
 			schedulerType, _ := cmd.Flags().GetString("scheduler")
 			taskLogPath, _ := cmd.Flags().GetString("task-log")
@@ -186,7 +187,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			cfg.Port = grpcPort
 			cfg.AuthToken = token
 			cfg.HeartbeatTTL = 60 * time.Second
-			cfg.RequestTimeout = 120 * time.Second
+			cfg.RequestTimeout = requestTimeout
 			cfg.EnableRequestID = true
 			cfg.SchedulerType = schedulerType
 			cfg.TaskLogPath = taskLogPath
@@ -360,6 +361,8 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 
 	serveCmd.Flags().Int("grpc-port", 9000, "gRPC server port")
 	serveCmd.Flags().Int("http-port", 8080, "HTTP ops port (health, metrics, log-level)")
+	serveCmd.Flags().String("token", "", "Authentication token required from workers and CLI clients (empty disables auth)")
+	serveCmd.Flags().Duration("request-timeout", 120*time.Second, "Default per-compile timeout (a request with larger TimeoutSeconds wins)")
 	serveCmd.Flags().Bool("no-mdns", false, "Disable mDNS advertisement")
 	serveCmd.Flags().String("scheduler", "leastloaded", "Scheduler type: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, heft, icecc-fastest, external")
 	serveCmd.Flags().String("scheduler-plugin-addr", "", "External scheduler plugin gRPC endpoint (used with --scheduler=external)")

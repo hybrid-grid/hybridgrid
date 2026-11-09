@@ -76,6 +76,7 @@ It executes build tasks received from the coordinator.`,
 			httpPort, _ := cmd.Flags().GetInt("http-port")
 			token, _ := cmd.Flags().GetString("token")
 			maxParallel, _ := cmd.Flags().GetInt("max-parallel")
+			workerID, _ := cmd.Flags().GetString("worker-id")
 			discoveryTimeout, _ := cmd.Flags().GetDuration("discovery-timeout")
 			advertiseAddr, _ := cmd.Flags().GetString("advertise-address")
 			tlsCert, _ := cmd.Flags().GetString("tls-cert")
@@ -231,7 +232,14 @@ It executes build tasks received from the coordinator.`,
 
 			srv := workerserver.New(cfg)
 			caps := srv.Capabilities()
-			caps.WorkerId = fmt.Sprintf("worker-%s", hostname)
+			if workerID == "" {
+				// Default identity: hostname-derived. Distinct workers
+				// sharing a hostname (e.g. two processes on one machine
+				// or host-network containers) MUST set --worker-id or
+				// they overwrite each other's registry entry.
+				workerID = fmt.Sprintf("worker-%s", hostname)
+			}
+			caps.WorkerId = workerID
 			caps.MaxParallelTasks = int32(maxParallel)
 			caps.Version = version
 			if len(builderIDs) > 0 {
@@ -368,6 +376,7 @@ It executes build tasks received from the coordinator.`,
 	serveCmd.Flags().Int("port", 50052, "Worker gRPC port")
 	serveCmd.Flags().Int("http-port", 9090, "Worker HTTP/metrics port")
 	serveCmd.Flags().String("coordinator", "", "Coordinator address (empty for mDNS auto-discovery)")
+	serveCmd.Flags().String("worker-id", "", "Unique worker identity (default: worker-<hostname>; REQUIRED when several workers share a hostname)")
 	serveCmd.Flags().String("advertise-address", "", "Address to advertise to coordinator (default: hostname:port)")
 	serveCmd.Flags().String("token", "", "Authentication token")
 	serveCmd.Flags().Int("max-parallel", 0, "Max parallel tasks (0 = auto)")
