@@ -78,8 +78,10 @@ type Manager struct {
 }
 
 // NewManager creates a new executor manager. dockerImages overrides the
-// default per-arch Docker images (nil keeps the dockcross defaults).
-func NewManager(nativeArch pb.Architecture, dockerAvailable bool, dockerImages map[pb.Architecture]string) *Manager {
+// default per-arch Docker images (nil keeps the dockcross defaults);
+// dockerCCs overrides the compiler command inside those images per arch
+// (nil keeps the client-requested compiler).
+func NewManager(nativeArch pb.Architecture, dockerAvailable bool, dockerImages map[pb.Architecture]string, dockerCCs map[pb.Architecture]string) *Manager {
 	m := &Manager{
 		nativeArch: nativeArch,
 		native:     NewNativeExecutor(),
@@ -90,6 +92,9 @@ func NewManager(nativeArch pb.Architecture, dockerAvailable bool, dockerImages m
 		if err == nil {
 			for arch, image := range dockerImages {
 				docker.SetImage(arch, image)
+			}
+			for arch, cc := range dockerCCs {
+				docker.SetToolchain(arch, cc)
 			}
 			m.docker = docker
 		}
@@ -105,6 +110,15 @@ func NewManager(nativeArch pb.Architecture, dockerAvailable bool, dockerImages m
 	m.unity = NewUnityExecutor()
 
 	return m
+}
+
+// SetDockerToolchain overrides the compiler command used inside the
+// docker executor's image for a target architecture (no-op when the
+// docker executor is unavailable).
+func (m *Manager) SetDockerToolchain(arch pb.Architecture, cc string) {
+	if d, ok := m.docker.(*DockerExecutor); ok {
+		d.SetToolchain(arch, cc)
+	}
 }
 
 // Select chooses the appropriate executor for the given target architecture.

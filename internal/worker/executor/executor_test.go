@@ -157,7 +157,7 @@ func TestNativeExecutor_Execute_Timeout(t *testing.T) {
 
 func TestManager_Select(t *testing.T) {
 	// Create manager without Docker
-	m := NewManager(pb.Architecture_ARCH_X86_64, false, nil)
+	m := NewManager(pb.Architecture_ARCH_X86_64, false, nil, nil)
 
 	// Should return native executor for native arch
 	e := m.Select(pb.Architecture_ARCH_X86_64)
@@ -179,7 +179,7 @@ func TestManager_Select(t *testing.T) {
 }
 
 func TestManager_SelectForRequest_Flutter(t *testing.T) {
-	m := NewManager(pb.Architecture_ARCH_X86_64, false, nil)
+	m := NewManager(pb.Architecture_ARCH_X86_64, false, nil, nil)
 
 	req := &Request{
 		TaskID:        "test-flutter-001",
@@ -194,7 +194,7 @@ func TestManager_SelectForRequest_Flutter(t *testing.T) {
 }
 
 func TestManager_SelectForRequest_FlutterPreservesNonFlutter(t *testing.T) {
-	m := NewManager(pb.Architecture_ARCH_X86_64, false, nil)
+	m := NewManager(pb.Architecture_ARCH_X86_64, false, nil, nil)
 
 	req := &Request{
 		TaskID:     "test-cpp-001",
@@ -209,7 +209,7 @@ func TestManager_SelectForRequest_FlutterPreservesNonFlutter(t *testing.T) {
 }
 
 func TestManager_GetFlutter(t *testing.T) {
-	m := NewManager(pb.Architecture_ARCH_X86_64, false, nil)
+	m := NewManager(pb.Architecture_ARCH_X86_64, false, nil, nil)
 
 	e := m.GetFlutter()
 	if e == nil {

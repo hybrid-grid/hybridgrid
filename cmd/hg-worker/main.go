@@ -217,6 +217,18 @@ It executes build tasks received from the coordinator.`,
 			if len(dockerImages) > 0 {
 				cfg.DockerImages = dockerImages
 			}
+			dockerCCs := map[pb.Architecture]string{}
+			for arch, flag := range map[pb.Architecture]string{
+				pb.Architecture_ARCH_X86_64: "docker-image-x86-cc",
+				pb.Architecture_ARCH_ARM64:  "docker-image-arm64-cc",
+			} {
+				if cc, _ := cmd.Flags().GetString(flag); cc != "" {
+					dockerCCs[arch] = cc
+				}
+			}
+			if len(dockerCCs) > 0 {
+				cfg.DockerToolchains = dockerCCs
+			}
 			if builderDir != "" {
 				registry := builders.NewRegistry()
 				builderIDs = registry.Discover(builderDir)
@@ -387,6 +399,8 @@ It executes build tasks received from the coordinator.`,
 	serveCmd.Flags().String("builder-dir", "", "Directory containing plugin builder executables (hg-exec-<id>)")
 	serveCmd.Flags().String("docker-image-x86", "", "Override compile image for x86_64 targets (default: dockcross/linux-x64)")
 	serveCmd.Flags().String("docker-image-arm64", "", "Override compile image for arm64 targets (default: dockcross/linux-arm64)")
+	serveCmd.Flags().String("docker-image-x86-cc", "", "Compiler command inside the x86_64 image (e.g. a prefixed cross gcc; empty keeps the client's compiler)")
+	serveCmd.Flags().String("docker-image-arm64-cc", "", "Compiler command inside the arm64 image (e.g. aarch64-linux-gnu-gcc; empty keeps the client's compiler)")
 	serveCmd.Flags().Bool("tls-require-client-cert", false, "Require client certificates (mTLS)")
 	serveCmd.Flags().Bool("tracing-enable", false, "Enable OpenTelemetry tracing")
 	serveCmd.Flags().String("tracing-endpoint", "localhost:4317", "OTLP gRPC endpoint")

@@ -42,6 +42,12 @@ type Config struct {
 	// (nil keeps the dockcross defaults). Lets an operator pin the
 	// exact toolchain version clients expect, e.g. --docker-image-x86.
 	DockerImages map[pb.Architecture]string
+
+	// DockerToolchains overrides the compiler command run inside the
+	// image per target arch, e.g. --docker-image-arm64-cc
+	// aarch64-linux-gnu-gcc for cross images whose plain gcc targets
+	// the host. Empty keeps the client-requested compiler.
+	DockerToolchains map[pb.Architecture]string
 }
 
 // DefaultConfig returns sensible defaults.
@@ -80,7 +86,7 @@ func New(cfg Config) *Server {
 	return &Server{
 		config:       cfg,
 		capabilities: caps,
-		executor:     executor.NewManager(caps.NativeArch, caps.DockerAvailable, cfg.DockerImages),
+		executor:     executor.NewManager(caps.NativeArch, caps.DockerAvailable, cfg.DockerImages, cfg.DockerToolchains),
 		builders:     cfg.Builders,
 	}
 }

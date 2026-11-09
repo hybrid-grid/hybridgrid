@@ -297,7 +297,7 @@ func TestDockerExecutor_EnsureImage_ImageAlreadyPresent(t *testing.T) {
 	defer client.Close()
 
 	e := &DockerExecutor{client: client}
-	if err := e.ensureImage(context.Background(), "dockcross/linux-x64"); err != nil {
+	if err := e.ensureImage(context.Background(), "dockcross/linux-x64", pb.Architecture_ARCH_X86_64); err != nil {
 		t.Fatalf("ensureImage() error = %v", err)
 	}
 }
@@ -320,7 +320,7 @@ func TestDockerExecutor_EnsureImage_PullsWhenMissing(t *testing.T) {
 	defer client.Close()
 
 	e := &DockerExecutor{client: client}
-	if err := e.ensureImage(context.Background(), "dockcross/linux-x64"); err != nil {
+	if err := e.ensureImage(context.Background(), "dockcross/linux-x64", pb.Architecture_ARCH_X86_64); err != nil {
 		t.Fatalf("ensureImage() error = %v", err)
 	}
 	if !pullCalled {
@@ -390,4 +390,51 @@ func appendDockerLogFrame(stream byte, payload string) []byte {
 	binary.BigEndian.PutUint32(frame[4:8], uint32(len(payload)))
 	copy(frame[8:], payload)
 	return frame
+}
+
+func TestArchPlatform(t *testing.T) {
+	cases := map[pb.Architecture]string{
+		pb.Architecture_ARCH_X86_64:      "linux/amd64",
+		pb.Architecture_ARCH_ARM64:       "linux/arm64",
+		pb.Architecture_ARCH_ARMV7:       "linux/arm/v7",
+		pb.Architecture_ARCH_UNSPECIFIED: "",
+	}
+	for arch, want := range cases {
+		if got := archPlatform(arch); got != want {
+			t.Fatalf("archPlatform(%v) = %q, want %q", arch, got, want)
+		}
+	}
+}
+
+func TestTripleMatches(t *testing.T) {
+	if !tripleMatches("aarch64-linux-gnu", pb.Architecture_ARCH_ARM64) {
+		t.Fatal("aarch64 triple must match ARM64")
+	}
+	if tripleMatches("x86_64-linux-gnu", pb.Architecture_ARCH_ARM64) {
+		t.Fatal("x86_64 triple must NOT match ARM64 (the silent-wrong-arch bug)")
+	}
+	if !tripleMatches("x86_64-linux-gnu", pb.Architecture_ARCH_X86_64) {
+		t.Fatal("x86_64 triple must match X86_64")
+	}
+	if !tripleMatches("arm-linux-gnueabihf", pb.Architecture_ARCH_ARMV7) {
+		t.Fatal("arm triple must match ARMV7")
+	}
+	if !tripleMatches("", pb.Architecture_ARCH_UNSPECIFIED) {
+		t.Fatal("unspecified target accepts anything")
+	}
+}
+
+func TestToolchainFor(t *testing.T) {
+	e := &DockerExecutor{toolchains: map[pb.Architecture]string{
+		pb.Architecture_ARCH_ARM64: "aarch64-linux-gnu-gcc",
+	}}
+	if got := e.toolchainFor(pb.Architecture_ARCH_ARM64, "gcc"); got != "aarch64-linux-gnu-gcc" {
+		t.Fatalf("toolchainFor override = %q", got)
+	}
+	if got := e.toolchainFor(pb.Architecture_ARCH_X86_64, "gcc"); got != "gcc" {
+		t.Fatalf("toolchainFor fallback = %q, want client compiler", got)
+	}
+	if got := e.toolchainFor(pb.Architecture_ARCH_ARM64, "g++"); got != "aarch64-linux-gnu-gcc" {
+		t.Fatalf("toolchainFor empty override must fall back, got %q", got)
+	}
 }

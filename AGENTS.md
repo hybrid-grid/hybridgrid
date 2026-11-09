@@ -42,7 +42,10 @@ make lint
 gofmt -l .
 
 # Security scan
-gosec -exclude=G104,G109,G112,G115,G204,G301,G304,G306,G402 ./...
+# Same command as the security job in .github/workflows/ci.yml (gen/ and test/ are excluded by scan)
+gosec -exclude=G104,G109,G112,G115,G204,G301,G304,G306,G402 -exclude-dir=gen -exclude-dir=test ./...
+# CI fails on reachable vulnerabilities except the two unpatched Moby client advisories
+# (GO-2026-4887, GO-2026-4883; docker/docker v28.5.2, Fixed in: N/A) - allowlist lives in ci.yml
 govulncheck ./...
 
 # Regenerate protobuf code
