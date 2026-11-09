@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -42,7 +43,14 @@ func DefaultDockerResourceLimits() DockerResourceLimits {
 type DockerExecutor struct {
 	client *client.Client
 	images map[pb.Architecture]string
-	limits DockerResourceLimits
+	// toolchains overrides the compiler command used inside the image
+	// for a target arch (e.g. aarch64-linux-gnu-gcc for a dockcross
+	// image whose plain gcc is the host compiler).
+	toolchains map[pb.Architecture]string
+	// probeResults caches image+cc dumpmachine verdicts: true = matches
+	// the target arch, false = known mismatch. Probes run once per pair.
+	probeResults sync.Map
+	limits       DockerResourceLimits
 }
 
 // Default dockcross images for cross-compilation.
@@ -75,9 +83,10 @@ func NewDockerExecutorWithLimits(limits DockerResourceLimits) (*DockerExecutor, 
 	}
 
 	return &DockerExecutor{
-		client: cli,
-		images: defaultImages,
-		limits: limits,
+		client:     cli,
+		images:     defaultImages,
+		toolchains: make(map[pb.Architecture]string),
+		limits:     limits,
 	}, nil
 }
 
@@ -95,6 +104,64 @@ func (e *DockerExecutor) CanExecute(targetArch pb.Architecture, nativeArch pb.Ar
 // SetImage sets a custom image for a target architecture.
 func (e *DockerExecutor) SetImage(arch pb.Architecture, image string) {
 	e.images[arch] = image
+}
+
+// SetToolchain overrides the compiler command executed inside the image
+// for a target architecture. Cross-toolchain images often keep the host
+// gcc as "gcc"; this is how an operator points at the prefixed cross
+// compiler (e.g. "aarch64-linux-gnu-gcc").
+func (e *DockerExecutor) SetToolchain(arch pb.Architecture, cc string) {
+	e.toolchains[arch] = cc
+}
+
+// toolchainFor returns the compiler command to run inside the image for
+// a target arch: the operator override when set, otherwise the compiler
+// the client asked for.
+func (e *DockerExecutor) toolchainFor(arch pb.Architecture, requested string) string {
+	if cc, ok := e.toolchains[arch]; ok && cc != "" {
+		return cc
+	}
+	return requested
+}
+
+// archPlatform maps a target architecture to its Docker platform suffix
+// ("" keeps the daemon default, i.e. the host architecture).
+func archPlatform(arch pb.Architecture) string {
+	switch arch {
+	case pb.Architecture_ARCH_X86_64:
+		return "linux/amd64"
+	case pb.Architecture_ARCH_ARM64:
+		return "linux/arm64"
+	case pb.Architecture_ARCH_ARMV7:
+		return "linux/arm/v7"
+	default:
+		return ""
+	}
+}
+
+// archTriplePrefix is the dumpmachine prefix a toolchain must report to
+// be trusted for the target architecture.
+func archTriplePrefix(arch pb.Architecture) string {
+	switch arch {
+	case pb.Architecture_ARCH_X86_64:
+		return "x86_64"
+	case pb.Architecture_ARCH_ARM64:
+		return "aarch64"
+	case pb.Architecture_ARCH_ARMV7:
+		return "arm"
+	default:
+		return ""
+	}
+}
+
+// tripleMatches reports whether a compiler's dumpmachine output targets
+// the given architecture.
+func tripleMatches(dumpmachine string, arch pb.Architecture) bool {
+	want := archTriplePrefix(arch)
+	if want == "" {
+		return true // unspecified target: accept anything
+	}
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(dumpmachine)), want)
 }
 
 // Execute runs the compilation inside a Docker container.
@@ -143,18 +210,28 @@ func (e *DockerExecutor) Execute(ctx context.Context, req *Request) (*Result, er
 		return nil, fmt.Errorf("no Docker image available for architecture: %v", req.TargetArch)
 	}
 
+	// Compiler command inside the image (operator override or client's).
+	cc := e.toolchainFor(req.TargetArch, req.Compiler)
+
 	// Ensure image is available (auto-pull if not)
-	if err := e.ensureImage(ctx, img); err != nil {
+	if err := e.ensureImage(ctx, img, req.TargetArch); err != nil {
 		return nil, fmt.Errorf("failed to ensure Docker image: %w", err)
+	}
+
+	// Refuse loudly when the image's compiler targets the wrong arch —
+	// silent x86_64 objects for arm64 tasks are exactly the bug class
+	// raw mode exists to prevent.
+	if err := e.probeToolchain(ctx, img, cc, req.TargetArch); err != nil {
+		return nil, err
 	}
 
 	// Build compilation command
 	outFile := "output.o"
 	var compileCmd []string
 	if len(req.RawSource) > 0 {
-		compileCmd = e.buildRawCommand(req.Compiler, req.Args, srcFile, outFile, req.IncludePaths)
+		compileCmd = e.buildRawCommand(cc, req.Args, srcFile, outFile, req.IncludePaths)
 	} else {
-		compileCmd = e.buildCommand(req.Compiler, req.Args, srcFile, outFile)
+		compileCmd = e.buildCommand(cc, req.Args, srcFile, outFile)
 	}
 
 	// Create container config with security settings
@@ -378,7 +455,7 @@ func (e *DockerExecutor) Close() error {
 
 // ensureImage checks if the image exists locally and pulls it if not.
 // Also checks for updates if the image is older than 24 hours.
-func (e *DockerExecutor) ensureImage(ctx context.Context, imageName string) error {
+func (e *DockerExecutor) ensureImage(ctx context.Context, imageName string, arch pb.Architecture) error {
 	// Add :latest tag if no tag specified
 	if !strings.Contains(imageName, ":") {
 		imageName += ":latest"
@@ -406,7 +483,7 @@ func (e *DockerExecutor) ensureImage(ctx context.Context, imageName string) erro
 	// Pull image if not exists
 	if !imageExists {
 		log.Info().Str("image", imageName).Msg("Pulling Docker image (first time)")
-		if err := e.pullImage(ctx, imageName); err != nil {
+		if err := e.pullImage(ctx, imageName, arch); err != nil {
 			return err
 		}
 	}
@@ -432,13 +509,20 @@ func IsWSL2DockerAvailable() bool {
 	return strings.TrimSpace(string(output)) == "linux"
 }
 
-// pullImage pulls a Docker image from the registry.
-func (e *DockerExecutor) pullImage(ctx context.Context, imageName string) error {
+// pullImage pulls a Docker image from the registry, requesting the
+// variant matching the target architecture. Without it a multi-arch tag
+// resolves to the daemon's host architecture and an arm64 task would
+// silently compile with an x86_64 toolchain.
+func (e *DockerExecutor) pullImage(ctx context.Context, imageName string, arch pb.Architecture) error {
 	// Use a longer timeout for pulling images
 	pullCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	reader, err := e.client.ImagePull(pullCtx, imageName, image.PullOptions{})
+	opts := image.PullOptions{}
+	if platform := archPlatform(arch); platform != "" {
+		opts.Platform = platform
+	}
+	reader, err := e.client.ImagePull(pullCtx, imageName, opts)
 	if err != nil {
 		return fmt.Errorf("failed to pull image %s: %w", imageName, err)
 	}
@@ -459,4 +543,93 @@ func (e *DockerExecutor) pullImage(ctx context.Context, imageName string) error 
 
 	log.Info().Str("image", imageName).Msg("Docker image pulled successfully")
 	return nil
+}
+
+// probeToolchain runs "<cc> -dumpmachine" inside the image once per
+// (image, cc) pair and refuses the task when the reported triple does
+// not match the target architecture. Without this a cross-compile task
+// can silently produce objects for the wrong arch (the default
+// dockcross images' plain gcc is the host compiler).
+func (e *DockerExecutor) probeToolchain(ctx context.Context, img, cc string, arch pb.Architecture) error {
+	if archTriplePrefix(arch) == "" {
+		return nil // unspecified target: nothing to compare
+	}
+	key := img + "|" + cc
+	if v, ok := e.probeResults.Load(key); ok {
+		if v.(bool) {
+			return nil
+		}
+		return e.toolchainMismatchErr(img, cc, arch)
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	dump, err := e.runInImage(probeCtx, img, []string{"sh", "-c", cc + " -dumpmachine"})
+	if err != nil {
+		// A missing sh/cc surfaces here; treat like a mismatch with a
+		// clear message instead of a cryptic exec failure later.
+		return fmt.Errorf("docker toolchain probe failed for image %q (cc %q): %w — pin a toolchain that targets %s, e.g. --docker-image-arm64 with a single-arch image, or set the matching -cc override",
+			img, cc, err, arch.String())
+	}
+	ok := tripleMatches(dump, arch)
+	e.probeResults.Store(key, ok)
+	if !ok {
+		return e.toolchainMismatchErr(img, cc, arch)
+	}
+	return nil
+}
+
+func (e *DockerExecutor) toolchainMismatchErr(img, cc string, arch pb.Architecture) error {
+	want := archTriplePrefix(arch)
+	return fmt.Errorf(
+		"docker image %q: compiler %q does not target %s (expected %s-* triple) — refusing to compile silently wrong output; point --docker-image-%s-cc at the cross compiler or pin a single-arch image",
+		img, cc, arch.String(), want, strings.ToLower(strings.TrimPrefix(arch.String(), "ARCH_")))
+}
+
+// runInImage runs argv in a throwaway container over the image and
+// returns trimmed stdout.
+func (e *DockerExecutor) runInImage(ctx context.Context, img string, argv []string) (string, error) {
+	cfg := &container.Config{Image: img, Cmd: argv}
+	hostCfg := &container.HostConfig{NetworkMode: "none"}
+	resp, err := e.client.ContainerCreate(ctx, cfg, hostCfg, nil, nil, "")
+	if err != nil {
+		return "", err
+	}
+	id := resp.ID
+	defer func() {
+		rmCtx, rmCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer rmCancel()
+		_ = e.client.ContainerRemove(rmCtx, id, container.RemoveOptions{Force: true})
+	}()
+	if err := e.client.ContainerStart(ctx, id, container.StartOptions{}); err != nil {
+		return "", err
+	}
+	statusCh, errCh := e.client.ContainerWait(ctx, id, container.WaitConditionNotRunning)
+	var outBuf bytes.Buffer
+	logsCh, logsErr := e.client.ContainerLogs(ctx, id, container.LogsOptions{ShowStdout: true, ShowStderr: true, Follow: true})
+	if logsErr != nil {
+		return "", fmt.Errorf("container logs error: %w", logsErr)
+	}
+	copyDone := make(chan struct{})
+	go func() {
+		// Non-TTY log streams are multiplexed with 8-byte frame headers;
+		// stdcopy de-muxes stdout/stderr into the plain bytes we want.
+		_, _ = stdcopy.StdCopy(&outBuf, &outBuf, logsCh)
+		_ = logsCh.Close()
+		close(copyDone)
+	}()
+	for {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case err := <-errCh:
+			return "", fmt.Errorf("container wait error: %w", err)
+		case st := <-statusCh:
+			<-copyDone // logs drain just after exit; buffer is final here
+			if st.StatusCode != 0 {
+				return "", fmt.Errorf("probe exited %d: %s", st.StatusCode, strings.TrimSpace(outBuf.String()))
+			}
+			return strings.TrimSpace(outBuf.String()), nil
+		}
+	}
 }
