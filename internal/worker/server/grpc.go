@@ -291,12 +291,21 @@ func (s *Server) Build(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResp
 		return s.handleCustomBuild(ctx, req)
 	}
 
-	if req.BuildType != pb.BuildType_BUILD_TYPE_FLUTTER {
+	var flutterConfig *pb.FlutterConfig
+	var unityConfig *pb.UnityConfig
+	switch req.BuildType {
+	case pb.BuildType_BUILD_TYPE_FLUTTER:
+		flutterConfig = req.GetFlutterConfig()
+		if flutterConfig == nil {
+			return nil, status.Error(codes.InvalidArgument, "flutter_config required")
+		}
+	case pb.BuildType_BUILD_TYPE_UNITY:
+		unityConfig = req.GetUnityConfig()
+		if unityConfig == nil {
+			return nil, status.Error(codes.InvalidArgument, "unity_config required")
+		}
+	default:
 		return nil, status.Error(codes.Unimplemented, "use Compile for compilation tasks")
-	}
-
-	if req.GetFlutterConfig() == nil {
-		return nil, status.Error(codes.InvalidArgument, "flutter_config required")
 	}
 
 	active := atomic.AddInt64(&s.activeTasks, 1)
@@ -321,7 +330,8 @@ func (s *Server) Build(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResp
 		TaskID:         req.TaskId,
 		BuildType:      req.BuildType,
 		TargetPlatform: req.TargetPlatform,
-		FlutterConfig:  req.GetFlutterConfig(),
+		FlutterConfig:  flutterConfig,
+		UnityConfig:    unityConfig,
 		SourceArchive:  req.SourceArchive,
 		TimeoutSeconds: req.TimeoutSeconds,
 		Timeout:        timeout,

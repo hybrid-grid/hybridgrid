@@ -1516,3 +1516,37 @@ func TestCompile_ResourceExhaustedQueuesThenCompletes(t *testing.T) {
 	assert.GreaterOrEqual(t, rejections.Load(), int32(3), "worker must have been retried after queueing")
 	assert.Equal(t, int64(0), atomic.LoadInt64(&s.queuedCompiles), "queue admission must be released")
 }
+
+// TestWorkerSupportsUnity: platform filter plus editor-version matching —
+// a request that pins a version must only land on workers advertising it.
+func TestWorkerSupportsUnity(t *testing.T) {
+	workerWith := func(caps *pb.WorkerCapabilities) *registry.WorkerInfo {
+		return &registry.WorkerInfo{ID: "w1", Capabilities: caps}
+	}
+	unityCaps := func(versions []string, targets []pb.TargetPlatform) *pb.WorkerCapabilities {
+		return &pb.WorkerCapabilities{Unity: &pb.UnityCapability{Versions: versions, BuildTargets: targets}}
+	}
+
+	tests := []struct {
+		name     string
+		worker   *registry.WorkerInfo
+		platform pb.TargetPlatform
+		version  string
+		want     bool
+	}{
+		{"nil worker", nil, pb.TargetPlatform_PLATFORM_ANDROID, "", false},
+		{"no unity capability", workerWith(&pb.WorkerCapabilities{}), pb.TargetPlatform_PLATFORM_ANDROID, "", false},
+		{"version match", workerWith(unityCaps([]string{"6000.0.32f1"}, []pb.TargetPlatform{pb.TargetPlatform_PLATFORM_ANDROID})), pb.TargetPlatform_PLATFORM_ANDROID, "6000.0.32f1", true},
+		{"version mismatch", workerWith(unityCaps([]string{"2022.3.1f1"}, []pb.TargetPlatform{pb.TargetPlatform_PLATFORM_ANDROID})), pb.TargetPlatform_PLATFORM_ANDROID, "6000.0.32f1", false},
+		{"version pinned but worker lists none", workerWith(unityCaps(nil, []pb.TargetPlatform{pb.TargetPlatform_PLATFORM_ANDROID})), pb.TargetPlatform_PLATFORM_ANDROID, "6000.0.32f1", true},
+		{"platform match without version", workerWith(unityCaps([]string{"6000.0.32f1"}, []pb.TargetPlatform{pb.TargetPlatform_PLATFORM_ANDROID})), pb.TargetPlatform_PLATFORM_ANDROID, "", true},
+		{"platform mismatch", workerWith(unityCaps([]string{"6000.0.32f1"}, []pb.TargetPlatform{pb.TargetPlatform_PLATFORM_IOS})), pb.TargetPlatform_PLATFORM_ANDROID, "", false},
+		{"empty targets accepts any platform", workerWith(unityCaps([]string{"6000.0.32f1"}, nil)), pb.TargetPlatform_PLATFORM_WINDOWS, "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, workerSupportsUnity(tt.worker, tt.platform, tt.version))
+		})
+	}
+}
