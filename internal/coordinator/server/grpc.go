@@ -1356,8 +1356,14 @@ func (s *Server) forwardCompile(ctx context.Context, worker *registry.WorkerInfo
 
 	client := pb.NewBuildServiceClient(conn)
 
-	// Forward request with timeout
-	timeoutCtx, cancel := context.WithTimeout(ctx, s.config.RequestTimeout)
+	// Forward request with timeout. The client may ask for longer than
+	// the configured default (large TU, cross-compile under qemu):
+	// the larger of the two wins, otherwise the flag default applies.
+	timeout := s.config.RequestTimeout
+	if t := time.Duration(req.GetTimeoutSeconds()) * time.Second; t > timeout {
+		timeout = t
+	}
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	return client.Compile(timeoutCtx, req)

@@ -220,7 +220,7 @@ func newStatusCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			output.AutoDetectColors()
 
-			c, err := client.New(newClientConfig(coordinator, timeout))
+			c, err := client.New(newClientConfig(getCoordinatorAddress(), timeout))
 			if err != nil {
 				return fmt.Errorf("failed to connect: %w", err)
 			}
@@ -256,7 +256,7 @@ func newWorkersCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			output.AutoDetectColors()
 
-			c, err := client.New(newClientConfig(coordinator, timeout))
+			c, err := client.New(newClientConfig(getCoordinatorAddress(), timeout))
 			if err != nil {
 				return fmt.Errorf("failed to connect: %w", err)
 			}
@@ -326,7 +326,7 @@ Examples:
 			if !isCoreBuildType(buildType) {
 				return runCustomBuild(buildType, args)
 			}
-			c, err := client.New(newClientConfig(coordinator, 5*time.Minute))
+			c, err := client.New(newClientConfig(getCoordinatorAddress(), 5*time.Minute))
 			if err != nil {
 				return fmt.Errorf("failed to connect: %w", err)
 			}
@@ -371,8 +371,12 @@ Examples:
 					comp = detectCompiler(file)
 				}
 
-				// Parse target architecture
-				arch := parseArch(targetArch)
+				// Parse target architecture — strict: an unknown value
+				// must fail, not silently compile for the local arch.
+				arch, err := parseArchStrict(targetArch)
+				if err != nil {
+					return fmt.Errorf("--arch: %w", err)
+				}
 
 				// Cache key covers raw source, compiler, flags and target
 				// arch — the same bytes the Service path would hash.
@@ -588,7 +592,7 @@ func runCustomBuild(builderID string, args []string) error {
 		return fmt.Errorf("failed to archive project: %w", err)
 	}
 
-	c, err := client.New(newClientConfig(coordinator, 30*time.Minute))
+	c, err := client.New(newClientConfig(getCoordinatorAddress(), 30*time.Minute))
 	if err != nil {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
@@ -724,18 +728,32 @@ func detectCompiler(file string) string {
 
 // parseArch converts architecture string to proto enum.
 func parseArch(arch string) pb.Architecture {
+	a, _ := parseArchStrict(arch)
+	if a == pb.Architecture_ARCH_UNSPECIFIED && arch != "" {
+		// Tolerant path (compiler-derived -march values such as
+		// "native"): unknown strings mean "no explicit target".
+		return pb.Architecture_ARCH_UNSPECIFIED
+	}
+	return a
+}
+
+// parseArchStrict resolves the user-facing --arch flag. Unlike parseArch
+// it rejects unknown values: a typo like --arch arm6 must fail loudly,
+// never silently compile for the local architecture.
+func parseArchStrict(arch string) (pb.Architecture, error) {
 	switch strings.ToLower(arch) {
 	case "x86_64", "amd64", "x64":
-		return pb.Architecture_ARCH_X86_64
+		return pb.Architecture_ARCH_X86_64, nil
 	case "arm64", "aarch64":
-		return pb.Architecture_ARCH_ARM64
+		return pb.Architecture_ARCH_ARM64, nil
 	case "arm", "armv7":
-		return pb.Architecture_ARCH_ARMV7
+		return pb.Architecture_ARCH_ARMV7, nil
 	case "":
 		// Default to local architecture
-		return getLocalArch()
+		return getLocalArch(), nil
 	default:
-		return pb.Architecture_ARCH_UNSPECIFIED
+		return pb.Architecture_ARCH_UNSPECIFIED, fmt.Errorf(
+			"unknown architecture %q (supported: x86_64, arm64, armv7)", arch)
 	}
 }
 
@@ -1025,27 +1043,45 @@ Examples:
 // These flags are parsed by hgbuild but should not be passed to the compiler.
 func filterHgbuildFlags(args []string) []string {
 	var filtered []string
-	skipNext := false
-
+	var pending string
 	for _, arg := range args {
-		if skipNext {
-			skipNext = false
+		if pending != "" {
+			switch pending {
+			case "coordinator":
+				coordinator = arg
+			case "timeout":
+				if d, err := time.ParseDuration(arg); err == nil {
+					timeout = d
+				}
+			}
+			pending = ""
 			continue
 		}
 
-		// Skip hgbuild-specific flags
+		// Skip hgbuild-specific flags. cc/c++/make/ninja run with
+		// DisableFlagParsing, so cobra never sees these: parse and set
+		// the persistent-flag variables here or they are silently
+		// ignored (the fallback warning is the only symptom).
 		switch {
 		case arg == "--coordinator" || arg == "-C":
-			skipNext = true // skip next arg (the value)
+			pending = "coordinator"
 			continue
 		case strings.HasPrefix(arg, "--coordinator="):
+			coordinator = strings.TrimPrefix(arg, "--coordinator=")
 			continue
 		case arg == "--timeout":
-			skipNext = true
+			pending = "timeout"
 			continue
 		case strings.HasPrefix(arg, "--timeout="):
+			if d, err := time.ParseDuration(strings.TrimPrefix(arg, "--timeout=")); err == nil {
+				timeout = d
+			}
 			continue
-		case arg == "--insecure":
+		case arg == "--insecure" || arg == "--insecure=true":
+			insecure = true
+			continue
+		case arg == "--insecure=false":
+			insecure = false
 			continue
 		case arg == "--no-fallback":
 			noFallback = true
