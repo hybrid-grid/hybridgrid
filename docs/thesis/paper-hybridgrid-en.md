@@ -1,6 +1,6 @@
 # Hybrid-Grid: A Distributed Compilation System with Contextual-Bandit Task Scheduling on Heterogeneous Clusters
 
-**Le Duc Hieuᵃ˒\*, Nguyen Trung Kienᵃ, Nguyen Trong Khanhᵃ**
+**Le Duc Hieuᵃ˒\*, Nguyen Trung Kienᵃ, Luong Tuan Anhᵃ, Nguyen Trong Khanhᵃ**
 
 ᵃ *Posts and Telecommunications Institute of Technology, Hanoi, Vietnam*
 
