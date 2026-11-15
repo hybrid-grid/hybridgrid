@@ -10,6 +10,7 @@ import (
 	"math"
 	"net"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -792,6 +793,22 @@ func New(cfg Config) *Server {
 	schedulerParams := ""
 	if withParams, ok := sched.(interface{ Params() string }); ok {
 		schedulerParams = withParams.Params()
+	} else {
+		// Schedulers without a Params() method: derive from cfg for
+		// provenance display.
+		switch cfg.SchedulerType {
+		case "hybrid-linucb", "hybrid-linucb-d":
+			schedulerParams = fmt.Sprintf("alpha=%s warm_start=%d load_penalty=%s",
+				strconv.FormatFloat(cfg.AlphaValue, 'g', -1, 64),
+				cfg.WarmStartTasks,
+				strconv.FormatFloat(cfg.LoadPenaltyValue, 'g', -1, 64))
+		case "epsilon-greedy":
+			eps := cfg.EpsilonValue
+			if eps == 0 {
+				eps = 0.1 // Sutton & Barto §2.3 default, same as newScheduler
+			}
+			schedulerParams = "epsilon=" + strconv.FormatFloat(eps, 'g', -1, 64)
+		}
 	}
 	log.Info().Str("scheduler", cfg.SchedulerType).Msg("Scheduler initialized")
 
