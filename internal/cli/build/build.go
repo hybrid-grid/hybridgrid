@@ -404,7 +404,11 @@ func (s *Service) buildSessionID(req *Request) string {
 	if req.BuildID != "" {
 		return req.BuildID
 	}
-	return taskid.BuildSessionID()
+	// Pass through an explicit HG_BUILD_ID (set by the compiler wrappers
+	// and experiment scripts) without minting one: lone cc calls must not
+	// each become a build in the history — same contract as
+	// wrappedBuildID in cmd/hgbuild.
+	return os.Getenv(taskid.BuildIDEnvVar)
 }
 
 // newPreprocessedRequest builds the wire request for a preprocessed compile.

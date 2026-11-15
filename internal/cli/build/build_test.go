@@ -69,8 +69,8 @@ func TestCompileRemote_BuildIDPropagated(t *testing.T) {
 				if tc.buildID != "" && got.BuildId != tc.buildID {
 					t.Errorf("BuildId=%q, want %q", got.BuildId, tc.buildID)
 				}
-				if tc.buildID == "" && !strings.HasPrefix(got.BuildId, "build-") {
-					t.Errorf("generated BuildId=%q", got.BuildId)
+				if tc.buildID == "" && got.BuildId != "" {
+					t.Errorf("BuildId=%q, want empty: lone calls must not mint a build session", got.BuildId)
 				}
 			}
 		})
