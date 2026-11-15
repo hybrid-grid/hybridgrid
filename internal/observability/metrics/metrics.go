@@ -13,10 +13,11 @@ const namespace = "hybridgrid"
 // Metrics contains all Prometheus metrics for Hybrid-Grid.
 type Metrics struct {
 	// Counters
-	TasksTotal     *prometheus.CounterVec
-	CacheHits      prometheus.Counter
-	CacheMisses    prometheus.Counter
-	FallbacksTotal *prometheus.CounterVec
+	TasksTotal        *prometheus.CounterVec
+	CacheHits         prometheus.Counter
+	CacheMisses       prometheus.Counter
+	FallbacksTotal    *prometheus.CounterVec
+	DispatchDecisions prometheus.Counter
 
 	// Gauges
 	WorkersTotal *prometheus.GaugeVec
@@ -81,6 +82,11 @@ func New() *Metrics {
 			},
 			[]string{"reason"},
 		),
+		DispatchDecisions: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "dispatch_decisions_total",
+			Help:      "Total booked C/C++ dispatch attempts",
+		}),
 
 		// Gauges
 		WorkersTotal: prometheus.NewGaugeVec(
@@ -164,6 +170,7 @@ func (m *Metrics) Register(reg prometheus.Registerer) {
 		m.CacheHits,
 		m.CacheMisses,
 		m.FallbacksTotal,
+		m.DispatchDecisions,
 		m.WorkersTotal,
 		m.ActiveTasks,
 		m.QueueDepth,

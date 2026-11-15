@@ -31,6 +31,24 @@ func TestMetrics_New(t *testing.T) {
 	}
 }
 
+func TestMetrics_DispatchDecisions(t *testing.T) {
+	m, reg := newTestMetrics()
+	m.DispatchDecisions.Inc()
+	mfs, err := reg.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mf := range mfs {
+		if mf.GetName() == "hybridgrid_dispatch_decisions_total" {
+			if got := mf.GetMetric()[0].GetCounter().GetValue(); got != 1 {
+				t.Errorf("dispatch counter=%v, want 1", got)
+			}
+			return
+		}
+	}
+	t.Fatal("hybridgrid_dispatch_decisions_total metric not found")
+}
+
 func TestMetrics_RecordTaskComplete(t *testing.T) {
 	m, reg := newTestMetrics()
 

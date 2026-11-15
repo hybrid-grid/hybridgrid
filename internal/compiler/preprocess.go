@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -99,15 +100,9 @@ func (p *Preprocessor) Preprocess(ctx context.Context, args *ParsedArgs, sourceF
 func (p *Preprocessor) buildPreprocessArgs(args *ParsedArgs, sourceFile string) []string {
 	cmdArgs := []string{"-E"} // Preprocess only
 
-	// Add include paths
-	for _, inc := range args.IncludeDirs {
-		cmdArgs = append(cmdArgs, "-I"+inc)
-	}
-
-	// Add defines
-	for _, def := range args.Defines {
-		cmdArgs = append(cmdArgs, "-D"+def)
-	}
+	// The parser keeps each preprocessing option and its operand in original
+	// command-line order. In particular, -D and -U must not be regrouped.
+	cmdArgs = append(cmdArgs, args.PreprocessFlags...)
 
 	// Add language standard if specified
 	if args.Standard != "" {
@@ -119,11 +114,21 @@ func (p *Preprocessor) buildPreprocessArgs(args *ParsedArgs, sourceFile string) 
 		cmdArgs = append(cmdArgs, "-x", args.Language)
 	}
 
-	// Add other flags that affect preprocessing
-	for _, flag := range args.Flags {
-		// Include flags that affect preprocessing
-		if isPreprocessingFlag(flag) {
-			cmdArgs = append(cmdArgs, flag)
+	cmdArgs = append(cmdArgs, args.DepFlags...)
+	// With -E the compiler writes source to stdout, so GCC cannot infer the
+	// original object's depfile path from -o. Supply the object target and the
+	// corresponding .d path unless the command already specifies them.
+	if args.GeneratesDependencies() {
+		object := args.OutputFile
+		if object == "" {
+			base := filepath.Base(sourceFile)
+			object = strings.TrimSuffix(base, filepath.Ext(base)) + ".o"
+		}
+		if !hasDependencyOption(args.DepFlags, "-MT", "-MQ") {
+			cmdArgs = append(cmdArgs, "-MQ", object)
+		}
+		if !hasDependencyOption(args.DepFlags, "-MF") {
+			cmdArgs = append(cmdArgs, "-MF", strings.TrimSuffix(object, filepath.Ext(object))+".d")
 		}
 	}
 
@@ -133,38 +138,27 @@ func (p *Preprocessor) buildPreprocessArgs(args *ParsedArgs, sourceFile string) 
 	return cmdArgs
 }
 
-// isPreprocessingFlag returns true if the flag affects preprocessing.
-func isPreprocessingFlag(flag string) bool {
-	// Flags that affect preprocessing behavior
-	prefixes := []string{
-		"-U",         // Undefine macro
-		"-include",   // Force include
-		"-imacros",   // Include macros only
-		"-isystem",   // System include path
-		"-idirafter", // Include path (after -I)
-		"-iprefix",   // Prefix for -iwithprefix
-		"-nostdinc",  // Don't search standard include dirs
-		"-trigraphs", // Enable trigraphs
-		"-fno-",      // Various -fno- flags
-		"-f",         // Various -f flags that might affect preprocessing
-	}
-
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(flag, prefix) {
-			return true
+func hasDependencyOption(flags []string, names ...string) bool {
+	for _, flag := range flags {
+		for _, name := range names {
+			if flag == name || strings.HasPrefix(flag, name) {
+				return true
+			}
 		}
 	}
+	return false
+}
 
-	// Exact matches
-	exactFlags := map[string]bool{
-		"-nostdinc":    true,
-		"-nostdinc++":  true,
-		"-trigraphs":   true,
-		"-ansi":        true,
-		"-traditional": true,
+// isPreprocessingFlag returns true if the flag affects preprocessing.
+func isPreprocessingFlag(flag string) bool {
+	if spec, _, ok := compilerOption(flag); ok {
+		return spec.preprocess
 	}
-
-	return exactFlags[flag]
+	switch flag {
+	case "-nostdinc", "-nostdinc++", "-trigraphs", "-ansi", "-traditional":
+		return true
+	}
+	return strings.HasPrefix(flag, "-f") // Some -f options affect preprocessing.
 }
 
 // extractWarnings extracts warning messages from stderr.

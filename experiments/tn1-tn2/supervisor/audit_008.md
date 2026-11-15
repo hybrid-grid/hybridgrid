@@ -1,0 +1,15 @@
+SEVERITY: OK
+
+- Completed scenarios `E1-j6`/`E1-j7`/`E1-j8`/`E1-j9` each have the expected `20 blocks x 4 arms x 1 build x 1 client = 80` `results.csv` rows; no duplicate `(arm,round,build_idx,client)` rows found.
+- `E1-2c` is in progress, not a warning: current `results.csv` has `32` rows = `4 completed blocks x 4 arms x 1 build x 2 clients`; `order_log.csv` has round 5 already logged, consistent with an active next block.
+- Task-log integrity is clean for result cells: completed E1 scenarios each have `80` nonempty `tasks_*_round*.jsonl`; `E1-2c` currently has `16`; all checked builds have exactly `295 task_completed` records, zero `success=false`, and continuous dispatch sequences per cell.
+- `failures.csv` is header-only in every scenario (`arm,round,attempt,reason`); runner logs show no `attempt 2`, retry, abort, or failed-cell evidence, so the preregistered retry limits were not exceeded.
+- Configuration matches preregistration in all present scenario `meta.json` files: arms, jobs, clients, `SESSION_BUILDS=1`, `DRIFT=none`, `BUILDER_CPUS=2.0`, clean git state, and `git_commit=1b8339d8f2be1e3e707272e2eefab752e355a137`, matching `campaign.log` line 1 prefix `commit=1b8339d`.
+- Preflight reports are present for each start (`preflight_r1.txt` only; no resumes): all show `STRICT=1`, `EXPECT_COMMIT=1b8339d`, commit match, High performance power plan, Docker `72 CPU / 31 GiB`, and no known noisy apps.
+- Harmless host fact noted once: `meta.json` `host.nproc` varies (`28`/`36`), but Docker capacity is stable everywhere (`docker_NCPU=72`, `docker_MemTotal=33592029184`).
+- Measurement saturation is below warning thresholds: builder samples at or above 190% are `56/8952 = 0.63%` campaign-wide, max scenario `E1-j8` is `20/2012 = 0.99%`; coordinator saturation at or above 23.75% is `0/8971`.
+- No makespan outliers by the requested rule: scenario medians are `E1-j6 92.488s`, `E1-j7 87.816s`, `E1-j8 86.443s`, `E1-j9 84.831s`, `E1-2c 166.161s`; no cell is `>1.5x` or `<0.7x` its scenario median.
+- No monotone time-of-day drift detected in block medians: all present scenarios have `monotone_inc=False` and `monotone_dec=False`.
+- Block-order balance does not show an arm always first/last: across the 80 completed E1 blocks, first counts are `sed=24`, `hybrid-linucb=24`, `leastloaded=20`, `hybrid-linucb-d-g098=12`; last counts are `hybrid-linucb-d-g098=32`, `leastloaded=24`, `hybrid-linucb=16`, `sed=8`.
+- Warm-up handling looks contained: runner logs mark warm-up as discarded, and `results.csv` rows start at registered round 1; `leastloaded` round 0 artifacts are not present as analysis/result rows.
+- Campaign process log shows no restart gap or abort: completed scenarios have `runner exit 0` and `all 20 blocks complete` on `campaign.log` lines 3-4, 8-9, 13-14, and 18-19; `E1-2c` starts at block 1 on line 22 and is still running.

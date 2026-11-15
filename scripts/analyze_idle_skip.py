@@ -23,8 +23,8 @@ occupancy ceiling
     available and the only mistake left is passing one over.
 
     An earlier version of this docstring went further and claimed no
-    scheduler can beat LeastLoaded below 100% occupancy. Measurement at
-    -j5 (50% occupancy) refuted it: Hybrid-LinUCB won by 1.11 s, p=0.042.
+    scheduler can beat LeastLoaded below 100% occupancy. Measurements
+    refuted it.
     The reason is that idle does not mean equivalent -- these workers
     differ by 2.2x in capacity, so "which idle worker" is still a real
     decision,
@@ -72,7 +72,10 @@ def idle_skip(path):
             line = line.strip()
             if not line:
                 continue
-            active = json.loads(line).get("worker_active_tasks_at_dispatch")
+            rec = json.loads(line)
+            if rec.get("event", "task_completed") != "task_completed":
+                continue
+            active = rec.get("worker_active_tasks_at_dispatch")
             if active is None:
                 continue
             total += 1
@@ -89,6 +92,8 @@ def slot_capacity(path):
             if not line:
                 continue
             rec = json.loads(line)
+            if rec.get("event", "task_completed") != "task_completed":
+                continue
             if rec.get("worker_max_parallel"):
                 slots[rec["worker_id"]] = rec["worker_max_parallel"]
     return slots
@@ -118,8 +123,7 @@ def analyze(out_dir):
         total = sum(slots.values())
         print(f"cluster: {len(slots)} workers, {total} slots "
               f"({'+'.join(str(v) for v in sorted(slots.values(), reverse=True))})")
-        print(f"         at make -j5 the occupancy ceiling is {500 // total}%"
-              f" -- below 100%, an idle worker is almost always available,"
+        print(f"         below full occupancy, an idle worker is often available,"
               f"\n         but idle != equivalent: which idle worker still matters"
               f" on a heterogeneous cluster")
 

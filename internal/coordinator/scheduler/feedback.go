@@ -55,6 +55,23 @@ type DispatchInfo struct {
 	// (uniform random for ε-greedy). Lets evaluation split traffic into
 	// explore vs exploit windows.
 	WasExploration bool
+	// Candidates contains all scored workers in decision order. It is nil
+	// unless LinUCB diagnostics are enabled on a bandit decision.
+	Candidates []CandidateDiag
+	// RewardOffset is the frozen pooled warm-start baseline, or zero before freeze.
+	RewardOffset float64
+}
+
+// CandidateDiag is the per-candidate score decomposition recorded when diagnostics are on.
+type CandidateDiag struct {
+	Address     string    `json:"address"`
+	Mean        float64   `json:"mean"`
+	Bonus       float64   `json:"bonus"`
+	LoadPenalty float64   `json:"load_penalty"`
+	P           float64   `json:"p"`
+	XAinvX      float64   `json:"x_ainv_x"`
+	ArmCount    int64     `json:"arm_count"`
+	X           []float64 `json:"x"`
 }
 
 // LearningScheduler extends Scheduler with an online-learning loop.
@@ -84,12 +101,21 @@ type LearningScheduler interface {
 	RecordOutcome(workerID string, reward float64, success bool, ctx TaskContext)
 }
 
-// SelectWith dispatches to LearningScheduler when available, falling
-// back to the base Scheduler.Select for non-learning schedulers. The
-// returned DispatchInfo is zero-valued in the fallback case.
+// ContextScheduler selects with task features without receiving outcome feedback.
+type ContextScheduler interface {
+	Scheduler
+	SelectWithContext(buildType pb.BuildType, arch pb.Architecture, clientOS string, ctx TaskContext) (*registry.WorkerInfo, error)
+}
+
+// SelectWith preserves the learner path, then routes context-aware baselines.
+// DispatchInfo is zero-valued for non-learning schedulers.
 func SelectWith(s Scheduler, buildType pb.BuildType, arch pb.Architecture, clientOS string, ctx TaskContext) (*registry.WorkerInfo, DispatchInfo, error) {
 	if learner, ok := s.(LearningScheduler); ok {
 		return learner.SelectWithDispatchInfo(buildType, arch, clientOS, ctx)
+	}
+	if contextual, ok := s.(ContextScheduler); ok {
+		w, err := contextual.SelectWithContext(buildType, arch, clientOS, ctx)
+		return w, DispatchInfo{}, err
 	}
 	w, err := s.Select(buildType, arch, clientOS)
 	return w, DispatchInfo{}, err

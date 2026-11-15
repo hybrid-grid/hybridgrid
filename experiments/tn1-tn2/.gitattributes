@@ -1,0 +1,3 @@
+# Official experiment data must keep its exact bytes (LF line endings) so it
+# still matches the SHA-256 manifests on any checkout, including autocrlf=true.
+* -text

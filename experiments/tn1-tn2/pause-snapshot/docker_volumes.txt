@@ -1,0 +1,7 @@
+hg-gomod
+hgexp_build-cache
+hgexp_build-cache2
+hgexp_cpython-src
+hgexp_cpython-src2
+hgexp_gate
+hgexp_task-logs

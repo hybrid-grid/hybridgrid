@@ -96,7 +96,7 @@ def load_round(path):
                 rec = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if rec.get("event") != "task_completed":
+            if rec.get("event", "task_completed") != "task_completed":
                 continue
             if "ts" not in rec or "total_duration_ms" not in rec:
                 continue

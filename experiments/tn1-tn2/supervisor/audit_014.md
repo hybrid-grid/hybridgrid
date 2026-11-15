@@ -1,0 +1,14 @@
+SEVERITY: WARN
+
+- Preliminary time trend: median session makespan decreases monotonically across the three completed E2-perm blocks: 189.250 → 187.884 → 187.814 s (−0.76%). Evidence: `E2-perm/results.csv`, rows 2–43. Only three blocks are complete, so this needs continued observation.
+- E2-perm is actively in progress: at 2026-10-18 01:06:25 +07, blocks 1–3 were complete; block 4 had 4/7 committed cells. `results.csv` contained 50/280 expected rows (25/140 cells). Live `stats_hybrid-linucb-d-g098_round4.csv` updates confirm the runner remains active.
+- Integrity passes for all 25 committed cells: exactly 2 build/client rows per cell, zero duplicate keys, all 25 task logs present and nonempty, 590 `task_completed` records per cell, zero `success=false`, and unique continuous `dispatch_seq=1..590`.
+- All registered E2 exclusion checks pass: 50/50 completed build logs have exit status 0 and valid terminal HGTIME; first `drift_on` is 127–131; every cell has 459–463 completed tasks after onset. `failures.csv` contains only its header.
+- No retries or block reruns occurred: `reruns.csv`, `interruptions.csv`, and `archive/` are absent; `campaign.log` records one E2-perm start and no abort/resume. Thus 0/2 permitted scenario reruns were used.
+- Configuration matches registration: `meta.json` has the prescribed 7 arms, JOBS=8, CLIENTS=1, SESSION_BUILDS=2, DRIFT=permanent, BUILDER_CPUS=2.0, REPS=20, and commit `1b8339d8f2be1e3e707272e2eefab752e355a137`, matching the `1b8339d` commit in both campaign starts.
+- The sole E2 start has a valid preflight: `preflight_r1.txt` reports `STRICT=1`, `EXPECT_COMMIT=1b8339d`, matching clean HEAD, High performance power plan, no known noisy apps, and Docker capacity 72 CPUs/33,591,300,096 bytes RAM.
+- No makespan outliers: across 25 cells, scenario median is 187.267 s; observed range is 181.302–194.674 s, with none outside 0.7×–1.5× the median.
+- Saturation is below warning thresholds: 6/1,364 builder samples reached ≥190% CPU (0.44%); 0/1,367 coordinator samples reached ≥23.75%. Evidence: the 25 committed `stats_*_round*.csv` files.
+- No warm-up, cooldown, drift-event, or ordering anomaly found: warm-up ended at dispatch 590 with both builds status 0/HGTIME; no completed-cell inter-event gap was under 8 s; every measured event file has one `drift_on` and only a `cell_end` `drift_off`. `order_log.csv` rows 2–5 show no arm consistently first or last.
+- E1 remains frozen: all 2,672 entries in `manifest_E1.sha256` exist and match SHA-256; no files are missing or changed. The only five extras are the permitted `analysis.done` markers.
+- Four known harmless sampler-shutdown `OSError: [Errno 22]` messages occur in `E2-perm/runner.log` (lines 525, 731, 903, 1041); they are not treated as warnings.

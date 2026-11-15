@@ -3,6 +3,7 @@ package scheduler
 import (
 	"math"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -12,6 +13,15 @@ import (
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/metrics"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/registry"
+)
+
+// DiscountMode chooses whether old evidence ages with dispatch decisions
+// or only when that worker receives another outcome.
+type DiscountMode string
+
+const (
+	DiscountModeGlobal DiscountMode = "global"
+	DiscountModeArm    DiscountMode = "arm"
 )
 
 // LinUCBScheduler implements the disjoint linear contextual bandit
@@ -66,10 +76,17 @@ type LinUCBScheduler struct {
 	latencyTracker *metrics.LatencyTracker
 	alpha          float64
 	dim            int
+	featureSet     string
+	rewardCenter   string
+	diagCandidates bool
+	rewardOffset   float64
+	centerFrozen   bool
+	warmOutcomes   []warmOutcome
 
 	// warmStartTasks configures the Hybrid-LinUCB warm-start window:
 	// dispatches 1..N are routed by the least-loaded heuristic while
-	// the bandit learns passively from their outcomes. 0 = pure LinUCB.
+	// the bandit learns passively from their outcomes. Centering buffers
+	// those outcomes until N have arrived. 0 = pure LinUCB.
 	warmStartTasks int64
 	// loadPenalty is λ in the hybrid score p = mean + bonus − λ·loadRatio.
 	// It acts as a hand-coded prior on the load feature: the model
@@ -77,6 +94,11 @@ type LinUCBScheduler struct {
 	// delayed rewards would otherwise let the scheduler pile tasks onto
 	// one fast worker before any feedback arrives. 0 disables it.
 	loadPenalty float64
+	discount    float64
+	// discountRequested is the gamma that was asked for, kept only so Params can
+	// say so even when it is not effective (1, or outside (0,1]).
+	discountRequested float64
+	discountMode      DiscountMode
 	// totalDispatches counts every SelectWithDispatchInfo call,
 	// including single-candidate fast-path dispatches — it measures
 	// dispatch volume, not learning events. Accessed atomically; never
@@ -93,18 +115,30 @@ type LinUCBScheduler struct {
 	// already been mutated by the time the outcome arrives. Keyed by
 	// TaskContext.TaskID; entries are deleted on consumption.
 	pendingX map[string]*mat.VecDense
+	// Global discounting ages feedback from its dispatch decision, even
+	// when completion is delayed. Both caches are consumed under s.mu.
+	pendingStep map[string]int64
 }
 
 // linUCBArm holds the per-worker bandit state. We keep both A and its
 // inverse so we can reconstruct from disk in the future and sanity-check
 // the Sherman-Morrison update against a fresh inversion in tests.
 type linUCBArm struct {
-	A     *mat.Dense // d×d
-	Ainv  *mat.Dense // d×d cached inverse
-	b     *mat.VecDense
-	theta *mat.VecDense // A^{-1} b, recomputed lazily after updates
-	dirty bool          // theta needs recomputing
-	count int64
+	A        *mat.Dense // d×d
+	Ainv     *mat.Dense // d×d cached inverse
+	b        *mat.VecDense
+	theta    *mat.VecDense // A^{-1} b, recomputed lazily after updates
+	dirty    bool          // theta needs recomputing
+	count    int64
+	lastStep int64
+}
+
+type warmOutcome struct {
+	workerID string
+	x        *mat.VecDense
+	step     int64
+	hasStep  bool
+	reward   float64
 }
 
 // LinUCBConfig holds construction parameters.
@@ -122,12 +156,22 @@ type LinUCBConfig struct {
 	WarmStartTasks int
 	// LoadPenalty is the Hybrid-LinUCB λ coefficient. Zero (the
 	// default) keeps pure-LinUCB behavior.
-	LoadPenalty float64
+	LoadPenalty    float64
+	Discount       float64
+	DiscountMode   DiscountMode
+	FeatureSet     string
+	RewardCenter   string
+	DiagCandidates bool
 }
 
-// NewLinUCBScheduler constructs the scheduler. The feature dimension
-// is fixed at the value returned by featureDim() to keep the state
-// shape stable across the cluster's lifetime.
+// ValidFeatureSet reports whether a feature layout is supported.
+func ValidFeatureSet(s string) bool { return s == "" || s == "full" || s == "compact" }
+
+// ValidRewardCenter reports whether a reward centering mode is supported.
+func ValidRewardCenter(s string) bool { return s == "" || s == "none" || s == "warm" }
+
+// NewLinUCBScheduler constructs the scheduler. The selected feature
+// dimension stays fixed across the cluster's lifetime.
 //
 // Default α is 0.5. The Li 2010 theoretical form (Eq. 4) is
 // "conservatively large in some applications" per the paper itself;
@@ -154,17 +198,76 @@ func NewLinUCBScheduler(cfg LinUCBConfig) *LinUCBScheduler {
 	if loadPenalty < 0 {
 		loadPenalty = 0
 	}
-	return &LinUCBScheduler{
-		registry:       cfg.Registry,
-		circuitChecker: cfg.CircuitChecker,
-		latencyTracker: lt,
-		alpha:          alpha,
-		dim:            featureDim(),
-		warmStartTasks: int64(warmStart),
-		loadPenalty:    loadPenalty,
-		arms:           make(map[string]*linUCBArm),
-		pendingX:       make(map[string]*mat.VecDense),
+	discount := cfg.Discount
+	if !(discount > 0 && discount < 1) {
+		discount = 0
 	}
+	mode := cfg.DiscountMode
+	switch mode {
+	case DiscountModeArm, DiscountModeGlobal:
+		// Both supported modes retain their requested clock.
+	default:
+		// Empty and unknown library values use the global clock.
+		mode = DiscountModeGlobal
+	}
+	featureSet := cfg.FeatureSet
+	if !ValidFeatureSet(featureSet) || featureSet == "" {
+		featureSet = "full"
+	}
+	dim := featureDim()
+	if featureSet == "compact" {
+		dim = 4
+	}
+	rewardCenter := cfg.RewardCenter
+	if !ValidRewardCenter(rewardCenter) || rewardCenter == "" ||
+		(rewardCenter == "warm" && (warmStart == 0 || (discount != 0 && mode != DiscountModeArm))) {
+		rewardCenter = "none"
+	}
+	return &LinUCBScheduler{
+		registry:          cfg.Registry,
+		circuitChecker:    cfg.CircuitChecker,
+		latencyTracker:    lt,
+		alpha:             alpha,
+		dim:               dim,
+		featureSet:        featureSet,
+		rewardCenter:      rewardCenter,
+		diagCandidates:    cfg.DiagCandidates,
+		warmStartTasks:    int64(warmStart),
+		loadPenalty:       loadPenalty,
+		discount:          discount,
+		discountRequested: cfg.Discount,
+		discountMode:      mode,
+		arms:              make(map[string]*linUCBArm),
+		pendingX:          make(map[string]*mat.VecDense),
+		pendingStep:       make(map[string]int64),
+	}
+}
+
+// Params reports the effective scheduler parameters used for task logs.
+func (s *LinUCBScheduler) Params() string {
+	params := "alpha=" + strconv.FormatFloat(s.alpha, 'g', -1, 64) +
+		" warm_start=" + strconv.FormatInt(s.warmStartTasks, 10) +
+		" load_penalty=" + strconv.FormatFloat(s.loadPenalty, 'g', -1, 64)
+	// Zero means "not requested" (hybrid-linucb). A requested gamma that is not
+	// effective (1, negative, above 1, NaN) is still logged, flagged as off, so
+	// the raw log says what the run asked for.
+	if s.discountRequested != 0 {
+		params += " discount=" + strconv.FormatFloat(s.discountRequested, 'g', -1, 64) +
+			" discount_mode=" + string(s.discountMode)
+		if s.discount == 0 {
+			params += " discount_effective=off"
+		}
+	}
+	if s.featureSet == "compact" {
+		params += " features=compact"
+	}
+	if s.rewardCenter == "warm" {
+		params += " reward_center=warm"
+	}
+	if s.diagCandidates {
+		params += " diag_candidates=on"
+	}
+	return params
 }
 
 // Select implements the base Scheduler interface; it delegates to the
@@ -176,26 +279,32 @@ func (s *LinUCBScheduler) Select(buildType pb.BuildType, arch pb.Architecture, c
 
 // SelectWithDispatchInfo implements LearningScheduler. It computes
 // p_{t,a} for every eligible worker and returns argmax along with the
-// score (Q value) and an exploration flag. We mark a dispatch as
-// "exploration" when the chosen arm's UCB bonus exceeds its mean term —
-// i.e. selection was driven by uncertainty rather than learned value.
+// score (Q value) and an exploration flag. Exploration means the UCB
+// winner differs from the penalized-mean winner.
 //
 // In hybrid mode (warmStartTasks/loadPenalty non-zero) the score is
 // p = θ̂ᵀx + α√(xᵀA⁻¹x) − λ·loadRatio, and the first warmStartTasks
-// dispatches are delegated to the least-loaded heuristic while the
-// bandit observes their outcomes (docs/thesis/hybrid_linucb_proposal.md).
+// dispatches are delegated to the least-loaded heuristic. Centered mode
+// keeps using that heuristic until enough outcomes have completed.
 func (s *LinUCBScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb.Architecture, clientOS string, ctx TaskContext) (*registry.WorkerInfo, DispatchInfo, error) {
 	candidates, err := s.eligibleWorkers(buildType, arch, clientOS)
 	if err != nil {
 		return nil, DispatchInfo{}, err
 	}
 	n := atomic.AddInt64(&s.totalDispatches, 1)
+	var offset float64
+	var frozen bool
+	if s.rewardCenter == "warm" {
+		s.mu.Lock()
+		offset, frozen = s.rewardOffset, s.centerFrozen
+		s.mu.Unlock()
+	}
 	if len(candidates) == 1 {
 		// Fast path: no choice. Skip matrix ops entirely.
-		return candidates[0], DispatchInfo{QValueAtDispatch: 0, WasExploration: false}, nil
+		return candidates[0], DispatchInfo{QValueAtDispatch: 0, WasExploration: false, RewardOffset: offset}, nil
 	}
-	if s.warmStartTasks > 0 && n <= s.warmStartTasks {
-		return s.selectWarmStart(candidates, arch, ctx)
+	if (s.warmStartTasks > 0 && n <= s.warmStartTasks) || (s.rewardCenter == "warm" && !frozen) {
+		return s.selectWarmStart(candidates, arch, ctx, n, offset)
 	}
 
 	// Single pass: track argmax over (mean−λ·lr+bonus) for selection and
@@ -208,11 +317,26 @@ func (s *LinUCBScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb
 	var bestMeanID string
 	bestP := math.Inf(-1)
 	bestMean := math.Inf(-1)
+	var diagnostics []CandidateDiag
+	if s.diagCandidates {
+		diagnostics = make([]CandidateDiag, 0, len(candidates))
+	}
 	for _, w := range candidates {
 		x := s.featureVector(w, arch, ctx)
-		mean, bonus := s.score(w.ID, x)
-		penalized := mean - s.loadPenalty*loadRatio(w)
+		mean, bonus, xAinvX, count := s.scoreDetailed(w.ID, x)
+		penalty := s.loadPenalty * loadRatio(w)
+		penalized := mean - penalty
 		p := penalized + bonus
+		if s.diagCandidates {
+			values := make([]float64, s.dim)
+			for i := range values {
+				values[i] = x.AtVec(i)
+			}
+			diagnostics = append(diagnostics, CandidateDiag{
+				Address: w.Address, Mean: mean, Bonus: bonus, LoadPenalty: penalty,
+				P: p, XAinvX: xAinvX, ArmCount: count, X: values,
+			})
+		}
 		if p > bestP {
 			bestP = p
 			best = w
@@ -230,18 +354,25 @@ func (s *LinUCBScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb
 	if ctx.TaskID != "" && bestX != nil {
 		s.mu.Lock()
 		s.pendingX[ctx.TaskID] = bestX
+		if s.discount > 0 && s.discountMode != DiscountModeArm {
+			s.pendingStep[ctx.TaskID] = n
+		}
 		s.mu.Unlock()
 	}
 
-	return best, DispatchInfo{QValueAtDispatch: bestP, WasExploration: wasExploration}, nil
+	q := bestP
+	if frozen {
+		q += offset
+	}
+	return best, DispatchInfo{QValueAtDispatch: q, WasExploration: wasExploration,
+		Candidates: diagnostics, RewardOffset: offset}, nil
 }
 
 // selectWarmStart routes a warm-start dispatch to the least-loaded
 // candidate (min ActiveTasks, first-wins tie-break — mirroring
-// LeastLoadedScheduler.Select) while the bandit learns passively: the
-// chosen worker's feature vector is cached in pendingX so RecordOutcome
-// applies the normal rank-1 update, exactly as if the bandit had made
-// the choice itself.
+// LeastLoadedScheduler.Select). The chosen feature vector is cached in
+// pendingX. Centered mode buffers warm outcomes before replay; default
+// mode applies each outcome immediately.
 //
 // DispatchInfo semantics: QValueAtDispatch reports the learner's hybrid
 // score for the delegated choice so offline analysis can watch Q
@@ -252,7 +383,7 @@ func (s *LinUCBScheduler) SelectWithDispatchInfo(buildType pb.BuildType, arch pb
 // Lock ordering: s.score locks s.mu internally, so it must complete
 // before the pendingX store takes s.mu — never call it with the lock
 // held.
-func (s *LinUCBScheduler) selectWarmStart(candidates []*registry.WorkerInfo, arch pb.Architecture, ctx TaskContext) (*registry.WorkerInfo, DispatchInfo, error) {
+func (s *LinUCBScheduler) selectWarmStart(candidates []*registry.WorkerInfo, arch pb.Architecture, ctx TaskContext, n int64, offset float64) (*registry.WorkerInfo, DispatchInfo, error) {
 	chosen := candidates[0]
 	for _, w := range candidates[1:] {
 		if w.ActiveTasks < chosen.ActiveTasks {
@@ -267,23 +398,46 @@ func (s *LinUCBScheduler) selectWarmStart(candidates []*registry.WorkerInfo, arc
 	if ctx.TaskID != "" {
 		s.mu.Lock()
 		s.pendingX[ctx.TaskID] = x
+		if s.discount > 0 && s.discountMode != DiscountModeArm {
+			s.pendingStep[ctx.TaskID] = n
+		}
 		s.mu.Unlock()
 	}
 
-	return chosen, DispatchInfo{QValueAtDispatch: q, WasExploration: true}, nil
+	if offset != 0 {
+		q += offset
+	}
+	return chosen, DispatchInfo{QValueAtDispatch: q, WasExploration: true, RewardOffset: offset}, nil
 }
 
 // score returns the mean estimate (θ̂^T x) and the UCB exploration bonus
 // (α √(x^T A^{-1} x)) for the given arm and context.
 func (s *LinUCBScheduler) score(workerID string, x *mat.VecDense) (mean, bonus float64) {
+	mean, bonus, _, _ = s.scoreDetailed(workerID, x)
+	return mean, bonus
+}
+
+func (s *LinUCBScheduler) scoreDetailed(workerID string, x *mat.VecDense) (mean, bonus, xAinvX float64, count int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	arm := s.armForLocked(workerID)
+	if s.discount > 0 && s.discountMode != DiscountModeArm {
+		now := atomic.LoadInt64(&s.totalDispatches)
+		if now < arm.lastStep {
+			now = arm.lastStep
+		}
+		// A failed catch-up leaves the arm untouched; score its last valid
+		// inverse and theta instead of discarding a usable estimate.
+		s.catchUpLocked(arm, now)
+	}
 	if arm.dirty {
 		arm.theta = mulMatVec(arm.Ainv, arm.b)
 		arm.dirty = false
 	}
 	mean = mat.Dot(arm.theta, x)
+	// The advisor keeps alpha*sqrt(x^T Ainv x) after discounting. This
+	// bonus is heuristic: Russac et al. use a second gamma-squared matrix
+	// and a time-dependent width, so their regret bound does not apply.
 	// x^T A^{-1} x — symmetric quadratic form
 	tmp := mulMatVec(arm.Ainv, x)
 	q := mat.Dot(x, tmp)
@@ -293,7 +447,7 @@ func (s *LinUCBScheduler) score(workerID string, x *mat.VecDense) (mean, bonus f
 		q = 0
 	}
 	bonus = s.alpha * math.Sqrt(q)
-	return mean, bonus
+	return mean, bonus, q, arm.count
 }
 
 // RecordOutcome implements LearningScheduler. It applies the rank-1
@@ -314,7 +468,7 @@ func (s *LinUCBScheduler) RecordOutcome(workerID string, reward float64, _ bool,
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	x, ok := s.pendingX[ctx.TaskID]
+	x, step, hasStep, ok := s.consumePending(ctx.TaskID)
 	if !ok {
 		// No cached x — either the caller did not set TaskID or the
 		// dispatch happened before this scheduler was constructed.
@@ -322,8 +476,97 @@ func (s *LinUCBScheduler) RecordOutcome(workerID string, reward float64, _ bool,
 		// post-completion feature vector.
 		return
 	}
-	delete(s.pendingX, ctx.TaskID)
+	if s.rewardCenter == "warm" && !s.centerFrozen {
+		s.warmOutcomes = append(s.warmOutcomes, warmOutcome{
+			workerID: workerID, x: x, step: step, hasStep: hasStep, reward: reward,
+		})
+		if int64(len(s.warmOutcomes)) < s.warmStartTasks {
+			// Without W recorded outcomes the scheduler remains in phase 1.
+			return
+		}
+		var total float64
+		for _, outcome := range s.warmOutcomes {
+			total += outcome.reward
+		}
+		s.rewardOffset = total / float64(len(s.warmOutcomes))
+		s.centerFrozen = true
+		for _, outcome := range s.warmOutcomes {
+			s.applyOutcomeLocked(outcome.workerID, outcome.x, outcome.step,
+				outcome.hasStep, outcome.reward-s.rewardOffset)
+		}
+		s.warmOutcomes = nil
+		return
+	}
+	if s.rewardCenter == "warm" {
+		reward -= s.rewardOffset
+	}
+	s.applyOutcomeLocked(workerID, x, step, hasStep, reward)
+}
 
+// applyOutcomeLocked is the common update path for live and replayed outcomes.
+// The caller holds s.mu; reward is already on the model's target scale.
+func (s *LinUCBScheduler) applyOutcomeLocked(workerID string, x *mat.VecDense, step int64, hasStep bool, reward float64) {
+	var ok bool
+	if s.discount > 0 {
+		arm, exists := s.arms[workerID]
+		if !exists {
+			// Keep a first observation local until its candidate passes
+			// validation; failed updates must not create an empty arm.
+			A := mat.NewDense(s.dim, s.dim, nil)
+			Ainv := mat.NewDense(s.dim, s.dim, nil)
+			for i := 0; i < s.dim; i++ {
+				A.Set(i, i, 1)
+				Ainv.Set(i, i, 1)
+			}
+			arm = &linUCBArm{A: A, Ainv: Ainv, b: mat.NewVecDense(s.dim, nil), theta: mat.NewVecDense(s.dim, nil)}
+			if s.discountMode != DiscountModeArm {
+				arm.lastStep = atomic.LoadInt64(&s.totalDispatches)
+			}
+		}
+		var A, Ainv *mat.Dense
+		var b *mat.VecDense
+		if s.discountMode == DiscountModeArm {
+			// This recurrence discounts only the arm's own observations:
+			// A_n = I + sum gamma^(n-i) x_i x_i^T, and similarly for b.
+			A, b = discountDecay(arm.A, arm.b, s.discount, 1)
+			A, b, Ainv, ok = discountUpdate(A, b, x, reward, 1)
+		} else {
+			// I is the fixed point of the decision-clock recurrence, so k
+			// missed decisions collapse to I + gamma^k(A-I). A late reward
+			// carries its dispatch-time weight into the same clock state.
+			now := atomic.LoadInt64(&s.totalDispatches)
+			if now < arm.lastStep {
+				now = arm.lastStep
+			}
+			A, b = discountDecay(arm.A, arm.b, s.discount, now-arm.lastStep)
+			if now > arm.lastStep {
+				if _, valid := discountInverse(A, b); !valid {
+					return
+				}
+			}
+			if !hasStep {
+				step = now
+			}
+			lag := now - step
+			if lag < 0 {
+				lag = 0
+			}
+			A, b, Ainv, ok = discountUpdate(A, b, x, reward, math.Pow(s.discount, float64(lag)))
+			if ok {
+				arm.lastStep = now
+			}
+		}
+		if ok {
+			// Every arm state change is committed together under s.mu.
+			arm.A, arm.b, arm.Ainv = A, b, Ainv
+			arm.count++
+			arm.dirty = true
+			if !exists {
+				s.arms[workerID] = arm
+			}
+		}
+		return
+	}
 	arm := s.armForLocked(workerID)
 
 	// b ← b + r x  (Algorithm 1 line 13)
@@ -364,6 +607,136 @@ func (s *LinUCBScheduler) RecordOutcome(workerID string, reward float64, _ bool,
 	arm.dirty = true
 }
 
+// consumePending is called with s.mu held. A known TaskID consumes its
+// feature and dispatch step together, including when the update later fails.
+func (s *LinUCBScheduler) consumePending(taskID string) (*mat.VecDense, int64, bool, bool) {
+	x, ok := s.pendingX[taskID]
+	if !ok {
+		return nil, 0, false, false
+	}
+	step, hasStep := s.pendingStep[taskID]
+	delete(s.pendingX, taskID)
+	delete(s.pendingStep, taskID)
+	return x, step, hasStep, true
+}
+
+// catchUpLocked ages an arm exactly to now, leaving it intact if the
+// candidate loses positive definiteness or contains a non-finite value.
+// Arms are read and changed only while s.mu is held.
+func (s *LinUCBScheduler) catchUpLocked(arm *linUCBArm, now int64) bool {
+	if now <= arm.lastStep {
+		return true
+	}
+	A, b := discountDecay(arm.A, arm.b, s.discount, now-arm.lastStep)
+	Ainv, ok := discountInverse(A, b)
+	if !ok {
+		return false
+	}
+	arm.A, arm.b, arm.Ainv = A, b, Ainv
+	arm.lastStep = now
+	arm.dirty = true
+	return true
+}
+
+// discountDecay is the closed form of k steps of the advisor's ridge
+// recurrence; each arm can therefore age lazily without losing decisions.
+func discountDecay(A *mat.Dense, b *mat.VecDense, gamma float64, k int64) (*mat.Dense, *mat.VecDense) {
+	d, _ := A.Dims()
+	g := math.Pow(gamma, float64(k))
+	Anew := mat.NewDense(d, d, nil)
+	bnew := mat.NewVecDense(d, nil)
+	for i := 0; i < d; i++ {
+		bnew.SetVec(i, g*b.AtVec(i))
+		for j := 0; j < d; j++ {
+			identity := 0.0
+			if i == j {
+				identity = 1
+			}
+			Anew.Set(i, j, identity+g*(A.At(i, j)-identity))
+		}
+	}
+	return Anew, bnew
+}
+
+// discountUpdate builds a candidate before exposing any state. The
+// discounted A needs a fresh SPD inverse; Sherman-Morrison cannot account
+// for the intervening decay and ridge restoration.
+func discountUpdate(A *mat.Dense, b, x *mat.VecDense, reward, weight float64) (Anew *mat.Dense, bnew *mat.VecDense, Ainv *mat.Dense, ok bool) {
+	d, cols := A.Dims()
+	if d != cols || b.Len() != d || x.Len() != d || !finite(reward) || !finite(weight) {
+		return nil, nil, nil, false
+	}
+	Anew = mat.NewDense(d, d, nil)
+	bnew = mat.NewVecDense(d, nil)
+	for i := 0; i < d; i++ {
+		xi := x.AtVec(i)
+		if !finite(xi) {
+			return nil, nil, nil, false
+		}
+		bnew.SetVec(i, b.AtVec(i)+weight*reward*xi)
+		for j := 0; j < d; j++ {
+			Anew.Set(i, j, A.At(i, j)+weight*xi*x.AtVec(j))
+		}
+	}
+	Ainv, ok = discountInverse(Anew, bnew)
+	if !ok {
+		return nil, nil, nil, false
+	}
+	// Keep the diagnostic A exactly symmetric, matching the matrix that
+	// Cholesky inverted after rounding the two triangles together.
+	for i := 0; i < d; i++ {
+		for j := 0; j < i; j++ {
+			v := (Anew.At(i, j) + Anew.At(j, i)) / 2
+			Anew.Set(i, j, v)
+			Anew.Set(j, i, v)
+		}
+	}
+	return Anew, bnew, Ainv, true
+}
+
+func discountInverse(A *mat.Dense, b *mat.VecDense) (*mat.Dense, bool) {
+	d, cols := A.Dims()
+	if d != cols || b.Len() != d {
+		return nil, false
+	}
+	sym := mat.NewSymDense(d, nil)
+	for i := 0; i < d; i++ {
+		if !finite(b.AtVec(i)) {
+			return nil, false
+		}
+		for j := 0; j <= i; j++ {
+			a, other := A.At(i, j), A.At(j, i)
+			if !finite(a) || !finite(other) {
+				return nil, false
+			}
+			v := (a + other) / 2
+			if !finite(v) {
+				return nil, false
+			}
+			sym.SetSym(i, j, v)
+		}
+	}
+	var chol mat.Cholesky
+	if !chol.Factorize(sym) {
+		return nil, false
+	}
+	inv := mat.NewSymDense(d, nil)
+	if err := chol.InverseTo(inv); err != nil {
+		return nil, false
+	}
+	out := mat.DenseCopyOf(inv)
+	for i := 0; i < d; i++ {
+		for j := 0; j < d; j++ {
+			if !finite(out.At(i, j)) {
+				return nil, false
+			}
+		}
+	}
+	return out, true
+}
+
+func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
+
 // armForLocked returns (creating if needed) the bandit state for a
 // worker. Caller must hold s.mu.
 func (s *LinUCBScheduler) armForLocked(workerID string) *linUCBArm {
@@ -383,6 +756,9 @@ func (s *LinUCBScheduler) armForLocked(workerID string) *linUCBArm {
 		b:     mat.NewVecDense(d, nil),
 		theta: mat.NewVecDense(d, nil),
 		dirty: false,
+	}
+	if s.discount > 0 && s.discountMode != DiscountModeArm {
+		arm.lastStep = atomic.LoadInt64(&s.totalDispatches)
 	}
 	s.arms[workerID] = arm
 	return arm
@@ -572,6 +948,15 @@ func (s *LinUCBScheduler) featureVector(w *registry.WorkerInfo, targetArch pb.Ar
 		logSize = 1.0
 	}
 	x.SetVec(1, logSize)
+	if s.featureSet == "compact" {
+		x.SetVec(2, loadRatio(w))
+		rawSize := math.Log1p(float64(ctx.RawSourceSizeBytes)) / rawSizeNormDenom
+		if rawSize > 1.0 {
+			rawSize = 1.0
+		}
+		x.SetVec(3, rawSize)
+		return x
+	}
 
 	// target arch one-hot (build type omitted — see featureDim doc).
 	switch targetArch {

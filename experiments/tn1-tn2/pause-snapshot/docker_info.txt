@@ -1,0 +1,1 @@
+NCPU=72 MemTotal=33591300096 ServerVersion=29.4.2 OS=Docker Desktop (containerized) Kernel=6.18.54.1-microsoft-standard-WSL2

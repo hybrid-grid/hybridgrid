@@ -16,6 +16,7 @@ import (
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/registry"
+	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/scheduler"
 )
 
 // loggerWithBuffer returns a TaskLogger writing to an in-memory buffer
@@ -226,4 +227,108 @@ func TestTaskLogger_ConcurrentWrites(t *testing.T) {
 			t.Fatalf("malformed JSON line under concurrency: %q (err=%v)", line, err)
 		}
 	}
+}
+
+func TestTaskLogRecord_SchedulerParamsJSON(t *testing.T) {
+	rec := sampleRecord()
+	oldJSON, err := json.Marshal(rec)
+	require.NoError(t, err)
+	assert.NotContains(t, string(oldJSON), "scheduler_params")
+	assert.Contains(t, string(oldJSON), `"scheduler":"p2c"`)
+	assert.Contains(t, string(oldJSON), `"worker_id":"worker-3"`)
+
+	rec.SchedulerParams = "alpha=0.5 warm_start=100 load_penalty=0.5 discount=0.95 discount_mode=global"
+	withParams, err := json.Marshal(rec)
+	require.NoError(t, err)
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal(withParams, &fields))
+	assert.Equal(t, rec.SchedulerParams, fields["scheduler_params"])
+
+	rec.SchedulerParams = ""
+	again, err := json.Marshal(rec)
+	require.NoError(t, err)
+	assert.Equal(t, string(oldJSON), string(again), "empty optional field must preserve existing records")
+}
+
+func TestTaskLogRecord_LinUCBDiagnosticsJSON(t *testing.T) {
+	rec := sampleRecord()
+	without, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal record without diagnostics: %v", err)
+	}
+	const legacy = `{"ts":"2026-04-29T10:00:00Z","event":"task_completed","dispatch_seq":0,"dispatch_ts":"0001-01-01T00:00:00Z","received_ts":"0001-01-01T00:00:00Z","worker_address":"","candidates":null,"task_id":"task-1","build_type":"cpp","build_id":"build-session-1","scheduler":"p2c","worker_id":"worker-3","worker_arch":"x86_64","worker_native_arch":"x86_64","worker_cpu_cores":8,"worker_cpu_millis":0,"worker_mem_bytes":8589934592,"worker_active_tasks_at_dispatch":2,"worker_max_parallel":8,"worker_discovery_source":"mdns","target_arch":"ARCH_X86_64","client_os":"linux","source_size_bytes":524288,"preprocessed_size_bytes":524288,"raw_source_size_bytes":0,"queue_time_ms":5,"compile_time_ms":1234,"worker_rpc_latency_ms":1245,"total_duration_ms":1250,"success":true,"exit_code":0,"from_cache":false,"q_value_at_dispatch":0,"was_exploration":false}`
+	if string(without) != legacy {
+		t.Fatalf("diagnostics off changed legacy JSON:\n got: %s\nwant: %s", without, legacy)
+	}
+
+	rec.LinUCBCandidates = []scheduler.CandidateDiag{{Address: "worker-3", Mean: -0.2, Bonus: 0.3, LoadPenalty: 0.1, P: 0, XAinvX: 0.25, ArmCount: 4, X: []float64{1, 0.5}}}
+	rec.RewardOffset = -0.15
+	with, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal record with diagnostics: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(with, &fields); err != nil {
+		t.Fatalf("decode diagnostic record: %v", err)
+	}
+	if string(fields["reward_offset"]) != `-0.15` {
+		t.Errorf("reward_offset = %s, want -0.15", fields["reward_offset"])
+	}
+	var candidates []map[string]any
+	if err := json.Unmarshal(fields["linucb_candidates"], &candidates); err != nil {
+		t.Fatalf("decode linucb_candidates: %v", err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("linucb_candidates length = %d, want 1", len(candidates))
+	}
+	for _, key := range []string{"address", "mean", "bonus", "load_penalty", "p", "x_ainv_x", "arm_count", "x"} {
+		if _, ok := candidates[0][key]; !ok {
+			t.Errorf("linucb_candidates[0] missing %q", key)
+		}
+	}
+	if candidates[0]["address"] != "worker-3" {
+		t.Errorf("address = %v, want worker-3", candidates[0]["address"])
+	}
+	if got, ok := candidates[0]["x"].([]any); !ok || len(got) != 2 || got[0] != float64(1) || got[1] != 0.5 {
+		t.Errorf("x = %v, want [1 0.5]", candidates[0]["x"])
+	}
+}
+
+func TestCompile_DiscountedSchedulerParamsInTaskLog(t *testing.T) {
+	s, _, cleanup := setupTestServer(t, Config{
+		Port:              0,
+		HeartbeatTTL:      60 * time.Second,
+		RequestTimeout:    1 * time.Second,
+		SchedulerType:     "hybrid-linucb-d",
+		DiscountValue:     0.95,
+		DiscountModeValue: "global",
+	})
+	defer cleanup()
+
+	logger, buf := loggerWithBuffer()
+	s.taskLogger = logger
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "worker-params",
+		Address: "127.0.0.1:19998",
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch: pb.Architecture_ARCH_X86_64,
+			Cpp:        &pb.CppCapability{Compilers: []string{"gcc"}},
+		},
+		MaxParallel: 1,
+	}))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err := s.Compile(ctx, &pb.CompileRequest{
+		TaskId:             "params-task",
+		PreprocessedSource: []byte("int main() { return 0; }"),
+		Compiler:           "gcc",
+		TargetArch:         pb.Architecture_ARCH_X86_64,
+	})
+	require.NoError(t, err)
+
+	var rec TaskLogRecord
+	require.NoError(t, json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &rec))
+	assert.Equal(t, "hybrid-linucb-d", rec.Scheduler)
+	assert.Equal(t, "alpha=0.5 warm_start=0 load_penalty=0 discount=0.95 discount_mode=global", rec.SchedulerParams)
 }

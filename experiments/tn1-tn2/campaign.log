@@ -1,0 +1,90 @@
+Power Scheme GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (High performance)2026-10-10 15:56:34 CAMPAIGN START commit=1b8339d builder_cpus=2.0 order=E1-j6 E1-j7 E1-j8 E1-j9 E1-2c E2-perm E2-trans E2-onoff E2-lambda stop_after=E1-2c
+2026-10-10 15:56:46 E1-j6: start at block 1 (arms: leastloaded sed hybrid-linucb hybrid-linucb-d-g098 | jobs=6 clients=1 session_builds=1 drift=none)
+2026-10-10 18:34:17 E1-j6: runner exit 0
+2026-10-10 18:34:17 E1-j6: all 20 blocks complete
+2026-10-10 18:34:21   analysis rc=0 -> /d/bench-work/out/official/E1-j6/analysis
+2026-10-10 18:34:25   analysis SED vs LL rc=0 -> /d/bench-work/out/official/E1-j6/analysis_sed_vs_ll
+2026-10-10 18:34:37 E1-j7: start at block 1 (arms: leastloaded sed hybrid-linucb hybrid-linucb-d-g098 | jobs=7 clients=1 session_builds=1 drift=none)
+2026-10-10 21:06:04 E1-j7: runner exit 0
+2026-10-10 21:06:04 E1-j7: all 20 blocks complete
+2026-10-10 21:06:09   analysis rc=0 -> /d/bench-work/out/official/E1-j7/analysis
+2026-10-10 21:06:13   analysis SED vs LL rc=0 -> /d/bench-work/out/official/E1-j7/analysis_sed_vs_ll
+2026-10-10 21:06:25 E1-j8: start at block 1 (arms: leastloaded sed hybrid-linucb hybrid-linucb-d-g098 | jobs=8 clients=1 session_builds=1 drift=none)
+2026-10-10 23:36:08 E1-j8: runner exit 0
+2026-10-10 23:36:08 E1-j8: all 20 blocks complete
+2026-10-10 23:36:12   analysis rc=0 -> /d/bench-work/out/official/E1-j8/analysis
+2026-10-10 23:36:16   analysis SED vs LL rc=0 -> /d/bench-work/out/official/E1-j8/analysis_sed_vs_ll
+2026-10-10 23:36:28 E1-j9: start at block 1 (arms: leastloaded sed hybrid-linucb hybrid-linucb-d-g098 | jobs=9 clients=1 session_builds=1 drift=none)
+2026-10-11 02:03:52 E1-j9: runner exit 0
+2026-10-11 02:03:52 E1-j9: all 20 blocks complete
+2026-10-11 02:03:56   analysis rc=0 -> /d/bench-work/out/official/E1-j9/analysis
+2026-10-11 02:04:00   analysis SED vs LL rc=0 -> /d/bench-work/out/official/E1-j9/analysis_sed_vs_ll
+2026-10-11 02:04:12 E1-2c: start at block 1 (arms: leastloaded sed hybrid-linucb hybrid-linucb-d-g098 | jobs=8 clients=2 session_builds=1 drift=none)
+2026-10-11 06:25:07 E1-2c: runner exit 0
+2026-10-11 06:25:07 E1-2c: all 20 blocks complete
+2026-10-11 06:25:19   analysis rc=0 -> /d/bench-work/out/official/E1-2c/analysis
+2026-10-11 06:25:24   analysis SED vs LL rc=0 -> /d/bench-work/out/official/E1-2c/analysis_sed_vs_ll
+2026-10-11 06:25:24 STOP_AFTER reached after E1-2c
+Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)2026-10-11 06:25:25 power plan restored
+2026-10-17 23:29:05 PHASE2_APPROVED E2_LAMBDA=RUN decided by the user on 2026-10-17 (explicit choice RUN); reason: advisor listed the lambda sweep, reporting the three variants does not wait for it. Plan docs/thesis/ke-hoach-thi-nghiem-2.md v3; tooling changes D:/bench-work/CHANGELOG-phase2.md
+2026-10-17 23:29:11 runner inherited inputs reset: CONFIGURE_FLAGS CPYTHON_VERSION COOLDOWN SEED_BASE ALPHA EPSILON WARM_START DRIFT_AT DRIFT_TARGET DRIFT_CPU DRIFT_DURATION DRIFT_ON DRIFT_OFF MIN_TASKS DRY_RUN EST_CELL_S ARMS REPS ROUND_START JOBS CLIENTS SESSION_BUILDS DRIFT OUT_DIR
+2026-10-17 23:29:11 PHASE2_APPROVED E2_LAMBDA=RUN effective_stop_after=<none>
+Power Scheme GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (High performance)2026-10-17 23:29:13 CAMPAIGN START commit=1b8339d builder_cpus=2.0 order=E1-j6 E1-j7 E1-j8 E1-j9 E1-2c E2-perm E2-trans E2-onoff E2-lambda stop_after=<none>
+2026-10-17 23:29:13 E1-j6: all 20 blocks complete
+2026-10-17 23:29:13 E1-j6: analysis up to date
+2026-10-17 23:29:13 E1-j7: all 20 blocks complete
+2026-10-17 23:29:14 E1-j7: analysis up to date
+2026-10-17 23:29:14 E1-j8: all 20 blocks complete
+2026-10-17 23:29:14 E1-j8: analysis up to date
+2026-10-17 23:29:15 E1-j9: all 20 blocks complete
+2026-10-17 23:29:15 E1-j9: analysis up to date
+2026-10-17 23:29:15 E1-2c: all 20 blocks complete
+2026-10-17 23:29:16 E1-2c: analysis up to date
+2026-10-17 23:29:16 PHASE2_APPROVED E2_LAMBDA=RUN effective_stop_after=<none>
+2026-10-17 23:29:28 E2-perm: start at block 1 (arms: leastloaded sed hybrid-linucb hybrid-linucb-d-g095 hybrid-linucb-d-g098 hybrid-linucb-d-g099 hybrid-linucb-d-arm-g098 | jobs=8 clients=1 session_builds=2 drift=permanent)
+2026-10-18 07:58:36 E2-perm: runner exit 0
+2026-10-18 07:58:37 E2-perm: all 20 blocks complete
+2026-10-18 07:58:47   analysis rc=0 -> /d/bench-work/out/official/E2-perm/analysis
+2026-10-18 07:58:56   analysis D vs HG rc=0 -> /d/bench-work/out/official/E2-perm/analysis_d_vs_hg
+2026-10-18 07:59:08 E2-trans: start at block 1 (arms: leastloaded sed hybrid-linucb hybrid-linucb-d-g095 hybrid-linucb-d-g098 hybrid-linucb-d-g099 hybrid-linucb-d-arm-g098 | jobs=8 clients=1 session_builds=2 drift=transient)
+2026-10-18 16:02:55 E2-trans: runner exit 0
+2026-10-18 16:02:55 E2-trans: all 20 blocks complete
+2026-10-18 16:03:14   analysis rc=0 -> /d/bench-work/out/official/E2-trans/analysis
+2026-10-18 16:03:23   analysis D vs HG rc=0 -> /d/bench-work/out/official/E2-trans/analysis_d_vs_hg
+2026-10-18 16:03:35 E2-onoff: start at block 1 (arms: leastloaded sed hybrid-linucb hybrid-linucb-d-g095 hybrid-linucb-d-g098 hybrid-linucb-d-g099 hybrid-linucb-d-arm-g098 | jobs=8 clients=1 session_builds=2 drift=onoff)
+2026-10-19 00:22:57 E2-onoff: runner exit 0
+2026-10-19 00:22:57 E2-onoff: all 20 blocks complete
+2026-10-19 00:24:05   analysis rc=0 -> /d/bench-work/out/official/E2-onoff/analysis
+2026-10-19 00:24:15   analysis D vs HG rc=0 -> /d/bench-work/out/official/E2-onoff/analysis_d_vs_hg
+2026-10-19 00:24:28 E2-lambda: start at block 1 (arms: leastloaded sed hybrid-linucb hybrid-linucb-l0 hybrid-linucb-l025 hybrid-linucb-l100 hybrid-linucb-d-g098 hybrid-linucb-d-g098-l0 hybrid-linucb-d-g098-l025 hybrid-linucb-d-g098-l100 | jobs=8 clients=1 session_builds=2 drift=permanent)
+2026-10-19 08:56:46 MANUAL STOP pause requested by the user after block 14 of E2-lambda (resume later after resume_check.sh)
+2026-10-19 08:56:50 stopped by STOP_REQUESTED (delete /d/bench-work/out/official/STOP_REQUESTED to resume)
+Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)2026-10-19 08:56:51 power plan restored
+2026-10-21 00:20:45 RESUME by operator at the user's request after resume_check.sh: all checks OK (snapshot /d/bench-work/pause_snapshots/pause_20261019-085652)
+2026-10-21 00:20:45 runner inherited inputs reset: CONFIGURE_FLAGS CPYTHON_VERSION COOLDOWN SEED_BASE ALPHA EPSILON WARM_START DRIFT_AT DRIFT_TARGET DRIFT_CPU DRIFT_DURATION DRIFT_ON DRIFT_OFF MIN_TASKS DRY_RUN EST_CELL_S ARMS REPS ROUND_START JOBS CLIENTS SESSION_BUILDS DRIFT OUT_DIR
+2026-10-21 00:20:46 PHASE2_APPROVED E2_LAMBDA=RUN effective_stop_after=<none>
+Power Scheme GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (High performance)2026-10-21 00:20:47 CAMPAIGN START commit=1b8339d builder_cpus=2.0 order=E1-j6 E1-j7 E1-j8 E1-j9 E1-2c E2-perm E2-trans E2-onoff E2-lambda stop_after=<none>
+2026-10-21 00:20:47 E1-j6: all 20 blocks complete
+2026-10-21 00:20:48 E1-j6: analysis up to date
+2026-10-21 00:20:48 E1-j7: all 20 blocks complete
+2026-10-21 00:20:48 E1-j7: analysis up to date
+2026-10-21 00:20:48 E1-j8: all 20 blocks complete
+2026-10-21 00:20:49 E1-j8: analysis up to date
+2026-10-21 00:20:49 E1-j9: all 20 blocks complete
+2026-10-21 00:20:49 E1-j9: analysis up to date
+2026-10-21 00:20:50 E1-2c: all 20 blocks complete
+2026-10-21 00:20:50 E1-2c: analysis up to date
+2026-10-21 00:20:50 PHASE2_APPROVED E2_LAMBDA=RUN effective_stop_after=<none>
+2026-10-21 00:20:51 E2-perm: all 20 blocks complete
+2026-10-21 00:20:51 E2-perm: analysis up to date
+2026-10-21 00:20:51 E2-trans: all 20 blocks complete
+2026-10-21 00:20:51 E2-trans: analysis up to date
+2026-10-21 00:20:52 E2-onoff: all 20 blocks complete
+2026-10-21 00:20:52 E2-onoff: analysis up to date
+2026-10-21 00:20:53 E2-lambda: archived partial block 15 to /d/bench-work/out/official/E2-lambda/archive/rerun_1_20261021-002053
+2026-10-21 00:21:10 E2-lambda: start at block 15 (arms: leastloaded sed hybrid-linucb hybrid-linucb-l0 hybrid-linucb-l025 hybrid-linucb-l100 hybrid-linucb-d-g098 hybrid-linucb-d-g098-l0 hybrid-linucb-d-g098-l025 hybrid-linucb-d-g098-l100 | jobs=8 clients=1 session_builds=2 drift=permanent)
+2026-10-21 03:59:29 E2-lambda: runner exit 0
+2026-10-21 03:59:29 E2-lambda: all 20 blocks complete
+2026-10-21 03:59:51   analysis rc=0 -> /d/bench-work/out/official/E2-lambda/analysis
+2026-10-21 03:59:51 CAMPAIGN DONE
+Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)2026-10-21 03:59:52 power plan restored

@@ -1,0 +1,5 @@
+PHASE2_APPROVED present: E2_LAMBDA=RUN
+PHASE2_DECISION present: E2_LAMBDA=RUN
+STOP_REQUESTED present: 
+campaign.pid absent
+runner.pid absent

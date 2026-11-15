@@ -1,0 +1,18 @@
+You are a Codex WORKER (task C3 of Experiment 3). Repo D:\Đồ án tốt nghiệp\hybridgrid, branch feat/exp3 (do not switch, do not commit). Create ONLY: scripts/gen_synthetic_cpp.py and scripts/tests/test_gen_synthetic.py. Another worker is editing scripts/bench_exp.sh in parallel: do not touch it or any other file. You cannot run Python with numpy in your sandbox reliably; write stdlib-only Python 3.11 code (no numpy) and unittest tests; Claude will run them with D:\bench-work\bin\python3.
+
+Purpose: a deterministic synthetic C/C++ project with a controlled heavy-tailed compile-cost distribution, built with CMake + Ninja, for Experiment 3 (plan: docs/thesis/ke-hoach-thi-nghiem-3.md sections 1, 3.3, 5; analysis docs/thesis/phan-tich-leastloaded-va-kich-ban.md section 6). The schedulers under test see only the PREPROCESSED SIZE of each translation unit (TaskContext.SourceSizeBytes) and learn from compile time, so the generator must control both cost and how strongly preprocessed size predicts cost.
+
+CLI: gen_synthetic_cpp.py --out DIR --seed INT [--files 300] [--c-fraction 0.3] [--pareto-alpha 1.5] [--median-units 40] [--max-units 1500] [--hidden-cost-fraction 0.0] [--shuffle-order/--no-shuffle-order]
+- Each TU gets a cost in "work units" drawn from a Pareto(alpha) with the given median, capped at max-units; seeded RNG (random.Random(seed)), fully deterministic: same args -> byte-identical output on every platform (use "\n" line endings, sorted keys, no timestamps).
+- Visible cost: the TU contains `units` distinct generated functions/classes (C++: small templates with explicit instantiations and some arithmetic loops; C: plain functions with arithmetic) so that BOTH preprocessed size and compile time grow roughly linearly with units at -O2.
+- Hidden cost (--hidden-cost-fraction h in [0,1]): a fraction h of each TU's units is implemented as recursive template instantiation depth (C++ only; e.g. a constexpr recursive template chain of length proportional to units) which costs compile time but adds little preprocessed text. h=0 means size predicts cost well; larger h weakens the size-time correlation. C files ignore h.
+- A shared header (common.h / common.hpp) included by all TUs, small and constant.
+- --c-fraction of TUs are .c, the rest .cc; assignment seeded.
+- Order: the list order in CMakeLists.txt is seeded-shuffled (default) so heavy TUs are not all first or last; record the order.
+- CMakeLists.txt: cmake_minimum_required(VERSION 3.16), project(hg_synth C CXX), CMAKE_CXX_STANDARD 17, one static library with all TUs plus a tiny main executable that calls one function from a few TUs (so linking is exercised). No external dependencies.
+- manifest.json: seed, all parameters, generator version string, and per TU: file name, language, units, hidden_units, sha256 of the file content, position in the CMake list. Also a top-level sha256 over the sorted per-file hashes.
+- Print a one-line summary: files, C/C++ counts, median/p95/max units, top5%/median ratio.
+
+Tests (unittest, scripts/tests/test_gen_synthetic.py, stdlib only): determinism (two runs same seed -> identical files and manifest hash; different seed -> different), file counts and C/C++ split within +-1, Pareto tail (top 5% mean / median >= 5 for alpha 1.5, median 40), cap respected, hidden-cost 0 vs 0.5 changes only C++ files, generated sources contain no non-ASCII and end with newline, CMakeLists lists exactly the generated TUs. Do NOT invoke a compiler in tests.
+
+Final answer: files created, the size/cost design, and the commands Claude should run (unit tests, and an example generation command).

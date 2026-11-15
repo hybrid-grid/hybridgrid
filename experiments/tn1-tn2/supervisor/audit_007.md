@@ -1,0 +1,11 @@
+SEVERITY: OK
+
+- Integrity OK: E1-j6/E1-j7/E1-j8 each have `results.csv` 80 data rows = 4 arms x 20 blocks x 1 build x 1 client; E1-j9 has 60 rows = 15 complete blocks and is still in progress, with `campaign.log` line 18 showing only `E1-j9: start at block 1`.
+- Task logs OK: all completed/public cells checked have nonempty `tasks_*_round*.jsonl`, exactly 295 `task_completed` records per file, zero `success=false`, and continuous `dispatch_seq`; counts checked were E1-j6 80 files, E1-j7 80, E1-j8 80, E1-j9 60 completed files.
+- No failure/retry rule issue: `failures.csv` in E1-j6, E1-j7, E1-j8, E1-j9 contains only line 1 `arm,round,attempt,reason`; `campaign.log` has no runner abort/resume entries, so resumes used per scenario = 0, below limit 2.
+- Configuration OK: all scenario `meta.json` files have preregistered E1 arms, `CLIENTS=1`, `SESSION_BUILDS=1`, `DRIFT=none`, `BUILDER_CPUS=2.0`; `JOBS` are 6/7/8/9 for E1-j6/E1-j7/E1-j8/E1-j9 as expected.
+- Commit/environment OK: every `meta.json` has `git_commit=1b8339d8f2be1e3e707272e2eefab752e355a137`, matching `campaign.log` line 1 prefix `commit=1b8339d`; Docker capacity is constant at `docker_NCPU=72`, `docker_MemTotal=33592029184`. `nproc` varies 28/36 as expected harmless Git Bash process view.
+- Preflight OK: each scenario has `preflight_r1.txt` with `STRICT=1`, `EXPECT_COMMIT=1b8339d`, `OK commit matches EXPECT_COMMIT`, Docker reference host match, `OK no known noisy apps running`, and High performance power plan.
+- Measurement quality OK: builder saturation above 95% of 2.0 CPU quota stayed below the 5% warning threshold: E1-j6 16/2151 = 0.74%, E1-j7 6/2055 = 0.29%, E1-j8 20/2012 = 0.99%, E1-j9 10/1487 = 0.67%; coordinator saturation was 0 samples in all scenarios.
+- Makespan/order checks OK: no cell was >1.5x or <0.7x its scenario median; block medians were not monotone. Order was not systematically first/last: completed scenarios each have max first count 6/20 and max last count 8/20 in `order_log.csv`.
+- Process OK: `campaign.log` shows clean exits and analyses for E1-j6, E1-j7, E1-j8; E1-j9 is merely in progress. Harmless `Exception ignored ... stdout ... OSError: [Errno 22]` sampler-stop lines appear in runner logs, e.g. 8/80, 10/80, 12/80, and 5/60 cells, and are not treated as warnings.

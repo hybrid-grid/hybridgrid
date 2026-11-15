@@ -1,0 +1,88 @@
+{
+  "ARMS": "leastloaded sed hybrid-linucb hybrid-linucb-d-g098",
+  "REPS": "20",
+  "ROUND_START": "1",
+  "OUT_DIR": "D:/bench-work/out/official/E1-j6",
+  "JOBS": "6",
+  "CLIENTS": "1",
+  "BUILDER_CPUS": "2.0",
+  "SESSION_BUILDS": "1",
+  "CONFIGURE_FLAGS": "--disable-test-modules --disable-perf-trampoline",
+  "CPYTHON_VERSION": "v3.14.0",
+  "COOLDOWN": "8",
+  "SEED_BASE": "1000",
+  "ALPHA": "0.5",
+  "EPSILON": "0.1",
+  "WARM_START": "100",
+  "DRIFT": "none",
+  "DRIFT_AT": "120",
+  "DRIFT_TARGET": "worker-5",
+  "DRIFT_CPU": "1",
+  "DRIFT_DURATION": "30",
+  "DRIFT_ON": "10",
+  "DRIFT_OFF": "10",
+  "MIN_TASKS": "295",
+  "DRY_RUN": "0",
+  "EST_CELL_S": "60",
+  "git_commit": "1b8339d8f2be1e3e707272e2eefab752e355a137",
+  "git_dirty": false,
+  "image_ids": {
+    "coordinator": "sha256:9219065b01784686f93f49851d950e28f4bd90b84261129e5afd7636ed3af50b",
+    "worker-1": "sha256:61d8372df27fcd3c6ec490fecad296ddb755d52a3672ae03d1bcbf77cc03c012",
+    "worker-2": "sha256:47c25e38dab14043b68b6ed06fa5b1258183ceb59ca434066bfdb073f091d6eb",
+    "worker-3": "sha256:9ca14dc79e0850f89958652f4d51ae62b7f25040a2fdae06c01212e3f19a7d16",
+    "worker-4": "sha256:fd4b5eb4b14f7ca7a863a64864d31f37e66d699913d6bed98d5a0e278f465ad3",
+    "worker-5": "sha256:10ea14d5e4f03bc9fb3e1420cea7fabca25aca753be6ca27b1b5370112306942",
+    "builder": "sha256:8b05ef1e675285731e21a8880f5ccb17980a8fb519f60797f02dfa780f622847"
+  },
+  "host": {
+    "nproc": 28,
+    "docker_NCPU": 72,
+    "docker_MemTotal": 33592029184
+  },
+  "resolved_arms": [
+    {
+      "label": "leastloaded",
+      "flags": "--scheduler=leastloaded --alpha=0.5 --epsilon=0.1 --warm-start=100 --load-penalty=0.5 --task-log=/tmp/tasks.jsonl"
+    },
+    {
+      "label": "sed",
+      "flags": "--scheduler=sed --alpha=0.5 --epsilon=0.1 --warm-start=100 --load-penalty=0.5 --task-log=/tmp/tasks.jsonl"
+    },
+    {
+      "label": "hybrid-linucb",
+      "flags": "--scheduler=hybrid-linucb --alpha=0.5 --epsilon=0.1 --warm-start=100 --load-penalty=0.5 --task-log=/tmp/tasks.jsonl"
+    },
+    {
+      "label": "hybrid-linucb-d-g098",
+      "flags": "--scheduler=hybrid-linucb-d --alpha=0.5 --epsilon=0.1 --warm-start=100 --load-penalty=0.5 --discount=0.98 --discount-mode=global --task-log=/tmp/tasks.jsonl"
+    }
+  ],
+  "workers": [
+    {
+      "worker": "worker-1",
+      "cpu_max": "50000 100000",
+      "nproc": "72"
+    },
+    {
+      "worker": "worker-2",
+      "cpu_max": "60000 100000",
+      "nproc": "72"
+    },
+    {
+      "worker": "worker-3",
+      "cpu_max": "80000 100000",
+      "nproc": "72"
+    },
+    {
+      "worker": "worker-4",
+      "cpu_max": "100000 100000",
+      "nproc": "72"
+    },
+    {
+      "worker": "worker-5",
+      "cpu_max": "110000 100000",
+      "nproc": "72"
+    }
+  ]
+}

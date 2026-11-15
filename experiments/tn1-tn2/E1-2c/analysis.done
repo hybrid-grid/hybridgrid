@@ -1,0 +1,21 @@
+{
+  "analyzer_sha256": "b0a18daae2afb7667a03d7f563be4bb19e003c3ba7ae19054871e7d485ed945c",
+  "argv": {
+    "analysis": "--strict",
+    "analysis_sed_vs_ll": "--strict --treatments sed --baselines leastloaded --out analysis_sed_vs_ll"
+  },
+  "families": [
+    "analysis",
+    "analysis_sed_vs_ll"
+  ],
+  "files": {
+    "analysis.log": "c4005dee28d168afca30461c59664cadc02cfbb5960d397e386195051b1c28fc",
+    "analysis/cells.csv": "f8f9cb5159aab61fc2a6a63bdfd59ba8b8fd02c9d6132bb2c10cc2e09579f8c4",
+    "analysis/pairs.csv": "a07e5c1eb2fff371d541e9653b48cff6cfa9881ab41cda891881aeb6cd727802",
+    "analysis/summary.md": "cd1264d7f274bb710cc0bbe62055513d1ccb1708e7fcfa8ed4b985b33cade4f9",
+    "analysis_sed_vs_ll.log": "792b5c071f364aaad053955a0f0abfd3bd564728d06d8ab76185f140c2c995db",
+    "analysis_sed_vs_ll/cells.csv": "f8f9cb5159aab61fc2a6a63bdfd59ba8b8fd02c9d6132bb2c10cc2e09579f8c4",
+    "analysis_sed_vs_ll/pairs.csv": "1f7ea587a320c75b1452ed83b1edbec927a2c186025473d58d4feac529de6064",
+    "analysis_sed_vs_ll/summary.md": "170be196db5fa635c644e1890b0f470c684429ceba883dba5c83c2b8bf23c985"
+  }
+}

@@ -1,0 +1,25 @@
+You are the Codex WORKER, round 2. Same rules as round 1 (D:\bench-work\review\worker_phase2_prompt.md): edit ONLY D:\bench-work\campaign.sh, supervisor.sh, stop_campaign.sh, analysis_marker.sh (only if needed), tests\test_campaign.sh, tests\test_supervisor.sh, CHANGELOG-phase2.md. Never touch D:\bench-work\hybridgrid, D:\bench-work\out (a smoke test is running there), backup-pre-phase2, venv, bin. Never run docker, the runner, codex, or the real campaign. Your sandbox cannot run Git Bash; write the code and tests carefully, Claude will run them. Note: Claude fixed tests/test_campaign.sh line 31 (fake analyzer writes to "$1/analysis" by default, like the real analyzer); keep that.
+
+Reviewer findings are in D:\bench-work\review\code_review_phase2.md. Implement exactly these changes (Claude's decisions):
+
+1. campaign.sh, env pinning: right after sourcing env.sh, `unset` every runner input that campaign does not set itself: CONFIGURE_FLAGS CPYTHON_VERSION COOLDOWN SEED_BASE ALPHA EPSILON WARM_START DRIFT_AT DRIFT_TARGET DRIFT_CPU DRIFT_DURATION DRIFT_ON DRIFT_OFF MIN_TASKS DRY_RUN EST_CELL_S ARMS REPS ROUND_START JOBS CLIENTS SESSION_BUILDS DRIFT OUT_DIR, so the runner always uses its built-in defaults (the registered values). Log one line listing that they were reset.
+
+2. campaign.sh, interruptions (NOT counted in the rerun cap; hypotheses section 3 caps reruns caused by failed cells only): before launching the runner write $out/.active_attempt (block, ts, campaign pid) atomically; remove it after the runner exit is observed (normal exit, abort, or manual stop). At the top of each scenario loop, if $out/.active_attempt exists (left by a crash/reboot/kill), append a row to $out/interruptions.csv (header ts,scenario,block,detected_at,detail) with detail "abandoned attempt (no runner exit observed)", log it, mark the block for archiving (.pending_archive) and remove the marker. Manual stops: also append a row to interruptions.csv with detail "manual stop".
+
+3. campaign.sh, lambda decision immutable: first successful phase_decision writes $CAMPAIGN/PHASE2_DECISION with no-clobber (set -C) containing `E2_LAMBDA=<value>`; every later phase_decision compares the parsed value with that file and stops on mismatch ("decision changed after it was recorded").
+
+4. campaign.sh, damaged-directory guard: in the scenario loop, if next_round returns 1 because results.csv or meta.json is missing, but the directory contains any tasks_*_round<k>.jsonl with k >= 2 or a non-empty archive/, stop for inspection instead of starting fresh.
+
+5. campaign.sh archive: also copy preflight_r<k>.txt (the current block's report) into the archive dir before the next preflight overwrites it.
+
+6. campaign.sh analysis marker: pass a normalized description of each family's analyzer arguments to analysis_marker.sh write/check (e.g. extra args `--argv analysis="--strict"` style or a single string per family) so the marker records them and check fails if they change. Keep it simple and test it.
+
+7. stop_campaign.sh: (a) liveness+identity check: treat a PID as ours only if `kill -0` succeeds AND /proc/<pid>/cmdline (MSYS) contains campaign.sh (for campaign.pid) or bench_exp.sh (for runner.pid); otherwise treat it as stale, remove the stale pid file and never signal it; (b) the wait loop ends as soon as the campaign process is gone (not only when the file disappears); (c) on timeout, kill -9 the runner, then every MSYS process whose /proc/*/cmdline contains bench_exp.sh (descendant subshells), then the campaign; (d) `docker compose -p hgexp -f <file> down --remove-orphans`; verify with `docker ps -aq --filter label=com.docker.compose.project=hgexp` (all states). Keep DOCKER override for tests; allow tests to override the /proc root via an env var (e.g. PROC_ROOT, default /proc).
+
+8. supervisor.sh: (a) start numbering after the highest existing audit_NNN.md in $SUP (no overwrite on restart); (b) wrap the codex call in `timeout 2700`; (c) if campaign.log shrinks below start_lines (truncation), reset start_lines to 0 and log it.
+
+9. Tests: isolate the manual-stop archive case so it does not reuse files from the previous case; add cases: env pinning (a stray SEED_BASE/DRY_RUN in the environment is not seen by the fake runner); abandoned attempt (fake .active_attempt + partial files -> interruptions.csv row, archive, no reruns.csv row); lambda immutability (SKIP recorded, then file changed to RUN -> refused); damaged-directory guard; stop_campaign stale PID (pid file pointing to a dead or foreign PID -> not signalled, returns quickly < 10 s); preflight archived; marker argv change -> re-analysis; supervisor numbering continues after existing audit_005.md and codex timeout wrapper present.
+
+10. CHANGELOG-phase2.md: add a "round 2" section with each change and the reviewer finding it addresses, and recompute sha256 of every changed file at the end (state that hashes are as of your final write).
+
+Final answer: files changed, a short description per change, and anything you were unsure about.

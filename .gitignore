@@ -101,3 +101,4 @@ scratch/
 
 # omp session state
 .omo/
+test/stress/docker-compose-exp.yml

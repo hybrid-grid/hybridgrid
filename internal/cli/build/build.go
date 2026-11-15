@@ -16,6 +16,7 @@ import (
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cache"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/fallback"
+	"github.com/h3nr1-d14z/hybridgrid/internal/cli/taskid"
 	"github.com/h3nr1-d14z/hybridgrid/internal/compiler"
 	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/client"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
@@ -167,6 +168,11 @@ func (s *Service) Build(ctx context.Context, req *Request) (*Result, error) {
 	cacheKey := s.generateCacheKeyRaw(req, rawSource)
 	if s.cache != nil {
 		if cached, ok := s.cache.GetBytes(cacheKey); ok {
+			if req.Args.GeneratesDependencies() {
+				if _, err := s.preprocessor.Preprocess(ctx, req.Args, req.SourceFile); err != nil {
+					return nil, fmt.Errorf("failed to generate dependencies for cached object: %w", err)
+				}
+			}
 			result.ObjectFile = cached
 			result.CacheHit = true
 			result.ExitCode = 0
@@ -322,13 +328,14 @@ func (s *Service) buildRemoteArgs(args *compiler.ParsedArgs) []string {
 	// Add compile-only flag
 	remoteArgs = append(remoteArgs, "-c")
 
-	// Add optimization and other flags (but not -I, -D since source is preprocessed)
-	for _, flag := range args.Flags {
-		// Skip flags that were only needed for preprocessing
-		if strings.HasPrefix(flag, "-I") || strings.HasPrefix(flag, "-D") {
-			continue
-		}
-		remoteArgs = append(remoteArgs, flag)
+	// Keep code generation flags; include paths and dependency output belong to
+	// the client's preprocessing step.
+	remoteArgs = append(remoteArgs, args.CompileFlags()...)
+	switch args.Language {
+	case "c":
+		remoteArgs = append(remoteArgs, "-x", "cpp-output")
+	case "c++":
+		remoteArgs = append(remoteArgs, "-x", "c++-cpp-output")
 	}
 
 	// Add standard if specified
@@ -391,11 +398,20 @@ func getClientArch() pb.Architecture {
 // compileRemotePreprocessed sends preprocessed source to a remote worker.
 // Preprocessed source is self-contained (all #includes resolved), so any worker
 // can compile it, even on a different OS via Docker.
+// buildSessionID prefers the caller-provided BuildID and falls back to the
+// HG_BUILD_ID environment (set by hgbuild and the compiler wrappers).
+func (s *Service) buildSessionID(req *Request) string {
+	if req.BuildID != "" {
+		return req.BuildID
+	}
+	return taskid.BuildSessionID()
+}
+
 // newPreprocessedRequest builds the wire request for a preprocessed compile.
 func (s *Service) newPreprocessedRequest(req *Request, preprocessed []byte) *pb.CompileRequest {
 	return &pb.CompileRequest{
 		TaskId:             req.TaskID,
-		BuildId:            req.BuildID,
+		BuildId:            s.buildSessionID(req),
 		Compiler:           req.Args.Compiler,
 		CompilerArgs:       s.buildRemoteArgs(req.Args),
 		PreprocessedSource: preprocessed,
@@ -463,7 +479,7 @@ func (s *Service) compileRemotePreprocessed(ctx context.Context, req *Request, p
 func (s *Service) newRawRequest(req *Request, rawSource []byte, includeFiles map[string][]byte) *pb.CompileRequest {
 	return &pb.CompileRequest{
 		TaskId:         req.TaskID,
-		BuildId:        req.BuildID,
+		BuildId:        s.buildSessionID(req),
 		Compiler:       req.Args.Compiler,
 		CompilerArgs:   s.buildRemoteArgsForRaw(req.Args),
 		RawSource:      rawSource,
@@ -538,7 +554,10 @@ func (s *Service) buildRemoteArgsForRaw(args *compiler.ParsedArgs) []string {
 	remoteArgs = append(remoteArgs, "-c")
 
 	// Keep all flags including -I and -D (needed for raw source compilation)
-	remoteArgs = append(remoteArgs, args.Flags...)
+	remoteArgs = append(remoteArgs, args.RawCompileFlags()...)
+	if args.Language != "" {
+		remoteArgs = append(remoteArgs, "-x", args.Language)
+	}
 
 	// Add standard if specified
 	if args.Standard != "" {
@@ -627,12 +646,15 @@ func CollectIncludeFiles(args *compiler.ParsedArgs) (map[string][]byte, error) {
 // its raw source. Exported so the CLI compile loop shares the Service's
 // key space instead of inventing a second hashing convention.
 func CacheKeyRaw(args *compiler.ParsedArgs, arch pb.Architecture, rawSource []byte) string {
+	// CompilationKey sorts Flags and Defines. Hash the ordered preprocessing
+	// stream separately so -D FOO -U FOO cannot reuse -U FOO -D FOO.
+	preprocessHash := cache.HashStrings(args.PreprocessFlags...)
 	key := &cache.CompilationKey{
 		Compiler:   args.Compiler,
 		TargetArch: arch.String(),
 		Flags:      args.Flags,
 		Defines:    args.Defines,
-		SourceHash: cache.HashBytes(rawSource),
+		SourceHash: cache.HashStrings(cache.HashBytes(rawSource), preprocessHash),
 	}
 	return key.Build()
 }

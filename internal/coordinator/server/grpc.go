@@ -9,7 +9,7 @@ import (
 	"io"
 	"math"
 	"net"
-	"strconv"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,6 +36,19 @@ import (
 )
 
 const maxGRPCMessageSize = 512 * 1024 * 1024
+
+// rewardNormalizationMs scales the learners' reward −log1p(ms)/log1p(scale).
+// It equals the historical 120 s RequestTimeout used in Experiments 1-2 and is
+// deliberately independent of the configurable timeout.
+const rewardNormalizationMs = 120000.0
+
+// failureReward scores a failed compile as if it had run for the whole request
+// timeout (at least 120 s), so no successful compile can score worse than a
+// failure. With the 120 s default it is exactly -1, as in Experiments 1-2.
+func failureReward(requestTimeout time.Duration) float64 {
+	ms := math.Max(rewardNormalizationMs, float64(requestTimeout.Milliseconds()))
+	return -math.Log1p(ms) / math.Log1p(rewardNormalizationMs)
+}
 
 // dispatchQueueSize bounds how many pending selection requests may queue
 // up behind the single dispatchLoop goroutine before Compile() callers
@@ -113,6 +126,9 @@ type dispatchResult struct {
 	worker           *registry.WorkerInfo
 	info             scheduler.DispatchInfo
 	activeAtDispatch int32
+	seq              int64
+	dispatchTS       time.Time
+	candidates       []DispatchCandidate
 	err              error
 }
 
@@ -122,26 +138,82 @@ type dispatchResult struct {
 // in Stop(). See dispatchRequest's doc comment for why this exists.
 func (s *Server) dispatchLoop() {
 	for req := range s.dispatchCh {
+		var candidates []DispatchCandidate
 		var (
-			worker           *registry.WorkerInfo
-			info             scheduler.DispatchInfo
-			activeAtDispatch int32
-			err              error
+			worker *registry.WorkerInfo
+			info   scheduler.DispatchInfo
+			err    error
 		)
 		if req.filter != nil {
 			worker, err = s.selectByFilter(req.filter, req.label)
 		} else {
+			candidates = s.snapshotCandidates(req.buildType, req.arch, req.clientOS)
 			worker, info, err = scheduler.SelectWith(s.scheduler, req.buildType, req.arch, req.clientOS, req.ctx)
 		}
+		result := dispatchResult{worker: worker, info: info, candidates: candidates, err: err}
 		if err == nil {
 			// Read-then-book, both on this single goroutine: no other
 			// goroutine can interleave a selection between this read
 			// and the IncrementTasks call below, because dispatchLoop
 			// is the only caller of either.
-			activeAtDispatch = worker.ActiveTasks
-			s.registry.IncrementTasks(worker.ID)
+			result.activeAtDispatch = worker.ActiveTasks
+			if err = s.registry.IncrementTasks(worker.ID); err != nil {
+				result.err = err
+			} else {
+				result.seq = atomic.AddInt64(&s.dispatchCount, 1)
+				result.dispatchTS = time.Now().UTC()
+				metrics.Default().DispatchDecisions.Inc()
+			}
 		}
-		req.result <- dispatchResult{worker: worker, info: info, activeAtDispatch: activeAtDispatch, err: err}
+		req.result <- result
+	}
+}
+
+// snapshotCandidates includes unhealthy capability matches so their health is
+// visible, and applies the scheduler's same-OS-or-Docker predicate.
+func (s *Server) snapshotCandidates(buildType pb.BuildType, arch pb.Architecture, clientOS string) []DispatchCandidate {
+	workers := s.registry.List()
+	result := make([]DispatchCandidate, 0, len(workers))
+	for _, worker := range workers {
+		if !matchesDispatchCapability(worker.Capabilities, buildType, arch) {
+			continue
+		}
+		if clientOS != "" && worker.Capabilities.Os != clientOS && !worker.Capabilities.DockerAvailable {
+			continue
+		}
+		result = append(result, DispatchCandidate{
+			Address: worker.Address, Active: worker.ActiveTasks,
+			MaxParallel: worker.MaxParallel, CPUMillis: worker.Capabilities.CpuMillis,
+			Healthy: worker.IsHealthy(s.config.HeartbeatTTL),
+		})
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Address < result[j].Address })
+	return result
+}
+
+// matchesDispatchCapability mirrors registry.matchesCapability for the
+// snapshot. The registry's ListByCapability omits unhealthy workers.
+func matchesDispatchCapability(caps *pb.WorkerCapabilities, buildType pb.BuildType, arch pb.Architecture) bool {
+	if caps == nil {
+		return false
+	}
+	if arch != pb.Architecture_ARCH_UNSPECIFIED && caps.NativeArch != arch &&
+		!caps.DockerAvailable && (caps.Cpp == nil || !caps.Cpp.CrossCompile) {
+		return false
+	}
+	switch buildType {
+	case pb.BuildType_BUILD_TYPE_CPP:
+		return caps.Cpp != nil && len(caps.Cpp.Compilers) > 0
+	case pb.BuildType_BUILD_TYPE_GO:
+		return caps.Go != nil
+	case pb.BuildType_BUILD_TYPE_RUST:
+		return caps.Rust != nil
+	case pb.BuildType_BUILD_TYPE_NODEJS:
+		return caps.Nodejs != nil
+	case pb.BuildType_BUILD_TYPE_FLUTTER:
+		return caps.Flutter != nil
+	default:
+		return true
 	}
 }
 
@@ -180,6 +252,11 @@ func (s *Server) selectByFilter(filter func(*registry.WorkerInfo) bool, label st
 // see Stop()'s comment for why this can't just rely on the gRPC
 // server's GracefulStop() to provide that guarantee.
 func (s *Server) dispatch(buildType pb.BuildType, arch pb.Architecture, clientOS string, ctx scheduler.TaskContext) (*registry.WorkerInfo, scheduler.DispatchInfo, int32, error) {
+	res := s.dispatchWithMetadata(buildType, arch, clientOS, ctx)
+	return res.worker, res.info, res.activeAtDispatch, res.err
+}
+
+func (s *Server) dispatchWithMetadata(buildType pb.BuildType, arch pb.Architecture, clientOS string, ctx scheduler.TaskContext) dispatchResult {
 	s.dispatchWG.Add(1)
 	defer s.dispatchWG.Done()
 
@@ -191,8 +268,15 @@ func (s *Server) dispatch(buildType pb.BuildType, arch pb.Architecture, clientOS
 		result:    make(chan dispatchResult, 1),
 	}
 	s.dispatchCh <- &req
-	res := <-req.result
-	return res.worker, res.info, res.activeAtDispatch, res.err
+	return <-req.result
+}
+
+// Dispatches returns the number of booked C/C++ dispatch attempts.
+func (s *Server) Dispatches() int64 { return atomic.LoadInt64(&s.dispatchCount) }
+
+// LogInjectedEvent writes an experiment event to the coordinator task log.
+func (s *Server) LogInjectedEvent(kind, target string, dispatchCount int64, detail string) error {
+	return s.taskLogger.LogInjectedEvent(kind, target, dispatchCount, detail)
 }
 
 // signalDispatchCapacity wakes every Compile() call waiting in the
@@ -403,9 +487,11 @@ type Config struct {
 	Tracing         tracing.Config
 	EnableRequestID bool
 	// SchedulerType selects the scheduler implementation.
-	// Valid: "leastloaded" (default), "simple", "p2c", "epsilon-greedy",
-	// "linucb", "hybrid-linucb", "heft".
+	// Valid: "leastloaded" (default), "sed", "p90", "sed-p90", "ewma", "simple", "p2c",
+	// "epsilon-greedy", "linucb", "hybrid-linucb", "hybrid-linucb-d", "heft", "icecc-fastest".
 	SchedulerType string
+	// SizeThreshold is the TaskContext.SourceSizeBytes cutoff in bytes for p90 arms.
+	SizeThreshold int
 	// EpsilonValue is the exploration rate for epsilon-greedy. Ignored
 	// for other schedulers. Default 0.1 (Sutton & Barto §2.3 baseline).
 	EpsilonValue float64
@@ -413,13 +499,25 @@ type Config struct {
 	// Theoretical form is 1 + sqrt(ln(2/δ)/2); we default to 1.0 and
 	// expect empirical tuning. Ignored for non-LinUCB schedulers.
 	AlphaValue float64
-	// WarmStartTasks is the hybrid-linucb warm-start window: that many
-	// initial dispatches are routed least-loaded while the bandit learns
-	// passively. 0 disables warm-start. Ignored by other schedulers.
+	// FeatureSetValue selects full or compact LinUCB features.
+	FeatureSetValue string
+	// RewardCenterValue selects the residual reward baseline for hybrid LinUCB.
+	RewardCenterValue string
+	// DiagCandidates records the score decomposition for each LinUCB candidate.
+	DiagCandidates bool
+	// EwmaAlphaValue is the EWMA scheduler's smoothing factor.
+	EwmaAlphaValue float64
+	// WarmStartTasks is the hybrid-linucb and ewma warm-start window: that
+	// many initial dispatches are routed least-loaded while learning from
+	// outcomes. 0 disables warm-start. Ignored by other schedulers.
 	WarmStartTasks int
 	// LoadPenaltyValue is the hybrid-linucb λ in p = mean + bonus −
 	// λ·loadRatio. 0 disables the penalty. Ignored by other schedulers.
 	LoadPenaltyValue float64
+	// DiscountValue is the HG-LinUCB-D discount gamma. Zero uses 0.98 in the factory.
+	DiscountValue float64
+	// DiscountModeValue selects the global or per-arm discount clock.
+	DiscountModeValue string
 	// TaskLogPath is the path to the JSON Lines per-task log file.
 	// Empty or "stdout" routes records to standard output.
 	TaskLogPath string
@@ -462,6 +560,12 @@ func DefaultConfig() Config {
 		WarmStartTasks:   100,
 		LoadPenaltyValue: 0.5,
 
+		DiscountValue:     0.98,
+		DiscountModeValue: "global",
+		FeatureSetValue:   "full",
+		RewardCenterValue: "none",
+		EwmaAlphaValue:    0.2,
+
 		DispatchQueueTimeout: 30 * time.Second,
 	}
 }
@@ -492,6 +596,9 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 			Registry:       reg,
 			CircuitChecker: cm,
 			Alpha:          cfg.AlphaValue,
+			FeatureSet:     cfg.FeatureSetValue,
+			RewardCenter:   cfg.RewardCenterValue,
+			DiagCandidates: cfg.DiagCandidates,
 		})
 	case "hybrid-linucb":
 		// Pass-through without zero-defaulting so --warm-start=0 or
@@ -501,14 +608,57 @@ func newScheduler(cfg Config, reg registry.Registry, cm *resilience.CircuitManag
 			Registry:       reg,
 			CircuitChecker: cm,
 			Alpha:          cfg.AlphaValue,
+			FeatureSet:     cfg.FeatureSetValue,
+			RewardCenter:   cfg.RewardCenterValue,
+			DiagCandidates: cfg.DiagCandidates,
 			WarmStartTasks: cfg.WarmStartTasks,
 			LoadPenalty:    cfg.LoadPenaltyValue,
+		})
+	case "hybrid-linucb-d":
+		discount := cfg.DiscountValue
+		if discount == 0 {
+			discount = 0.98
+		}
+		mode := cfg.DiscountModeValue
+		if mode == "" {
+			mode = string(scheduler.DiscountModeGlobal)
+		}
+		return scheduler.NewLinUCBScheduler(scheduler.LinUCBConfig{
+			Registry:       reg,
+			CircuitChecker: cm,
+			Alpha:          cfg.AlphaValue,
+			FeatureSet:     cfg.FeatureSetValue,
+			RewardCenter:   cfg.RewardCenterValue,
+			DiagCandidates: cfg.DiagCandidates,
+			WarmStartTasks: cfg.WarmStartTasks,
+			LoadPenalty:    cfg.LoadPenaltyValue,
+			Discount:       discount,
+			DiscountMode:   scheduler.DiscountMode(mode),
 		})
 	case "heft":
 		return scheduler.NewHEFTScheduler(scheduler.HEFTConfig{
 			Registry:       reg,
 			CircuitChecker: cm,
 		})
+	case "sed":
+		return scheduler.NewSEDScheduler(scheduler.SEDConfig{
+			Registry:       reg,
+			CircuitChecker: cm,
+		})
+	case "ewma":
+		return scheduler.NewEWMAScheduler(scheduler.EWMAConfig{
+			Registry:       reg,
+			CircuitChecker: cm,
+			WarmStartTasks: cfg.WarmStartTasks,
+			Alpha:          cfg.EwmaAlphaValue,
+		})
+	case "p90":
+		return scheduler.NewP90Scheduler(reg, cfg.SizeThreshold)
+	case "sed-p90":
+		return scheduler.NewSEDP90Scheduler(scheduler.SEDConfig{
+			Registry:       reg,
+			CircuitChecker: cm,
+		}, cfg.SizeThreshold)
 	case "icecc-fastest":
 		return scheduler.NewIceccFastestScheduler(scheduler.IceccConfig{
 			Registry:       reg,
@@ -591,6 +741,7 @@ type Server struct {
 	dispatchSignalMu sync.Mutex
 	dispatchSignal   chan struct{}
 	queuedCompiles   int64
+	dispatchCount    int64
 
 	activeTasks         int64
 	queuedTasks         int64
@@ -638,23 +789,9 @@ func New(cfg Config) *Server {
 	reg := registry.NewInMemoryRegistry(cfg.HeartbeatTTL)
 	circuitMgr := resilience.NewCircuitManager(resilience.DefaultCircuitConfig())
 	sched := newScheduler(cfg, reg, circuitMgr)
-	// Scheduler params for provenance display. Main's scheduler set is
-	// narrower than exp3's, so derive from cfg instead of a Params()
-	// interface; the exp3 branch carries the richer format
-	// (discount/features/reward_center).
-	var schedulerParams string
-	switch cfg.SchedulerType {
-	case "linucb", "hybrid-linucb":
-		schedulerParams = fmt.Sprintf("alpha=%s warm_start=%d load_penalty=%s",
-			strconv.FormatFloat(cfg.AlphaValue, 'g', -1, 64),
-			cfg.WarmStartTasks,
-			strconv.FormatFloat(cfg.LoadPenaltyValue, 'g', -1, 64))
-	case "epsilon-greedy":
-		eps := cfg.EpsilonValue
-		if eps == 0 {
-			eps = 0.1 // Sutton & Barto §2.3 default, same as newScheduler
-		}
-		schedulerParams = "epsilon=" + strconv.FormatFloat(eps, 'g', -1, 64)
+	schedulerParams := ""
+	if withParams, ok := sched.(interface{ Params() string }); ok {
+		schedulerParams = withParams.Params()
 	}
 	log.Info().Str("scheduler", cfg.SchedulerType).Msg("Scheduler initialized")
 
@@ -1010,6 +1147,9 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 		queueTime        time.Duration
 		taskStartTime    time.Time
 		activeAtDispatch int32
+		dispatchSeq      int64
+		dispatchTS       time.Time
+		candidates       []DispatchCandidate
 	)
 	atomic.AddInt64(&s.activeTasks, 1)
 	defer atomic.AddInt64(&s.activeTasks, -1)
@@ -1021,7 +1161,8 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 		queueDeadline time.Time
 	)
 	for attempt := 1; ; attempt++ {
-		worker, dispatchInfo, activeAtDispatch, err = s.dispatch(pb.BuildType_BUILD_TYPE_CPP, req.TargetArch, clientOSFilter, taskCtx)
+		selection := s.dispatchWithMetadata(pb.BuildType_BUILD_TYPE_CPP, req.TargetArch, clientOSFilter, taskCtx)
+		worker, dispatchInfo, activeAtDispatch, err = selection.worker, selection.info, selection.activeAtDispatch, selection.err
 		if err != nil {
 			// dispatch() itself found no eligible worker — every worker is
 			// genuinely at MaxParallel right now (this is the schedulers'
@@ -1107,6 +1248,7 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 			}, nil
 		}
 		tracing.AddEvent(ctx, "scheduler.select.done")
+		dispatchSeq, dispatchTS, candidates = selection.seq, selection.dispatchTS, selection.candidates
 		span.SetAttributes(tracing.AttrWorkerID.String(worker.ID))
 
 		// activeAtDispatch was captured inside dispatch(), before
@@ -1236,16 +1378,15 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	// see docs/thesis/theory-notes.md §4.3 for the empirical-choice
 	// rationale (this is NOT the Decima reward function).
 	if learner, ok := s.scheduler.(scheduler.LearningScheduler); ok {
-		timeoutMs := float64(s.config.RequestTimeout.Milliseconds())
-		if timeoutMs <= 0 {
-			timeoutMs = 120000 // 2-minute fallback
-		}
-		denom := math.Log1p(timeoutMs)
+		// The reward scale is fixed at the 2-minute default instead of
+		// following RequestTimeout: raising the timeout (e.g. for long
+		// C++ compiles) must not silently change what the learner sees.
+		denom := math.Log1p(rewardNormalizationMs)
 		var reward float64
 		if success && resp != nil {
 			reward = -math.Log1p(float64(resp.CompilationTimeMs)) / denom
 		} else {
-			reward = -1.0
+			reward = failureReward(s.config.RequestTimeout)
 		}
 		learner.RecordOutcome(worker.ID, reward, success, taskCtx)
 	}
@@ -1279,10 +1420,18 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 		s.taskLogger.Log(&TaskLogRecord{
 			TS:                          time.Now().UTC(),
 			Event:                       "task_completed",
+			DispatchSeq:                 dispatchSeq,
+			DispatchTS:                  dispatchTS,
+			ReceivedTS:                  start.UTC(),
+			WorkerAddress:               worker.Address,
+			Candidates:                  candidates,
+			LinUCBCandidates:            dispatchInfo.Candidates,
+			RewardOffset:                dispatchInfo.RewardOffset,
 			TaskID:                      req.TaskId,
 			BuildType:                   "cpp",
 			BuildID:                     buildID,
 			Scheduler:                   s.config.SchedulerType,
+			SchedulerParams:             s.schedulerParams,
 			WorkerID:                    worker.ID,
 			WorkerArch:                  workerNativeArch,
 			WorkerNativeArch:            workerNativeArch,

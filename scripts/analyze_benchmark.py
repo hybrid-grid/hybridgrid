@@ -40,7 +40,7 @@ except ImportError:
     HAVE_MPL = False
 
 HYBRID = "hybrid-linucb"
-BASELINES = ["leastloaded", "p2c", "linucb"]
+BASELINES = ["leastloaded", "sed", "p2c", "linucb"]
 ALPHA_LEVEL = 0.05
 WARMUP_TASKS = 150
 ROLLING_WINDOW = 20
@@ -123,6 +123,8 @@ def load_task_logs(out_dir):
         except ValueError as e:
             print(f"[warn] unreadable {path}: {e}")
             continue
+        if "event" in df.columns:
+            df = df[df["event"].isna() | df["event"].eq("task_completed")]
         if df.empty or "compile_time_ms" not in df.columns:
             continue
         if "ts" in df.columns:

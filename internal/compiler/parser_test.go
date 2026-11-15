@@ -162,3 +162,206 @@ func TestToArgs(t *testing.T) {
 		t.Errorf("Reconstructed args missing elements: %v", reconstructed)
 	}
 }
+
+func TestParse_DriverOperands(t *testing.T) {
+	cmake := []string{"/usr/bin/c++", "-DFOO", "-I/src/x", "-isystem", "/usr/include/y", "-O2", "-std=c++17", "-MD", "-MT", "absl/base/CMakeFiles/base.dir/internal/cycleclock.cc.o", "-MF", "absl/base/CMakeFiles/base.dir/internal/cycleclock.cc.o.d", "-o", "absl/base/CMakeFiles/base.dir/internal/cycleclock.cc.o", "-c", "/src/absl/base/internal/cycleclock.cc"}
+	tests := []struct {
+		name          string
+		args          []string
+		inputs        []string
+		flags         []string
+		depFlags      []string
+		distributable bool
+	}{
+		{
+			name: "cmake ninja", args: cmake,
+			inputs:        []string{"/src/absl/base/internal/cycleclock.cc"},
+			flags:         []string{"-isystem", "/usr/include/y", "-O2", "-std=c++17", "-c"},
+			depFlags:      []string{"-MD", "-MT", "absl/base/CMakeFiles/base.dir/internal/cycleclock.cc.o", "-MF", "absl/base/CMakeFiles/base.dir/internal/cycleclock.cc.o.d"},
+			distributable: true,
+		},
+		{
+			name: "forced includes", args: []string{"gcc", "-c", "-include", "config.h", "-imacros", "macros.h", "a.c"},
+			inputs: []string{"a.c"}, flags: []string{"-c", "-include", "config.h", "-imacros", "macros.h"}, distributable: true,
+		},
+		{
+			name: "separate dependencies", args: []string{"gcc", "-c", "-MMD", "-MP", "-MF", "x.d", "x.c"},
+			inputs: []string{"x.c"}, flags: []string{"-c"}, depFlags: []string{"-MMD", "-MP", "-MF", "x.d"}, distributable: true,
+		},
+		{
+			name: "joined dependencies and include", args: []string{"gcc", "-c", "-MFx.d", "-isystem/dir", "x.c"},
+			inputs: []string{"x.c"}, flags: []string{"-c", "-isystem/dir"}, depFlags: []string{"-MFx.d"}, distributable: true,
+		},
+		{
+			name: "cpython", args: []string{"gcc", "-c", "-o", "build/python.o", "-I", "Include", "-DPy_BUILD_CORE", "-std=c11", "-O3", "-march=x86-64", "-x", "c", "Python/python.c"},
+			inputs: []string{"Python/python.c"}, flags: []string{"-c", "-std=c11", "-O3", "-march=x86-64"}, distributable: true,
+		},
+		{
+			name: "link", args: []string{"g++", "one.o", "two.o", "-o", "app"},
+			inputs: []string{"one.o", "two.o"}, flags: []string{}, distributable: false,
+		},
+		{
+			name: "explicit header language", args: []string{"g++", "-c", "-x", "c++", "file.h", "-o", "file.o"},
+			inputs: []string{"file.h"}, flags: []string{"-c"}, distributable: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Parse(tt.args)
+			if !reflect.DeepEqual(got.InputFiles, tt.inputs) {
+				t.Errorf("InputFiles = %v, want %v", got.InputFiles, tt.inputs)
+			}
+			if !reflect.DeepEqual(got.Flags, tt.flags) {
+				t.Errorf("Flags = %v, want %v", got.Flags, tt.flags)
+			}
+			if !reflect.DeepEqual(got.DepFlags, tt.depFlags) {
+				t.Errorf("DepFlags = %v, want %v", got.DepFlags, tt.depFlags)
+			}
+			if got.IsDistributable() != tt.distributable {
+				t.Errorf("IsDistributable = %v, want %v", got.IsDistributable(), tt.distributable)
+			}
+			if tt.name == "cpython" {
+				if got.OutputFile != "build/python.o" || !reflect.DeepEqual(got.IncludeDirs, []string{"Include"}) || !reflect.DeepEqual(got.Defines, []string{"Py_BUILD_CORE"}) || got.Standard != "c11" || got.Optimization != "3" || got.TargetArch != "x86-64" || got.Language != "c" {
+					t.Errorf("CPython fields changed: %+v", got)
+				}
+			}
+		})
+	}
+}
+
+func TestParse_OptionOperandsNeverBecomeInputs(t *testing.T) {
+	options := []string{
+		"-MF", "-MT", "-MQ", "-isystem", "-idirafter", "-iquote",
+		"-iprefix", "-iwithprefix", "-iwithprefixbefore", "-isysroot",
+		"-iframework", "-imultilib", "-include", "-imacros", "-U",
+		"-Xpreprocessor", "-Xassembler", "-Xlinker", "--sysroot",
+		"-target", "-arch", "-aux-info", "-dumpbase", "-dumpdir",
+		"-Wa", "-Wp",
+	}
+	for _, option := range options {
+		t.Run(option, func(t *testing.T) {
+			parsed := Parse([]string{"gcc", "-c", option, "value.o", "src.c"})
+			if !reflect.DeepEqual(parsed.InputFiles, []string{"src.c"}) {
+				t.Errorf("InputFiles = %v, want [src.c]", parsed.InputFiles)
+			}
+			values := parsed.Flags
+			if option == "-MF" || option == "-MT" || option == "-MQ" {
+				values = parsed.DepFlags
+			}
+			found := false
+			for i := 0; i+1 < len(values); i++ {
+				if values[i] == option && values[i+1] == "value.o" {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("option and operand not adjacent in %v", values)
+			}
+		})
+	}
+}
+
+func TestParse_DependencyOnlyModesStayLocal(t *testing.T) {
+	for _, mode := range []string{"-M", "-MM"} {
+		t.Run(mode, func(t *testing.T) {
+			parsed := Parse([]string{"gcc", "-c", mode, "src.c"})
+			if !reflect.DeepEqual(parsed.DepFlags, []string{mode}) || parsed.IsDistributable() {
+				t.Errorf("dependency-only mode parsed incorrectly: %+v", parsed)
+			}
+		})
+	}
+}
+
+func TestParse_PreprocessingOrder(t *testing.T) {
+	tests := []struct {
+		name    string
+		options []string
+	}{
+		{"undefine then define", []string{"-U", "FOO", "-D", "FOO"}},
+		{"define then undefine", []string{"-D", "FOO", "-U", "FOO"}},
+		{"include family", []string{"-I", "inc", "-iquote", "quoted", "-isystem", "system", "-idirafter", "after", "-include", "config.h", "-imacros", "macros.h", "-nostdinc"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := append([]string{"gcc", "-c"}, tt.options...)
+			args = append(args, "source.c")
+			parsed := Parse(args)
+			if !reflect.DeepEqual(parsed.PreprocessFlags, tt.options) {
+				t.Errorf("PreprocessFlags = %v, want %v", parsed.PreprocessFlags, tt.options)
+			}
+		})
+	}
+}
+
+func TestParse_IndirectDependencies(t *testing.T) {
+	tests := []struct {
+		name    string
+		options []string
+		want    []string
+	}{
+		{"wp md", []string{"-Wp,-MD,wp.d"}, []string{"-MD", "-MF", "wp.d"}},
+		{"wp mmd", []string{"-Wp,-MMD,wp.d"}, []string{"-MMD", "-MF", "wp.d"}},
+		{"wp mmd with mp", []string{"-Wp,-MMD,wp.d,-MP"}, []string{"-MMD", "-MF", "wp.d", "-MP"}},
+		{"wp md with target", []string{"-Wp,-MD,wp.d,-MT,obj.o"}, []string{"-MD", "-MF", "wp.d", "-MT", "obj.o"}},
+		{"xpreprocessor", []string{"-Xpreprocessor", "-MD", "-Xpreprocessor", "-MF", "-Xpreprocessor", "xp.d"}, []string{"-MD", "-MF", "xp.d"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := append([]string{"gcc", "-c"}, tt.options...)
+			args = append(args, "source.c")
+			parsed := Parse(args)
+			if !reflect.DeepEqual(parsed.DepFlags, tt.want) || !parsed.GeneratesDependencies() {
+				t.Errorf("dependency flags = %v, want %v", parsed.DepFlags, tt.want)
+			}
+			if !parsed.IsDistributable() || len(parsed.InputFiles) != 1 {
+				t.Errorf("indirect dependency command parsed incorrectly: %+v", parsed)
+			}
+		})
+	}
+}
+
+func TestParse_ClangIncludeOperands(t *testing.T) {
+	options := []string{"-include-pch", "prefix.pch", "-isystem-after", "later", "-isystem-afterjoined", "-iwithsysroot", "sysinc", "-iframework", "frameworks", "-iframeworkwithsysroot", "sysframeworks", "-isysroot", "sdk", "-iwithprefixbefore", "before", "-iwithprefix", "with", "-iprefix", "prefix", "-imultilib", "multi"}
+	args := append([]string{"clang", "-c"}, options...)
+	args = append(args, "source.c")
+	parsed := Parse(args)
+	if !reflect.DeepEqual(parsed.PreprocessFlags, options) {
+		t.Errorf("PreprocessFlags = %v, want %v", parsed.PreprocessFlags, options)
+	}
+	if !reflect.DeepEqual(parsed.InputFiles, []string{"source.c"}) {
+		t.Errorf("InputFiles = %v", parsed.InputFiles)
+	}
+	if len(parsed.CompileFlags()) != 0 {
+		t.Errorf("preprocessed compile flags = %v, want none", parsed.CompileFlags())
+	}
+}
+
+func TestParse_SideOutputsStayLocal(t *testing.T) {
+	tests := [][]string{
+		{"-aux-info", "info.txt"},
+		{"-dumpbase", "unit.c"},
+		{"-dumpdir", "dumps/"},
+		{"-save-temps"},
+		{"-save-temps=obj"},
+		{"-fdump-tree-all"},
+		{"-gsplit-dwarf"},
+		{"-ftest-coverage"},
+		{"--coverage"},
+	}
+	for _, options := range tests {
+		t.Run(options[0], func(t *testing.T) {
+			args := append([]string{"gcc", "-c"}, options...)
+			args = append(args, "source.c")
+			parsed := Parse(args)
+			if parsed.IsDistributable() {
+				t.Errorf("side output command should stay local: %v", args)
+			}
+			if !reflect.DeepEqual(parsed.InputFiles, []string{"source.c"}) {
+				t.Errorf("InputFiles = %v", parsed.InputFiles)
+			}
+		})
+	}
+	if parsed := Parse([]string{"gcc", "-c", "-ftime-report", "source.c"}); !parsed.IsDistributable() {
+		t.Error("-ftime-report only writes diagnostics and should remain distributable")
+	}
+}

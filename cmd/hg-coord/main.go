@@ -14,6 +14,7 @@ import (
 
 	"github.com/h3nr1-d14z/hybridgrid/internal/config"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/opshttp"
+	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/scheduler"
 	coordserver "github.com/h3nr1-d14z/hybridgrid/internal/coordinator/server"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/webhook"
 	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
@@ -73,6 +74,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			requestTimeout, _ := cmd.Flags().GetDuration("request-timeout")
 			noMdns, _ := cmd.Flags().GetBool("no-mdns")
 			schedulerType, _ := cmd.Flags().GetString("scheduler")
+			sizeThreshold, _ := cmd.Flags().GetInt("size-threshold")
 			taskLogPath, _ := cmd.Flags().GetString("task-log")
 			buildHistoryPath, _ := cmd.Flags().GetString("build-history")
 			builderCacheDir, _ := cmd.Flags().GetString("builder-cache-dir")
@@ -88,11 +90,23 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			schedulerPluginCert, _ := cmd.Flags().GetString("scheduler-plugin-cert")
 			schedulerPluginKey, _ := cmd.Flags().GetString("scheduler-plugin-key")
 			loadPenalty, _ := cmd.Flags().GetFloat64("load-penalty")
+			discount, _ := cmd.Flags().GetFloat64("discount")
+			discountMode, _ := cmd.Flags().GetString("discount-mode")
+			rewardCenter, _ := cmd.Flags().GetString("reward-center")
+			featureSet, _ := cmd.Flags().GetString("features")
+			ewmaAlpha, _ := cmd.Flags().GetFloat64("ewma-alpha")
+			diagCandidates, _ := cmd.Flags().GetBool("diag-candidates")
 
 			// Validate scheduler choice (fail fast rather than silent fallback).
-			validSchedulers := map[string]bool{"leastloaded": true, "simple": true, "p2c": true, "epsilon-greedy": true, "linucb": true, "hybrid-linucb": true, "heft": true, "icecc-fastest": true, "external": true}
+			validSchedulers := map[string]bool{"leastloaded": true, "simple": true, "p2c": true, "epsilon-greedy": true, "linucb": true, "hybrid-linucb": true, "hybrid-linucb-d": true, "heft": true, "icecc-fastest": true, "sed": true, "p90": true, "sed-p90": true, "ewma": true, "external": true}
 			if !validSchedulers[schedulerType] {
-				return fmt.Errorf("invalid --scheduler %q; must be one of: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, heft, icecc-fastest, external", schedulerType)
+				return fmt.Errorf("invalid --scheduler %q; must be one of: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, hybrid-linucb-d, heft, icecc-fastest, sed, p90, sed-p90, ewma, external", schedulerType)
+			}
+			if err := validateSizeThreshold(schedulerType, sizeThreshold); err != nil {
+				return err
+			}
+			if requestTimeout <= 0 {
+				return fmt.Errorf("invalid --request-timeout %v; must be positive", requestTimeout)
 			}
 			if schedulerType == "external" && schedulerPluginAddr == "" {
 				return fmt.Errorf("--scheduler=external requires --scheduler-plugin-addr")
@@ -117,6 +131,13 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			// the scheduler degenerates to leastloaded.
 			if loadPenalty < 0 || loadPenalty > 5 {
 				return fmt.Errorf("invalid --load-penalty %v; must be in [0, 5]", loadPenalty)
+			}
+
+			if err := validateDiscountFlags(schedulerType, discount, discountMode); err != nil {
+				return err
+			}
+			if err := validateExperimentFlags(schedulerType, rewardCenter, featureSet, ewmaAlpha, diagCandidates, warmStart, discount, discountMode); err != nil {
+				return err
 			}
 
 			// Validate port ranges
@@ -190,6 +211,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			cfg.RequestTimeout = requestTimeout
 			cfg.EnableRequestID = true
 			cfg.SchedulerType = schedulerType
+			cfg.SizeThreshold = sizeThreshold
 			cfg.TaskLogPath = taskLogPath
 			cfg.DispatchQueueTimeout = dispatchQueueTimeout
 			cfg.BuilderCacheDir = builderCacheDir
@@ -197,6 +219,12 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			cfg.AlphaValue = alphaValue
 			cfg.WarmStartTasks = warmStart
 			cfg.LoadPenaltyValue = loadPenalty
+			cfg.DiscountValue = discount
+			cfg.DiscountModeValue = discountMode
+			cfg.RewardCenterValue = rewardCenter
+			cfg.FeatureSetValue = featureSet
+			cfg.EwmaAlphaValue = ewmaAlpha
+			cfg.DiagCandidates = diagCandidates
 			cfg.SchedulerPluginAddr = schedulerPluginAddr
 			cfg.SchedulerPluginTimeout = schedulerPluginTimeout
 			cfg.Tracing.Enable = tracingEnable
@@ -314,7 +342,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			}()
 
 			// Start ops HTTP server (health, metrics, log-level).
-			opsSrv := &opshttp.Server{Port: httpPort, AuthToken: token}
+			opsSrv := &opshttp.Server{Port: httpPort, AuthToken: token, EventSink: srv, DispatchCounter: srv}
 			go func() {
 				if err := opsSrv.Start(); err != nil {
 					errCh <- fmt.Errorf("ops http server: %w", err)
@@ -364,7 +392,8 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 	serveCmd.Flags().String("token", "", "Authentication token required from workers and CLI clients (empty disables auth)")
 	serveCmd.Flags().Duration("request-timeout", 120*time.Second, "Default per-compile timeout (a request with larger TimeoutSeconds wins)")
 	serveCmd.Flags().Bool("no-mdns", false, "Disable mDNS advertisement")
-	serveCmd.Flags().String("scheduler", "leastloaded", "Scheduler type: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, heft, icecc-fastest, external")
+	serveCmd.Flags().String("scheduler", "leastloaded", "Scheduler type: leastloaded, simple, p2c, epsilon-greedy, linucb, hybrid-linucb, hybrid-linucb-d, heft, icecc-fastest, sed, p90, sed-p90, ewma, external")
+	serveCmd.Flags().Int("size-threshold", 0, "Source size cutoff in bytes (> 0 for p90 and sed-p90; ignored otherwise)")
 	serveCmd.Flags().String("scheduler-plugin-addr", "", "External scheduler plugin gRPC endpoint (used with --scheduler=external)")
 	serveCmd.Flags().Duration("scheduler-plugin-timeout", 50*time.Millisecond, "Per-Select timeout for the external scheduler plugin")
 	serveCmd.Flags().String("scheduler-plugin-ca", "", "CA certificate verifying the scheduler plugin (set with cert+key for plugin mTLS)")
@@ -377,8 +406,15 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 	serveCmd.Flags().String("builder-cache-dir", "", "Cache per-builder (plugin builder) build results in this directory, keyed by builder version + source hash (default: off)")
 	serveCmd.Flags().Float64("epsilon", 0.1, "Exploration rate for epsilon-greedy scheduler (in [0, 1]; ignored otherwise)")
 	serveCmd.Flags().Float64("alpha", 1.0, "LinUCB exploration coefficient α (in [0, 10]; ignored for other schedulers)")
-	serveCmd.Flags().Int("warm-start", 100, "Hybrid-LinUCB warm-start dispatch count (>= 0; ignored for other schedulers)")
+	serveCmd.Flags().Int("warm-start", 100, "Hybrid-LinUCB and ewma warm-start dispatch count (>= 0; ignored for other schedulers)")
 	serveCmd.Flags().Float64("load-penalty", 0.5, "Hybrid-LinUCB load penalty λ (in [0, 5]; ignored for other schedulers)")
+	serveCmd.Flags().Float64("discount", 0.98, "HG-LinUCB-D discount gamma in (0, 1]; ignored unless --scheduler=hybrid-linucb-d")
+	serveCmd.Flags().String("discount-mode", "global", "global (every worker ages with the dispatch clock) or arm (only the worker that returns an outcome ages); ignored unless --scheduler=hybrid-linucb-d")
+	serveCmd.Flags().String("reward-center", "none", "Baseline mode for HG-LinUCB residual rewards: none or warm; ignored for other schedulers")
+	serveCmd.Flags().String("features", "full", "LinUCB feature set: full or compact")
+	serveCmd.Flags().Float64("ewma-alpha", 0.2, "EWMA smoothing factor in (0, 1]; used only by --scheduler=ewma")
+	serveCmd.Flags().Bool("diag-candidates", false, "Record per-candidate score decomposition for LinUCB schedulers")
+	serveCmd.Flags().Duration("request-timeout", 120*time.Second, "Deadline for the worker RPC of one compile (queueing is bounded by --dispatch-queue-timeout)")
 	serveCmd.Flags().Duration("dispatch-queue-timeout", 30*time.Second, "How long an over-capacity compile waits in the dispatch queue before failing (0 disables queueing)")
 	serveCmd.Flags().String("tls-cert", "", "Path to TLS certificate file (PEM format)")
 	serveCmd.Flags().String("tls-key", "", "Path to TLS private key file (PEM format)")
@@ -398,6 +434,62 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func validateDiscountFlags(schedulerType string, discount float64, mode string) error {
+	if schedulerType != "hybrid-linucb-d" {
+		return nil
+	}
+	if !(discount > 0 && discount <= 1) {
+		return fmt.Errorf("invalid --discount %v; must be in (0, 1]", discount)
+	}
+	if mode != "global" && mode != "arm" {
+		return fmt.Errorf("invalid --discount-mode %q; must be global or arm", mode)
+	}
+	return nil
+}
+
+func validateExperimentFlags(schedulerType, rewardCenter, featureSet string, ewmaAlpha float64, diagCandidates bool, warmStart int, discount float64, discountMode string) error {
+	if !scheduler.ValidRewardCenter(rewardCenter) {
+		return fmt.Errorf("invalid --reward-center %q; must be none or warm", rewardCenter)
+	}
+	if !scheduler.ValidFeatureSet(featureSet) {
+		return fmt.Errorf("invalid --features %q; must be full or compact", featureSet)
+	}
+	if !(ewmaAlpha > 0 && ewmaAlpha <= 1) {
+		return fmt.Errorf("invalid --ewma-alpha %v; must be in (0, 1]", ewmaAlpha)
+	}
+
+	linucb := schedulerType == "linucb" || schedulerType == "hybrid-linucb" || schedulerType == "hybrid-linucb-d"
+	hybrid := schedulerType == "hybrid-linucb" || schedulerType == "hybrid-linucb-d"
+	if rewardCenter == "warm" {
+		if !hybrid {
+			return fmt.Errorf("--reward-center=warm requires --scheduler=hybrid-linucb or hybrid-linucb-d")
+		}
+		if warmStart <= 0 {
+			return fmt.Errorf("--reward-center=warm requires --warm-start > 0")
+		}
+		if schedulerType == "hybrid-linucb-d" && discountMode != "arm" && discount != 1 {
+			return fmt.Errorf("--reward-center=warm with --scheduler=hybrid-linucb-d requires --discount-mode=arm or --discount=1")
+		}
+	}
+	if featureSet == "compact" && !linucb {
+		return fmt.Errorf("--features=compact requires a LinUCB scheduler")
+	}
+	if diagCandidates && !linucb {
+		return fmt.Errorf("--diag-candidates requires a LinUCB scheduler")
+	}
+	if schedulerType != "ewma" && ewmaAlpha != 0.2 {
+		return fmt.Errorf("--ewma-alpha requires --scheduler=ewma")
+	}
+	return nil
+}
+
+func validateSizeThreshold(schedulerType string, threshold int) error {
+	if (schedulerType == "p90" || schedulerType == "sed-p90") && threshold <= 0 {
+		return fmt.Errorf("invalid --size-threshold %d; must be > 0 for --scheduler=%s", threshold, schedulerType)
+	}
+	return nil
 }
 
 // eventNotifierWrapper adapts the telemetry service's positional-arg

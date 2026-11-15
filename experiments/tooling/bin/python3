@@ -1,0 +1,4 @@
+#!/bin/sh
+# python3 shim for Git Bash: the Windows "python3" alias is a Store stub.
+# Always runs the benchmark venv (pandas < 3), never the system Python.
+exec "/d/bench-work/venv/Scripts/python.exe" "$@"
