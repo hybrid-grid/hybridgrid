@@ -1,6 +1,6 @@
 # Hybrid-Grid: Distributed Compilation with Adaptive Scheduling under Unadvertised Worker Slowdown
 
-**Le Duc Hieuᵃ˒\*, Nguyen Trung Kienᵃ, Nguyen Trong Khanhᵃ**
+**Le Duc Hieuᵃ˒\*, Nguyen Trung Kienᵃ, Luong Tuan Anhᵃ, Nguyen Trong Khanhᵃ**
 
 ᵃ *Posts and Telecommunications Institute of Technology, Hanoi, Vietnam*
 

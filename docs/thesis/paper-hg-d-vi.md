@@ -1,6 +1,6 @@
 # Hybrid-Grid: Biên dịch phân tán với lập lịch thích nghi khi worker chậm đi mà không báo trước
 
-**Lê Đức Hiếuᵃ˒\*, Nguyễn Trung Kiênᵃ, Nguyễn Trọng Khánhᵃ**
+**Lê Đức Hiếuᵃ˒\*, Nguyễn Trung Kiênᵃ, Lương Tuấn Anhᵃ, Nguyễn Trọng Khánhᵃ**
 
 ᵃ *Học viện Công nghệ Bưu chính Viễn thông, Hà Nội, Việt Nam*
 
