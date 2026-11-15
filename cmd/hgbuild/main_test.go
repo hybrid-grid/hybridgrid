@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -147,6 +148,11 @@ func TestMain(m *testing.M) {
 }
 
 func TestInstallWrappers(t *testing.T) {
+	// The wrappers are POSIX shell scripts; executable-bit checks and
+	// the export/exec content assertions do not apply on Windows.
+	if runtime.GOOS == "windows" {
+		t.Skip("wrapper fixtures are POSIX-only")
+	}
 	dir := filepath.Join(t.TempDir(), "bin")
 	if err := installWrappers(dir); err != nil {
 		t.Fatalf("installWrappers failed: %v", err)

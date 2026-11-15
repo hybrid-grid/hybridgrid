@@ -329,7 +329,8 @@ func (p *ParsedArgs) IsDistributable() bool {
 		return false
 	}
 	// Must be a source file (not object file)
-	if !isSourceFile(p.InputFiles[0]) && !(strings.EqualFold(filepath.Ext(p.InputFiles[0]), ".h") && p.Language != "") {
+	isHeaderWithLang := strings.EqualFold(filepath.Ext(p.InputFiles[0]), ".h") && p.Language != ""
+	if !isSourceFile(p.InputFiles[0]) && !isHeaderWithLang {
 		return false
 	}
 	// Assembly units (.s/.S) must compile locally: the preprocess-and-
