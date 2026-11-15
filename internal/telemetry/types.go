@@ -101,6 +101,10 @@ type BuildInfo struct {
 	FirstTaskAtMs  int64  `json:"first_task_at_ms"`
 	LastTaskAtMs   int64  `json:"last_task_at_ms"`
 	Truncated      bool   `json:"truncated"`
+	// Scheduler identifies the coordinator scheduling policy that
+	// produced this build; empty when unknown (pre-label builds).
+	Scheduler       string `json:"scheduler,omitempty"`
+	SchedulerParams string `json:"scheduler_params,omitempty"`
 }
 
 // StatsProvider provides live cluster statistics.

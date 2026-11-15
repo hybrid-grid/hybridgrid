@@ -100,16 +100,18 @@ func buildFromProto(b *pb.TelemetryBuild) *BuildInfo {
 		return &BuildInfo{}
 	}
 	return &BuildInfo{
-		ID:             b.GetId(),
-		BuildType:      b.GetBuildType(),
-		Status:         b.GetStatus(),
-		TotalTasks:     int(b.GetTotalTasks()),
-		CompletedTasks: int(b.GetCompletedTasks()),
-		FailedTasks:    int(b.GetFailedTasks()),
-		RunningTasks:   int(b.GetRunningTasks()),
-		FromCacheCount: int(b.GetFromCacheCount()),
-		FirstTaskAtMs:  b.GetFirstTaskAtMs(),
-		LastTaskAtMs:   b.GetLastTaskAtMs(),
-		Truncated:      b.GetTruncated(),
+		ID:              b.GetId(),
+		BuildType:       b.GetBuildType(),
+		Status:          b.GetStatus(),
+		TotalTasks:      int(b.GetTotalTasks()),
+		CompletedTasks:  int(b.GetCompletedTasks()),
+		FailedTasks:     int(b.GetFailedTasks()),
+		RunningTasks:    int(b.GetRunningTasks()),
+		FromCacheCount:  int(b.GetFromCacheCount()),
+		FirstTaskAtMs:   b.GetFirstTaskAtMs(),
+		LastTaskAtMs:    b.GetLastTaskAtMs(),
+		Truncated:       b.GetTruncated(),
+		Scheduler:       b.GetScheduler(),
+		SchedulerParams: b.GetSchedulerParams(),
 	}
 }

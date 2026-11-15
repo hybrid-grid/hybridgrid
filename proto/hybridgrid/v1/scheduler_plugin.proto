@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package hybridgrid.v1;
+
+option go_package = "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1;hybridgridv1";
+
+// ============================================================
+// Scheduler Plugin (coordinator-side, external process)
+// ============================================================
+// An external scheduler plugin replaces the coordinator's in-process
+// worker-selection policy. The coordinator snapshots the worker fleet
+// and the dispatch context into each Select call; the plugin answers
+// with the chosen worker id. Completions flow back as Feedback so
+// learning policies can update. Contract version: schedulerv1alpha1
+// (see docs/plugins.md). Select must answer within the coordinator's
+// plugin timeout or the fallback scheduler decides.
+
+// TaskContext carries the dispatch-time features a learning plugin
+// may condition on (mirror of scheduler.TaskContext).
+message PluginTaskContext {
+  int64 source_size_bytes = 1;      // log-scaled feature: len(pre)+len(raw)
+  int64 raw_source_size_bytes = 2;  // raw TUs run 10-100x smaller
+  string source_filename = 3;       // language signal ("main.cpp")
+  string compiler = 4;              // driver signal ("gcc")
+}
+
+// WorkerSnapshot is the fleet state at decision time.
+message WorkerSnapshot {
+  string id = 1;
+  string address = 2;
+  uint32 active_tasks = 3;
+  uint32 max_parallel = 4;
+  bool healthy = 5;
+  bool circuit_open = 6;
+  string native_os = 7;
+  string native_arch = 8;
+  repeated string build_types = 9;  // cpp, flutter, custom builder ids
+  uint32 cpu_cores = 10;
+  double memory_gb = 11;
+}
+
+message SelectRequest {
+  string build_type = 1;            // "cpp", "flutter", or builder id
+  string target_arch = 2;
+  string client_os = 3;
+  PluginTaskContext context = 4;
+  repeated WorkerSnapshot workers = 5;
+}
+
+message SelectResponse {
+  string worker_id = 1;             // must match a snapshot id
+}
+
+message FeedbackRequest {
+  string build_type = 1;
+  string worker_id = 2;
+  bool success = 3;
+  double duration_ms = 4;           // task duration as observed
+  PluginTaskContext context = 5;
+}
+
+message FeedbackResponse {}
+
+service SchedulerPlugin {
+  // Select chooses a worker for one dispatch. Called per task.
+  rpc Select(SelectRequest) returns (SelectResponse);
+  // Feedback reports a task completion. Fire-and-forget by contract:
+  // the coordinator never blocks dispatch on Feedback.
+  rpc Feedback(FeedbackRequest) returns (FeedbackResponse);
+}

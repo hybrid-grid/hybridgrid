@@ -1,0 +1,61 @@
+---
+import Terminal from './Terminal.astro';
+---
+
+<section class="relative overflow-hidden px-5 pb-20 pt-16 sm:pt-24">
+  <div
+    class="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[480px] bg-[radial-gradient(ellipse_60%_50%_at_50%_0%,color-mix(in_oklch,var(--color-signal)_14%,transparent),transparent)]"
+  >
+  </div>
+
+  <div class="mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-[1.05fr_1fr]">
+    <div>
+      <span
+        class="inline-flex items-center gap-1.5 rounded-full border border-hairline-strong px-3 py-1 font-mono text-[11px] uppercase tracking-[0.08em] text-ink-muted"
+      >
+        <span class="h-1.5 w-1.5 rounded-full bg-signal animate-heartbeat"></span>
+        Open source · Go
+      </span>
+
+      <h1 class="mt-5 text-balance text-[40px] font-bold leading-[1.05] tracking-[-0.02em] text-ink sm:text-[52px]">
+        Compile like you have a <span class="text-signal">fleet</span>, not a laptop.
+      </h1>
+
+      <p class="mt-5 max-w-lg text-[16px] leading-relaxed text-ink-secondary">
+        Hybrid-Grid spreads C/C++, Flutter, and Unity builds across every
+        machine on your network — with a scheduler, a circuit breaker per
+        worker, a content-addressable cache, and a live dashboard, not just
+        a bag of SSH scripts.
+      </p>
+
+      <div class="mt-8 flex flex-wrap items-center gap-3">
+        <a
+          href="/docs/quick-start"
+          class="rounded-full bg-signal px-5 py-2.5 text-[14px] font-semibold text-canvas transition-[filter] hover:brightness-110"
+        >
+          Get started
+        </a>
+        <a
+          href="https://github.com/h3nr1-d14z/hybridgrid"
+          class="rounded-full border border-hairline-strong px-5 py-2.5 text-[14px] font-medium text-ink-secondary transition-colors hover:bg-canvas-raised hover:text-ink"
+        >
+          View on GitHub
+        </a>
+      </div>
+
+      <div class="mt-8 flex flex-wrap items-center gap-x-6 gap-y-2 font-mono text-[11px] text-ink-faint">
+        <span>C/C++</span>
+        <span class="h-1 w-1 rounded-full bg-ink-faint"></span>
+        <span>Flutter (Android)</span>
+        <span class="h-1 w-1 rounded-full bg-ink-faint"></span>
+        <span>Unity</span>
+        <span class="h-1 w-1 rounded-full bg-ink-faint"></span>
+        <span>mDNS auto-discovery</span>
+      </div>
+    </div>
+
+    <div class="flex justify-center lg:justify-end">
+      <Terminal />
+    </div>
+  </div>
+</section>

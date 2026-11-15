@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
+	"github.com/h3nr1-d14z/hybridgrid/internal/cli/taskid"
 )
 
 func TestFallbackEnabled_Default(t *testing.T) {
@@ -202,5 +205,99 @@ func TestCompileTimeout_EnvOverride(t *testing.T) {
 				t.Errorf("workerTimeout() = %v, want %v", got, tt.wantWorker)
 			}
 		})
+	}
+}
+
+func TestEnsureBuildSession(t *testing.T) {
+	tests := []struct {
+		name      string
+		env       []string
+		wantExact string
+	}{
+		{"keeps an explicit id", []string{"PATH=/bin", "HG_BUILD_ID=release-42"}, "release-42"},
+		{"generates one when missing", []string{"PATH=/bin"}, ""},
+		{"replaces an empty value", []string{"HG_BUILD_ID="}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := envValue(ensureBuildSession(tt.env), taskid.BuildIDEnvVar)
+			if tt.wantExact != "" && got != tt.wantExact {
+				t.Fatalf("HG_BUILD_ID = %q, want %q", got, tt.wantExact)
+			}
+			if tt.wantExact == "" && !strings.HasPrefix(got, "build-") {
+				t.Fatalf("HG_BUILD_ID = %q, want a generated build- id", got)
+			}
+		})
+	}
+}
+
+func TestWrappedBuildID(t *testing.T) {
+	t.Setenv(taskid.BuildIDEnvVar, "")
+	if got := wrappedBuildID(); got != "" {
+		t.Fatalf("without HG_BUILD_ID got %q, want empty so lone cc calls do not each become a build", got)
+	}
+
+	t.Setenv(taskid.BuildIDEnvVar, "demo-1")
+	if got := wrappedBuildID(); got != "demo-1" {
+		t.Fatalf("got %q, want demo-1", got)
+	}
+}
+
+func TestFilterHgbuildFlags_SetsCoordinatorAndTimeout(t *testing.T) {
+	origCoord, origTimeout := coordinator, timeout
+	defer func() { coordinator, timeout = origCoord, origTimeout }()
+	coordinator = ""
+	timeout = 2 * time.Minute
+
+	// Space form — the shape that used to be silently swallowed
+	// (cc runs with DisableFlagParsing so cobra never sees it).
+	filtered := filterHgbuildFlags([]string{"--coordinator", "localhost:19002", "-c", "a.c"})
+	if coordinator != "localhost:19002" {
+		t.Fatalf("space-form --coordinator ignored: got %q", coordinator)
+	}
+	if !containsArg(filtered, "-c") || !containsArg(filtered, "a.c") {
+		t.Fatalf("compiler args must survive filtering: %v", filtered)
+	}
+	if containsArg(filtered, "--coordinator") || containsArg(filtered, "localhost:19002") {
+		t.Fatalf("hgbuild flags leaked into compiler args: %v", filtered)
+	}
+
+	// Equals forms + timeout.
+	filtered = filterHgbuildFlags([]string{"--coordinator=h1:1", "--timeout=10m", "-c", "a.c"})
+	if coordinator != "h1:1" {
+		t.Fatalf("equals-form --coordinator ignored: got %q", coordinator)
+	}
+	if timeout != 10*time.Minute {
+		t.Fatalf("equals-form --timeout ignored: got %v", timeout)
+	}
+	if containsArg(filtered, "--timeout=10m") {
+		t.Fatalf("hgbuild flags leaked into compiler args: %v", filtered)
+	}
+}
+
+func TestParseArchStrict_RejectsUnknown(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    pb.Architecture
+		wantErr bool
+	}{
+		{"x86_64", pb.Architecture_ARCH_X86_64, false},
+		{"ARM64", pb.Architecture_ARCH_ARM64, false},
+		{"", getLocalArch(), false},
+		{"riscv", pb.Architecture_ARCH_UNSPECIFIED, true},
+		{"arm6", pb.Architecture_ARCH_UNSPECIFIED, true},
+	}
+	for _, c := range cases {
+		got, err := parseArchStrict(c.in)
+		if (err != nil) != c.wantErr {
+			t.Fatalf("parseArchStrict(%q) err=%v, wantErr=%v", c.in, err, c.wantErr)
+		}
+		if got != c.want {
+			t.Fatalf("parseArchStrict(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+	// Tolerant wrapper (compiler -march values like "native") must not panic.
+	if got := parseArch("native"); got != pb.Architecture_ARCH_UNSPECIFIED {
+		t.Fatalf("parseArch(native) = %v, want UNSPECIFIED", got)
 	}
 }

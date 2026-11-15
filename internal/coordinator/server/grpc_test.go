@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"sync/atomic"
 	"testing"
@@ -647,6 +648,116 @@ func TestBuild_NotImplemented(t *testing.T) {
 	assert.Contains(t, resp.Stderr, "not implemented")
 }
 
+func TestBuild_Custom_NoWorker(t *testing.T) {
+	_, client, cleanup := setupTestServer(t, Config{Port: 0, HeartbeatTTL: 30 * time.Second})
+	defer cleanup()
+
+	resp, err := client.Build(context.Background(), &pb.BuildRequest{
+		TaskId:        "custom-no-worker",
+		CustomBuilder: "demo",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, pb.TaskStatus_STATUS_FAILED, resp.Status)
+	assert.Contains(t, resp.Stderr, "no worker available")
+}
+
+func TestBuild_Custom_ForwardsToWorker(t *testing.T) {
+	s, client, cleanup := setupTestServer(t, Config{Port: 0, HeartbeatTTL: 30 * time.Second, RequestTimeout: 30 * time.Second})
+	defer cleanup()
+
+	var gotBuilder string
+	var gotArgs []string
+	addr, workerCleanup := setupTestWorker(t, func(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+		gotBuilder = req.CustomBuilder
+		gotArgs = req.GetCustomConfig().GetArgs()
+		return &pb.BuildResponse{
+			Status:      pb.TaskStatus_STATUS_COMPLETED,
+			ExitCode:    0,
+			Stdout:      "demo console output",
+			Artifacts:   []byte("demo-artifact-bytes"),
+			BuildTimeMs: 42,
+		}, nil
+	})
+	defer workerCleanup()
+
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "custom-worker-1",
+		Address: addr,
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch:     pb.Architecture_ARCH_X86_64,
+			CustomBuilders: []string{"demo", "other"},
+		},
+		MaxParallel: 2,
+	}))
+
+	resp, err := client.Build(context.Background(), &pb.BuildRequest{
+		TaskId:        "custom-forward",
+		SourceHash:    "aabb",
+		SourceArchive: []byte("fake-tar"),
+		CustomBuilder: "demo",
+		Config: &pb.BuildRequest_CustomConfig{
+			CustomConfig: &pb.CustomConfig{Args: []string{"--release", "--verbose"}},
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, pb.TaskStatus_STATUS_COMPLETED, resp.Status)
+	assert.Equal(t, "demo console output", resp.Stdout)
+	assert.Equal(t, []byte("demo-artifact-bytes"), resp.Artifacts)
+	assert.Equal(t, "demo", gotBuilder, "worker must receive the custom_builder routing")
+	assert.Equal(t, []string{"--release", "--verbose"}, gotArgs, "builder args must pass through")
+}
+
+func TestBuild_Custom_QueuesUntilSlotFrees(t *testing.T) {
+	addr, workerCleanup := setupTestWorker(t, func(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+		return &pb.BuildResponse{Status: pb.TaskStatus_STATUS_COMPLETED, ExitCode: 0, Stdout: "ok"}, nil
+	})
+	defer workerCleanup()
+
+	cfg := Config{Port: 0, HeartbeatTTL: 30 * time.Second, RequestTimeout: 30 * time.Second, DispatchQueueTimeout: 5 * time.Second}
+	s, client, cleanup := setupTestServer(t, cfg)
+	defer cleanup()
+
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "custom-worker-busy",
+		Address: addr,
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch:     pb.Architecture_ARCH_X86_64,
+			CustomBuilders: []string{"demo"},
+		},
+		MaxParallel: 1,
+		ActiveTasks: 1,
+	}))
+
+	type buildResult struct {
+		resp *pb.BuildResponse
+		err  error
+	}
+	res := make(chan buildResult, 1)
+	go func() {
+		resp, err := client.Build(context.Background(), &pb.BuildRequest{
+			TaskId:        "custom-queued-1",
+			CustomBuilder: "demo",
+		})
+		res <- buildResult{resp, err}
+	}()
+
+	time.Sleep(1800 * time.Millisecond)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&s.queuedCompiles),
+		"after the fast dispatch budget the custom build should be parked in the dispatch queue")
+
+	s.registry.DecrementTasks("custom-worker-busy", true, 10*time.Millisecond)
+	s.signalDispatchCapacity()
+
+	select {
+	case r := <-res:
+		require.NoError(t, r.err)
+		assert.Equal(t, pb.TaskStatus_STATUS_COMPLETED, r.resp.Status)
+		assert.Equal(t, int64(0), atomic.LoadInt64(&s.queuedCompiles))
+	case <-time.After(5 * time.Second):
+		t.Fatal("queued custom build did not finish within 5s of the slot freeing")
+	}
+}
+
 func TestBuild_Flutter_NoWorker(t *testing.T) {
 	_, client, cleanup := setupTestServer(t, Config{Port: 0, HeartbeatTTL: 30 * time.Second})
 	defer cleanup()
@@ -748,6 +859,174 @@ func TestBuild_Flutter_CacheMissForwardsAndCaches(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, resp.FromCache)
 	assert.Equal(t, int64(1), atomic.LoadInt64(&buildCalls))
+}
+
+func newUnityBuildRequest(taskID, sourceHash string) *pb.BuildRequest {
+	return &pb.BuildRequest{
+		TaskId:         taskID,
+		SourceHash:     sourceHash,
+		BuildType:      pb.BuildType_BUILD_TYPE_UNITY,
+		TargetPlatform: pb.TargetPlatform_PLATFORM_ANDROID,
+		Config: &pb.BuildRequest_UnityConfig{
+			UnityConfig: &pb.UnityConfig{
+				UnityVersion: "2022.3",
+				BuildMethod:  "BuildScript.Build",
+			},
+		},
+	}
+}
+
+// TestBuild_Flutter_QueuesUntilSlotFrees mirrors
+// TestCompile_QueuesUntilSlotFrees for the archive-build path: the only
+// flutter worker is at capacity, so after the fast dispatch budget the
+// Build call parks in the dispatch queue instead of failing, and
+// dispatches to the (mock) worker once the slot frees.
+func TestBuild_Flutter_QueuesUntilSlotFrees(t *testing.T) {
+	addr, workerCleanup := setupTestWorker(t, func(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+		return &pb.BuildResponse{Status: pb.TaskStatus_STATUS_COMPLETED, ExitCode: 0, Stdout: "ok"}, nil
+	})
+	defer workerCleanup()
+
+	cfg := Config{Port: 0, HeartbeatTTL: 30 * time.Second, RequestTimeout: 30 * time.Second, DispatchQueueTimeout: 5 * time.Second}
+	s, client, cleanup := setupTestServer(t, cfg)
+	defer cleanup()
+
+	// One slot, already occupied: every fast attempt fails the
+	// capacity check.
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "flutter-worker-busy",
+		Address: addr,
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch: pb.Architecture_ARCH_X86_64,
+			Flutter: &pb.FlutterCapability{
+				SdkVersion: "3.10.0",
+				Platforms:  []pb.TargetPlatform{pb.TargetPlatform_PLATFORM_ANDROID},
+			},
+		},
+		MaxParallel: 1,
+		ActiveTasks: 1, // full until the test frees it
+	}))
+
+	type buildResult struct {
+		resp *pb.BuildResponse
+		err  error
+	}
+	res := make(chan buildResult, 1)
+	go func() {
+		resp, err := client.Build(context.Background(), newFlutterBuildRequest("flutter-queued-1", "deadbeef"))
+		res <- buildResult{resp, err}
+	}()
+
+	// Well past the fast budget (~700 ms) plus the entry re-check
+	// budget (~700 ms): the call must be parked, not failed and not
+	// dispatched.
+	time.Sleep(1800 * time.Millisecond)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&s.queuedCompiles),
+		"after the fast dispatch budget the flutter build should be parked in the dispatch queue")
+
+	// The occupying task finishes: slot frees, signal fires.
+	s.registry.DecrementTasks("flutter-worker-busy", true, 10*time.Millisecond)
+	s.signalDispatchCapacity()
+
+	select {
+	case r := <-res:
+		require.NoError(t, r.err)
+		assert.Equal(t, pb.TaskStatus_STATUS_COMPLETED, r.resp.Status,
+			"the queued flutter build should dispatch and complete once capacity frees")
+		assert.Equal(t, int64(0), atomic.LoadInt64(&s.queuedCompiles),
+			"queue admission must be released when the build finishes")
+	case <-time.After(5 * time.Second):
+		t.Fatal("queued flutter build did not finish within 5s of the slot freeing")
+	}
+}
+
+// TestBuild_Flutter_QueueTimeout verifies the queued phase is bounded
+// for archive builds too: with capacity never freeing, Build fails
+// with the queue-timeout message after DispatchQueueTimeout.
+func TestBuild_Flutter_QueueTimeout(t *testing.T) {
+	addr, workerCleanup := setupTestWorker(t, nil)
+	defer workerCleanup()
+
+	s, client, cleanup := setupTestServer(t, Config{
+		Port:                 0,
+		HeartbeatTTL:         30 * time.Second,
+		RequestTimeout:       30 * time.Second,
+		DispatchQueueTimeout: 300 * time.Millisecond,
+	})
+	defer cleanup()
+
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "flutter-worker-full",
+		Address: addr,
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch: pb.Architecture_ARCH_X86_64,
+			Flutter: &pb.FlutterCapability{
+				SdkVersion: "3.10.0",
+				Platforms:  []pb.TargetPlatform{pb.TargetPlatform_PLATFORM_ANDROID},
+			},
+		},
+		MaxParallel: 1,
+		ActiveTasks: 1,
+	}))
+
+	resp, err := client.Build(context.Background(), newFlutterBuildRequest("flutter-queue-timeout", "cafe1234"))
+	require.NoError(t, err)
+	assert.Equal(t, pb.TaskStatus_STATUS_FAILED, resp.Status)
+	assert.Contains(t, resp.Stderr, "dispatch queue timeout")
+	assert.Equal(t, int64(0), atomic.LoadInt64(&s.queuedCompiles))
+}
+
+// TestBuild_Unity_QueuesUntilSlotFrees covers the unity handler on the
+// same shared backpressure path.
+func TestBuild_Unity_QueuesUntilSlotFrees(t *testing.T) {
+	addr, workerCleanup := setupTestWorker(t, func(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+		return &pb.BuildResponse{Status: pb.TaskStatus_STATUS_COMPLETED, ExitCode: 0, Stdout: "ok"}, nil
+	})
+	defer workerCleanup()
+
+	cfg := Config{Port: 0, HeartbeatTTL: 30 * time.Second, RequestTimeout: 30 * time.Second, DispatchQueueTimeout: 5 * time.Second}
+	s, client, cleanup := setupTestServer(t, cfg)
+	defer cleanup()
+
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "unity-worker-busy",
+		Address: addr,
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch: pb.Architecture_ARCH_X86_64,
+			Unity: &pb.UnityCapability{
+				Versions:     []string{"2022.3"},
+				BuildTargets: []pb.TargetPlatform{pb.TargetPlatform_PLATFORM_ANDROID},
+			},
+		},
+		MaxParallel: 1,
+		ActiveTasks: 1,
+	}))
+
+	type buildResult struct {
+		resp *pb.BuildResponse
+		err  error
+	}
+	res := make(chan buildResult, 1)
+	go func() {
+		resp, err := client.Build(context.Background(), newUnityBuildRequest("unity-queued-1", "beef5678"))
+		res <- buildResult{resp, err}
+	}()
+
+	time.Sleep(1800 * time.Millisecond)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&s.queuedCompiles),
+		"after the fast dispatch budget the unity build should be parked in the dispatch queue")
+
+	s.registry.DecrementTasks("unity-worker-busy", true, 10*time.Millisecond)
+	s.signalDispatchCapacity()
+
+	select {
+	case r := <-res:
+		require.NoError(t, r.err)
+		assert.Equal(t, pb.TaskStatus_STATUS_COMPLETED, r.resp.Status)
+		assert.Equal(t, int64(0), atomic.LoadInt64(&s.queuedCompiles))
+	case <-time.After(5 * time.Second):
+		t.Fatal("queued unity build did not finish within 5s of the slot freeing")
+	}
 }
 
 // --- StreamBuild ---
@@ -1056,4 +1335,218 @@ func TestCompile_WorkerUnreachable(t *testing.T) {
 
 	assert.Len(t, notifier.completed, 1)
 	assert.Equal(t, "failed", notifier.completed[0].Status)
+}
+
+// TestBuild_Custom_BuilderCache verifies the per-builder result cache:
+// the first build reaches the worker, an identical repeat is served
+// from the cache without touching the worker again.
+func TestBuild_Custom_BuilderCache(t *testing.T) {
+	var workerCalls int32
+	addr, workerCleanup := setupTestWorker(t, func(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+		atomic.AddInt32(&workerCalls, 1)
+		return &pb.BuildResponse{
+			Status:      pb.TaskStatus_STATUS_COMPLETED,
+			ExitCode:    0,
+			Stdout:      "fresh build",
+			Artifacts:   []byte("artifact"),
+			BuildTimeMs: 7,
+		}, nil
+	})
+	defer workerCleanup()
+
+	dir := t.TempDir()
+	s, client, cleanup := setupTestServer(t, Config{
+		Port:            0,
+		HeartbeatTTL:    30 * time.Second,
+		RequestTimeout:  30 * time.Second,
+		BuilderCacheDir: dir,
+	})
+	defer cleanup()
+
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "cached-worker",
+		Address: addr,
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch:            pb.Architecture_ARCH_X86_64,
+			CustomBuilders:        []string{"demo"},
+			CustomBuilderVersions: map[string]string{"demo": "hash-v1"},
+		},
+		MaxParallel: 2,
+	}))
+
+	buildReq := func(id string) *pb.BuildRequest {
+		return &pb.BuildRequest{
+			TaskId:        id,
+			SourceHash:    "deadbeef",
+			SourceArchive: []byte("fake-tar"),
+			CustomBuilder: "demo",
+		}
+	}
+
+	resp1, err := client.Build(context.Background(), buildReq("custom-cache-1"))
+	require.NoError(t, err)
+	require.Equal(t, pb.TaskStatus_STATUS_COMPLETED, resp1.Status)
+	assert.False(t, resp1.FromCache)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&workerCalls))
+
+	resp2, err := client.Build(context.Background(), buildReq("custom-cache-2"))
+	require.NoError(t, err)
+	require.Equal(t, pb.TaskStatus_STATUS_COMPLETED, resp2.Status)
+	assert.True(t, resp2.FromCache, "identical repeat must be served from cache")
+	assert.Equal(t, "fresh build", resp2.Stdout)
+	assert.Equal(t, []byte("artifact"), resp2.Artifacts)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&workerCalls), "cached repeat must not reach the worker")
+}
+
+// TestBuild_Custom_BuilderCacheInvalidatedByVersion verifies that
+// bumping the advertised builder version invalidates cached entries:
+// the same source rebuilds through the worker after the builder
+// changes.
+func TestBuild_Custom_BuilderCacheInvalidatedByVersion(t *testing.T) {
+	var workerCalls int32
+	addr, workerCleanup := setupTestWorker(t, func(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+		atomic.AddInt32(&workerCalls, 1)
+		return &pb.BuildResponse{
+			Status:      pb.TaskStatus_STATUS_COMPLETED,
+			ExitCode:    0,
+			Stdout:      fmt.Sprintf("build #%d", atomic.LoadInt32(&workerCalls)),
+			BuildTimeMs: 7,
+		}, nil
+	})
+	defer workerCleanup()
+
+	s, client, cleanup := setupTestServer(t, Config{
+		Port:            0,
+		HeartbeatTTL:    30 * time.Second,
+		RequestTimeout:  30 * time.Second,
+		BuilderCacheDir: t.TempDir(),
+	})
+	defer cleanup()
+
+	info := &registry.WorkerInfo{
+		ID:      "versioned-worker",
+		Address: addr,
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch:            pb.Architecture_ARCH_X86_64,
+			CustomBuilders:        []string{"demo"},
+			CustomBuilderVersions: map[string]string{"demo": "hash-v1"},
+		},
+		MaxParallel: 2,
+	}
+	require.NoError(t, s.registry.Add(info))
+
+	req := &pb.BuildRequest{
+		TaskId:        "custom-versioned",
+		SourceHash:    "cafe",
+		SourceArchive: []byte("fake-tar"),
+		CustomBuilder: "demo",
+	}
+	resp1, err := client.Build(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, pb.TaskStatus_STATUS_COMPLETED, resp1.Status)
+	assert.False(t, resp1.FromCache)
+
+	// Builder update on the worker: same id, new content hash.
+	info.Capabilities.CustomBuilderVersions = map[string]string{"demo": "hash-v2"}
+	require.NoError(t, s.registry.Add(info))
+
+	resp2, err := client.Build(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, pb.TaskStatus_STATUS_COMPLETED, resp2.Status)
+	assert.False(t, resp2.FromCache, "builder version bump must invalidate the cache")
+	assert.Equal(t, "build #2", resp2.Stdout)
+	assert.Equal(t, int32(2), atomic.LoadInt32(&workerCalls))
+}
+
+// TestCompile_ResourceExhaustedQueuesThenCompletes: the fast reselect
+// budget can run dry while every selected worker rejects at its own
+// admission control (registry lag under a burst). The task must enter
+// the dispatch queue and complete once a slot frees — not fail with
+// ResourceExhausted like the pre-backpressure behavior.
+func TestCompile_ResourceExhaustedQueuesThenCompletes(t *testing.T) {
+	var rejections atomic.Int32
+	// Gate the worker's own admission control open after two rejects;
+	// the coordinator releases admission when the compile finishes.
+	workerLis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	workerSrv := grpc.NewServer()
+	pb.RegisterBuildServiceServer(workerSrv, &mockWorkerBuildService{
+		compileFn: func(ctx context.Context, req *pb.CompileRequest) (*pb.CompileResponse, error) {
+			if rejections.Add(1) <= 2 {
+				return nil, status.Error(codes.ResourceExhausted, "too many concurrent tasks")
+			}
+			return &pb.CompileResponse{Status: pb.TaskStatus_STATUS_COMPLETED, ObjectFile: []byte("obj")}, nil
+		},
+	})
+	go func() { _ = workerSrv.Serve(workerLis) }()
+	defer workerSrv.Stop()
+
+	s, client, cleanup := setupTestServer(t, Config{
+		Port:                 0,
+		HeartbeatTTL:         30 * time.Second,
+		RequestTimeout:       30 * time.Second,
+		DispatchQueueTimeout: 5 * time.Second,
+	})
+	defer cleanup()
+
+	require.NoError(t, s.registry.Add(&registry.WorkerInfo{
+		ID:      "worker-queued-rx",
+		Address: workerLis.Addr().String(),
+		Capabilities: &pb.WorkerCapabilities{
+			NativeArch: pb.Architecture_ARCH_X86_64,
+			Cpp:        &pb.CppCapability{Compilers: []string{"gcc"}},
+		},
+		MaxParallel: 8,
+	}))
+
+	done := make(chan *pb.CompileResponse, 1)
+	go func() {
+		resp, err := client.Compile(context.Background(), &pb.CompileRequest{
+			TaskId:             "task-rx-queued",
+			PreprocessedSource: []byte("int main() {}"),
+			Compiler:           "gcc",
+		})
+		require.NoError(t, err)
+		done <- resp
+	}()
+
+	resp := <-done
+	assert.Equal(t, pb.TaskStatus_STATUS_COMPLETED, resp.Status,
+		"task rejected at worker capacity must queue and complete, got stderr: %s", resp.Stderr)
+	assert.GreaterOrEqual(t, rejections.Load(), int32(3), "worker must have been retried after queueing")
+	assert.Equal(t, int64(0), atomic.LoadInt64(&s.queuedCompiles), "queue admission must be released")
+}
+
+// TestWorkerSupportsUnity: platform filter plus editor-version matching —
+// a request that pins a version must only land on workers advertising it.
+func TestWorkerSupportsUnity(t *testing.T) {
+	workerWith := func(caps *pb.WorkerCapabilities) *registry.WorkerInfo {
+		return &registry.WorkerInfo{ID: "w1", Capabilities: caps}
+	}
+	unityCaps := func(versions []string, targets []pb.TargetPlatform) *pb.WorkerCapabilities {
+		return &pb.WorkerCapabilities{Unity: &pb.UnityCapability{Versions: versions, BuildTargets: targets}}
+	}
+
+	tests := []struct {
+		name     string
+		worker   *registry.WorkerInfo
+		platform pb.TargetPlatform
+		version  string
+		want     bool
+	}{
+		{"nil worker", nil, pb.TargetPlatform_PLATFORM_ANDROID, "", false},
+		{"no unity capability", workerWith(&pb.WorkerCapabilities{}), pb.TargetPlatform_PLATFORM_ANDROID, "", false},
+		{"version match", workerWith(unityCaps([]string{"6000.0.32f1"}, []pb.TargetPlatform{pb.TargetPlatform_PLATFORM_ANDROID})), pb.TargetPlatform_PLATFORM_ANDROID, "6000.0.32f1", true},
+		{"version mismatch", workerWith(unityCaps([]string{"2022.3.1f1"}, []pb.TargetPlatform{pb.TargetPlatform_PLATFORM_ANDROID})), pb.TargetPlatform_PLATFORM_ANDROID, "6000.0.32f1", false},
+		{"version pinned but worker lists none", workerWith(unityCaps(nil, []pb.TargetPlatform{pb.TargetPlatform_PLATFORM_ANDROID})), pb.TargetPlatform_PLATFORM_ANDROID, "6000.0.32f1", true},
+		{"platform match without version", workerWith(unityCaps([]string{"6000.0.32f1"}, []pb.TargetPlatform{pb.TargetPlatform_PLATFORM_ANDROID})), pb.TargetPlatform_PLATFORM_ANDROID, "", true},
+		{"platform mismatch", workerWith(unityCaps([]string{"6000.0.32f1"}, []pb.TargetPlatform{pb.TargetPlatform_PLATFORM_IOS})), pb.TargetPlatform_PLATFORM_ANDROID, "", false},
+		{"empty targets accepts any platform", workerWith(unityCaps([]string{"6000.0.32f1"}, nil)), pb.TargetPlatform_PLATFORM_WINDOWS, "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, workerSupportsUnity(tt.worker, tt.platform, tt.version))
+		})
+	}
 }

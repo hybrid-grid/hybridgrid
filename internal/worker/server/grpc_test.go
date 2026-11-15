@@ -2,6 +2,9 @@ package server
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -47,7 +50,7 @@ func TestCapabilities(t *testing.T) {
 }
 
 func TestStop_NotStarted(t *testing.T) {
-	s := New(Config{Port: 0, MaxConcurrent: 1})
+	s := New(Config{Port: 0, MaxConcurrent: 1, DefaultTimeout: 60 * time.Second})
 	// Should not panic
 	s.Stop()
 }
@@ -288,4 +291,64 @@ func TestCompile_ConcurrentRequests(t *testing.T) {
 				"Should not hit concurrency limit with MaxConcurrent=10")
 		}
 	}
+}
+
+// --- Unity builds ---
+
+// TestBuild_Unity_Completed: a fake editor on PATH must run in batch mode,
+// write the -logFile (embedded into Stdout), and produce the APK artifact
+// collected from <project>/Build.
+func TestBuild_Unity_Completed(t *testing.T) {
+	// The stub editor is a POSIX shell script on PATH; Windows resolves
+	// LookPath("Unity") through PATHEXT and needs a different fixture.
+	if runtime.GOOS == "windows" {
+		t.Skip("stub Unity editor fixture is POSIX-only")
+	}
+	binDir := t.TempDir()
+	stub := `#!/bin/sh
+prev=""
+for a in "$@"; do
+	if [ "$prev" = "-projectPath" ]; then mkdir -p "$a/Build"; echo apk > "$a/Build/app-release.apk"; fi
+	if [ "$prev" = "-logFile" ]; then echo "stub-unity build ok" > "$a"; fi
+	prev="$a"
+done
+exit 0
+`
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, "Unity"), []byte(stub), 0o755))
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	s := New(Config{Port: 0, MaxConcurrent: 1, DefaultTimeout: 60 * time.Second})
+	resp, err := s.Build(context.Background(), &pb.BuildRequest{
+		TaskId:         "unity-1",
+		BuildType:      pb.BuildType_BUILD_TYPE_UNITY,
+		TargetPlatform: pb.TargetPlatform_PLATFORM_ANDROID,
+		Config: &pb.BuildRequest_UnityConfig{
+			UnityConfig: &pb.UnityConfig{
+				BuildMethod:  "BuildScript.Build",
+				UnityVersion: "6000.0.32f1",
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, pb.TaskStatus_STATUS_COMPLETED, resp.Status)
+	assert.Equal(t, int32(0), resp.ExitCode)
+	assert.Contains(t, resp.Stdout, "stub-unity build ok")
+	require.Len(t, resp.ArtifactList, 1)
+	assert.Equal(t, "app-release.apk", resp.ArtifactList[0].Name)
+	assert.NotEmpty(t, resp.Artifacts)
+}
+
+func TestBuild_Unity_MissingConfig(t *testing.T) {
+	s := New(DefaultConfig())
+
+	_, err := s.Build(context.Background(), &pb.BuildRequest{
+		TaskId:    "unity-2",
+		BuildType: pb.BuildType_BUILD_TYPE_UNITY,
+	})
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
 }

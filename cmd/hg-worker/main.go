@@ -25,6 +25,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/logging"
 	observabilitymetrics "github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
+	"github.com/h3nr1-d14z/hybridgrid/internal/worker/builders"
 	workerserver "github.com/h3nr1-d14z/hybridgrid/internal/worker/server"
 )
 
@@ -75,6 +76,7 @@ It executes build tasks received from the coordinator.`,
 			httpPort, _ := cmd.Flags().GetInt("http-port")
 			token, _ := cmd.Flags().GetString("token")
 			maxParallel, _ := cmd.Flags().GetInt("max-parallel")
+			workerID, _ := cmd.Flags().GetString("worker-id")
 			discoveryTimeout, _ := cmd.Flags().GetDuration("discovery-timeout")
 			advertiseAddr, _ := cmd.Flags().GetString("advertise-address")
 			tlsCert, _ := cmd.Flags().GetString("tls-cert")
@@ -199,11 +201,65 @@ It executes build tasks received from the coordinator.`,
 				log.Debug().Msg("TLS disabled")
 			}
 
+			// Discover plugin builders (hg-exec-<id> executables) and
+			// advertise them as custom build types.
+			var builderIDs []string
+			builderDir, _ := cmd.Flags().GetString("builder-dir")
+			dockerImages := map[pb.Architecture]string{}
+			for arch, flag := range map[pb.Architecture]string{
+				pb.Architecture_ARCH_X86_64: "docker-image-x86",
+				pb.Architecture_ARCH_ARM64:  "docker-image-arm64",
+			} {
+				if image, _ := cmd.Flags().GetString(flag); image != "" {
+					dockerImages[arch] = image
+				}
+			}
+			if len(dockerImages) > 0 {
+				cfg.DockerImages = dockerImages
+			}
+			dockerCCs := map[pb.Architecture]string{}
+			for arch, flag := range map[pb.Architecture]string{
+				pb.Architecture_ARCH_X86_64: "docker-image-x86-cc",
+				pb.Architecture_ARCH_ARM64:  "docker-image-arm64-cc",
+			} {
+				if cc, _ := cmd.Flags().GetString(flag); cc != "" {
+					dockerCCs[arch] = cc
+				}
+			}
+			if len(dockerCCs) > 0 {
+				cfg.DockerToolchains = dockerCCs
+			}
+			if builderDir != "" {
+				registry := builders.NewRegistry()
+				builderIDs = registry.Discover(builderDir)
+				if len(builderIDs) > 0 {
+					cfg.Builders = registry
+					log.Info().Strs("builders", builderIDs).Str("dir", builderDir).
+						Msg("Plugin builders discovered")
+				} else {
+					log.Info().Str("dir", builderDir).
+						Msg("No plugin builders discovered")
+				}
+			}
+
 			srv := workerserver.New(cfg)
 			caps := srv.Capabilities()
-			caps.WorkerId = fmt.Sprintf("worker-%s", hostname)
+			if workerID == "" {
+				// Default identity: hostname-derived. Distinct workers
+				// sharing a hostname (e.g. two processes on one machine
+				// or host-network containers) MUST set --worker-id or
+				// they overwrite each other's registry entry.
+				workerID = fmt.Sprintf("worker-%s", hostname)
+			}
+			caps.WorkerId = workerID
 			caps.MaxParallelTasks = int32(maxParallel)
 			caps.Version = version
+			if len(builderIDs) > 0 {
+				caps.CustomBuilders = builderIDs
+				if versions := srv.BuilderVersions(); len(versions) > 0 {
+					caps.CustomBuilderVersions = versions
+				}
+			}
 
 			// Connect to coordinator
 			cli, err := client.New(client.Config{
@@ -332,6 +388,7 @@ It executes build tasks received from the coordinator.`,
 	serveCmd.Flags().Int("port", 50052, "Worker gRPC port")
 	serveCmd.Flags().Int("http-port", 9090, "Worker HTTP/metrics port")
 	serveCmd.Flags().String("coordinator", "", "Coordinator address (empty for mDNS auto-discovery)")
+	serveCmd.Flags().String("worker-id", "", "Unique worker identity (default: worker-<hostname>; REQUIRED when several workers share a hostname)")
 	serveCmd.Flags().String("advertise-address", "", "Address to advertise to coordinator (default: hostname:port)")
 	serveCmd.Flags().String("token", "", "Authentication token")
 	serveCmd.Flags().Int("max-parallel", 0, "Max parallel tasks (0 = auto)")
@@ -339,6 +396,11 @@ It executes build tasks received from the coordinator.`,
 	serveCmd.Flags().String("tls-cert", "", "Path to TLS certificate file (PEM format)")
 	serveCmd.Flags().String("tls-key", "", "Path to TLS private key file (PEM format)")
 	serveCmd.Flags().String("tls-ca", "", "Path to CA certificate for client verification (mTLS)")
+	serveCmd.Flags().String("builder-dir", "", "Directory containing plugin builder executables (hg-exec-<id>)")
+	serveCmd.Flags().String("docker-image-x86", "", "Override compile image for x86_64 targets (default: dockcross/linux-x64)")
+	serveCmd.Flags().String("docker-image-arm64", "", "Override compile image for arm64 targets (default: dockcross/linux-arm64)")
+	serveCmd.Flags().String("docker-image-x86-cc", "", "Compiler command inside the x86_64 image (e.g. a prefixed cross gcc; empty keeps the client's compiler)")
+	serveCmd.Flags().String("docker-image-arm64-cc", "", "Compiler command inside the arm64 image (e.g. aarch64-linux-gnu-gcc; empty keeps the client's compiler)")
 	serveCmd.Flags().Bool("tls-require-client-cert", false, "Require client certificates (mTLS)")
 	serveCmd.Flags().Bool("tracing-enable", false, "Enable OpenTelemetry tracing")
 	serveCmd.Flags().String("tracing-endpoint", "localhost:4317", "OTLP gRPC endpoint")

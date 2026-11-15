@@ -340,3 +340,27 @@ func TestWorkerInfoIsHealthy(t *testing.T) {
 		})
 	}
 }
+
+// TestMatchesCapability_CrossArchRequiresDocker pins the regression where a
+// worker advertising Cpp.CrossCompile (set by any *-linux-gnu-gcc, including
+// Ubuntu's native-arch symlink) accepted tasks for a different architecture
+// and compiled them natively — silently wrong-arch objects.
+func TestMatchesCapability_CrossArchRequiresDocker(t *testing.T) {
+	caps := func(docker bool, cross bool) *pb.WorkerCapabilities {
+		return &pb.WorkerCapabilities{
+			NativeArch:      pb.Architecture_ARCH_ARM64,
+			DockerAvailable: docker,
+			Cpp:             &pb.CppCapability{Compilers: []string{"gcc"}, CrossCompile: cross},
+		}
+	}
+
+	if MatchesCapability(caps(false, true), pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64) {
+		t.Error("cross_compile alone must not qualify for a different arch")
+	}
+	if MatchesCapability(caps(true, false), pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_X86_64) != true {
+		t.Error("docker availability must allow cross-arch dispatch")
+	}
+	if !MatchesCapability(caps(false, true), pb.BuildType_BUILD_TYPE_CPP, pb.Architecture_ARCH_ARM64) {
+		t.Error("native arch must always match")
+	}
+}

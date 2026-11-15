@@ -1,0 +1,72 @@
+@import "tailwindcss";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+@import "@fontsource/jetbrains-mono/600.css";
+@import "@fontsource/jetbrains-mono/700.css";
+
+/* Same phosphor-green "compile farm" identity as the dashboard and docs. */
+@theme {
+  --font-sans: ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --color-canvas: oklch(0.16 0.012 255);
+  --color-canvas-raised: oklch(0.19 0.013 255);
+  --color-surface: oklch(0.205 0.013 255);
+  --color-surface-inset: oklch(0.13 0.011 255);
+
+  --color-hairline: oklch(1 0 0 / 8%);
+  --color-hairline-strong: oklch(1 0 0 / 14%);
+
+  --color-ink: oklch(0.94 0.006 255);
+  --color-ink-secondary: oklch(0.78 0.012 255);
+  --color-ink-muted: oklch(0.6 0.012 255);
+  --color-ink-faint: oklch(0.44 0.012 255);
+
+  --color-signal: oklch(0.82 0.16 165);
+  --color-signal-strong: oklch(0.88 0.18 165);
+  --color-status-failed: oklch(0.7 0.19 25);
+  --color-status-running: oklch(0.75 0.13 230);
+  --color-status-timeout: oklch(0.8 0.16 85);
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --animate-heartbeat: heartbeat 2.4s ease-in-out infinite;
+
+  @keyframes heartbeat {
+    0%,
+    100% {
+      opacity: 0.55;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes trace-scroll {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-240px);
+    }
+  }
+}
+
+html {
+  color-scheme: dark;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+.font-tabular {
+  font-variant-numeric: tabular-nums;
+}

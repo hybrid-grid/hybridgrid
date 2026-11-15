@@ -107,6 +107,9 @@ message TelemetryBuild {
   int64 first_task_at_ms = 9;
   int64 last_task_at_ms = 10;
   bool truncated = 11;
+  // Scheduling policy that produced this build (empty if unknown).
+  string scheduler = 12;
+  string scheduler_params = 13;
 }
 
 // Retained console output of one task.

@@ -42,7 +42,10 @@ make lint
 gofmt -l .
 
 # Security scan
-gosec -exclude=G104,G109,G112,G115,G204,G301,G304,G306,G402 ./...
+# Same command as the security job in .github/workflows/ci.yml (gen/ and test/ are excluded by scan)
+gosec -exclude=G104,G109,G112,G115,G204,G301,G304,G306,G402 -exclude-dir=gen -exclude-dir=test ./...
+# CI fails on reachable vulnerabilities except the two unpatched Moby client advisories
+# (GO-2026-4887, GO-2026-4883; docker/docker v28.5.2, Fixed in: N/A) - allowlist lives in ci.yml
 govulncheck ./...
 
 # Regenerate protobuf code
@@ -70,6 +73,10 @@ internal/               # Core application packages
   platform/             # Platform-specific code
   security/             # Auth (token), TLS/mTLS, input validation
   worker/               # Worker: native, Docker, and MSVC executors
+    builders/           # Plugin-builder discovery + exec contract (builderv1alpha1)
+  webhook/ (under coordinator/)  # HTTP event webhooks (eventhooksv1)
+sdk/builder/            # Go SDK for plugin-builder authors
+examples/               # Reference plugins (builders/, schedulers/)
 gen/go/                 # Generated protobuf Go code (do not edit)
 proto/                  # Protobuf definitions (.proto files)
 test/                   # Integration, load, chaos, and stress tests

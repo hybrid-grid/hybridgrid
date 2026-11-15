@@ -355,6 +355,43 @@ func TestServer_Console200(t *testing.T) {
 	}
 }
 
+func TestServer_ServesEmbeddedAsset(t *testing.T) {
+	s, _, _, cleanup := setupServer(t, &fakeProvider{}, telemetry.NewStore())
+	defer cleanup()
+
+	rec := doGETRouted(s, "/favicon.svg")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("asset status = %d, want 200", rec.Code)
+	}
+	if contentType := rec.Header().Get("Content-Type"); !strings.Contains(contentType, "image/svg+xml") {
+		t.Errorf("asset Content-Type = %q, want image/svg+xml", contentType)
+	}
+	if !strings.Contains(rec.Body.String(), "<svg") {
+		t.Errorf("asset body does not contain SVG markup: %q", rec.Body.String())
+	}
+}
+
+func TestServer_SPAFallbackServesIndex(t *testing.T) {
+	s, _, _, cleanup := setupServer(t, &fakeProvider{}, telemetry.NewStore())
+	defer cleanup()
+
+	index := doGETRouted(s, "/")
+	if index.Code != http.StatusOK {
+		t.Fatalf("index status = %d, want 200", index.Code)
+	}
+
+	deepRoute := doGETRouted(s, "/builds/example-build")
+	if deepRoute.Code != http.StatusOK {
+		t.Fatalf("deep route status = %d, want 200", deepRoute.Code)
+	}
+	if got, want := deepRoute.Header().Get("Content-Type"), index.Header().Get("Content-Type"); got != want {
+		t.Errorf("deep route Content-Type = %q, want %q", got, want)
+	}
+	if !bytes.Equal(deepRoute.Body.Bytes(), index.Body.Bytes()) {
+		t.Error("deep route did not serve the embedded index.html")
+	}
+}
+
 // TestServer_Health verifies the liveness probe answers 200 OK\n.
 func TestServer_Health(t *testing.T) {
 	s, _, _, cleanup := setupServer(t, &fakeProvider{}, telemetry.NewStore())

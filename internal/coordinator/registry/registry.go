@@ -192,7 +192,7 @@ func (r *InMemoryRegistry) ListByCapability(buildType pb.BuildType, arch pb.Arch
 			continue
 		}
 
-		if r.matchesCapability(w.Capabilities, buildType, arch) {
+		if MatchesCapability(w.Capabilities, buildType, arch) {
 			result = append(result, cloneWorkerInfo(w))
 		}
 	}
@@ -212,8 +212,10 @@ func cloneWorkerInfo(worker *WorkerInfo) *WorkerInfo {
 	return &copy
 }
 
-// matchesCapability checks if worker capabilities match the requirements.
-func (r *InMemoryRegistry) matchesCapability(caps *pb.WorkerCapabilities, buildType pb.BuildType, arch pb.Architecture) bool {
+// MatchesCapability reports whether capabilities can serve buildType on arch.
+// Package-level so other components (e.g. the scheduler plugin wrapper) can
+// re-validate worker choices against the same rules the registry applies.
+func MatchesCapability(caps *pb.WorkerCapabilities, buildType pb.BuildType, arch pb.Architecture) bool {
 	if caps == nil {
 		log.Debug().Msg("matchesCapability: caps is nil")
 		return false
@@ -222,9 +224,16 @@ func (r *InMemoryRegistry) matchesCapability(caps *pb.WorkerCapabilities, buildT
 	// Check architecture
 	if arch != pb.Architecture_ARCH_UNSPECIFIED {
 		archMatch := caps.NativeArch == arch
-		canCrossCompile := caps.DockerAvailable || (caps.Cpp != nil && caps.Cpp.CrossCompile)
+		// Only the Docker executor actually produces objects for a
+		// different architecture (it pulls the target platform image).
+		// Cpp.CrossCompile is not a routing signal: capability detection
+		// sets it whenever ANY *-linux-gnu-gcc exists — including the
+		// native-arch symlink Ubuntu ships with gcc — and no executor
+		// picks a cross toolchain for mismatched requests. Trusting it
+		// silently compiled x86_64 requests to aarch64.
+		canCrossArch := caps.DockerAvailable
 
-		if !archMatch && !canCrossCompile {
+		if !archMatch && !canCrossArch {
 			log.Debug().
 				Str("worker", caps.WorkerId).
 				Str("native_arch", caps.NativeArch.String()).
@@ -235,14 +244,13 @@ func (r *InMemoryRegistry) matchesCapability(caps *pb.WorkerCapabilities, buildT
 			return false
 		}
 
-		if !archMatch && canCrossCompile {
+		if !archMatch && canCrossArch {
 			log.Debug().
 				Str("worker", caps.WorkerId).
 				Str("native_arch", caps.NativeArch.String()).
 				Str("requested_arch", arch.String()).
 				Bool("docker", caps.DockerAvailable).
-				Bool("cross_compile", caps.Cpp != nil && caps.Cpp.CrossCompile).
-				Msg("matchesCapability: cross-compilation available")
+				Msg("matchesCapability: cross-arch available via docker")
 		}
 	}
 

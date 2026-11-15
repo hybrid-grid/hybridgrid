@@ -1,0 +1,55 @@
+---
+const nodes = [
+  { label: 'hgbuild', sub: 'CLI client' },
+  { label: 'hg-coord', sub: 'Coordinator' },
+];
+
+const workers = ['hg-worker', 'hg-worker', 'hg-worker'];
+---
+
+<section class="px-5 py-20">
+  <div class="mx-auto max-w-6xl">
+    <span class="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-faint">Architecture</span>
+    <h2 class="mt-2 text-[28px] font-bold tracking-[-0.01em] text-ink">Three binaries, one gRPC contract</h2>
+    <p class="mt-3 max-w-2xl text-[14px] leading-relaxed text-ink-muted">
+      hgbuild talks to the coordinator over gRPC; the coordinator schedules
+      work onto whichever worker is healthiest and least loaded, then dials
+      back into it to hand off the task.
+    </p>
+
+    <div class="mt-12 flex flex-col items-center gap-6">
+      <div class="flex flex-wrap items-center justify-center gap-4">
+        {nodes.map((node, i) => (
+          <>
+            <div class="rounded-lg border border-hairline-strong bg-surface px-6 py-4 text-center">
+              <div class="font-mono text-[13px] font-semibold text-ink">{node.label}</div>
+              <div class="text-[11px] text-ink-faint">{node.sub}</div>
+            </div>
+            {i < nodes.length - 1 && (
+              <svg width="40" height="16" viewBox="0 0 40 16" class="text-ink-faint" aria-hidden="true">
+                <line x1="0" y1="8" x2="32" y2="8" stroke="currentColor" stroke-width="1.5" />
+                <path d="M32 3 L38 8 L32 13" fill="none" stroke="currentColor" stroke-width="1.5" />
+              </svg>
+            )}
+          </>
+        ))}
+      </div>
+
+      <svg width="2" height="28" viewBox="0 0 2 28" class="text-ink-faint" aria-hidden="true">
+        <line x1="1" y1="0" x2="1" y2="22" stroke="currentColor" stroke-width="1.5" />
+        <path d="M-4 22 L1 27 L6 22" fill="none" stroke="currentColor" stroke-width="1.5" />
+      </svg>
+
+      <div class="flex flex-wrap justify-center gap-4">
+        {workers.map((worker, i) => (
+          <div class="rounded-lg border border-hairline bg-surface px-5 py-3 text-center">
+            <div class="flex items-center justify-center gap-1.5 font-mono text-[12px] text-ink-secondary">
+              <span class="h-1.5 w-1.5 rounded-full bg-signal animate-heartbeat" style={`animation-delay:${i * 300}ms`}></span>
+              {worker} <span class="text-ink-faint">#{i + 1}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+</section>
