@@ -32,7 +32,7 @@ Hybrid-Grid distributes compilation tasks across multiple machines on your LAN (
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Flutter builds | ✅ Working | Android-only for v0.4.0 |
-| Unity builds | ❌ Planned | v0.4.0 |
+| Unity builds | ✅ Working | Worker needs a Unity Hub editor install; dispatch matches the requested editor version |
 | Rust/Go/Node builds | ❌ Planned | v0.4.0 |
 | WAN Registry | ❌ Planned | Currently LAN-only |
 | Config Validation | ❌ Planned | Runtime config checks |
