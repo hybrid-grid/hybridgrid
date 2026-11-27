@@ -4,6 +4,10 @@ import (
 	"math"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidateDiscountFlags(t *testing.T) {
@@ -127,5 +131,25 @@ func TestValidateExperimentFlags(t *testing.T) {
 				t.Fatalf("validateExperimentFlags() = %v, want error containing %q", err, tt.wantError)
 			}
 		})
+	}
+}
+
+// TestRegisterServeFlagsUnique: a duplicate serve flag registration panics
+// at command-build time ("flag redefined") and killed hg-coord serve at
+// startup after the paper merge while every test stayed green. Building
+// the serve flag set now fails a test instead.
+func TestRegisterServeFlagsUnique(t *testing.T) {
+	cmd := &cobra.Command{Use: "serve"}
+	require.NotPanics(t, func() { registerServeFlags(cmd) })
+
+	seen := make(map[string]bool)
+	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+		if seen[f.Name] {
+			t.Fatalf("duplicate serve flag: --%s", f.Name)
+		}
+		seen[f.Name] = true
+	})
+	if len(seen) == 0 {
+		t.Fatal("expected serve flags to be registered")
 	}
 }
