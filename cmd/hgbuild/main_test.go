@@ -307,3 +307,25 @@ func TestParseArchStrict_RejectsUnknown(t *testing.T) {
 		t.Fatalf("parseArch(native) = %v, want UNSPECIFIED", got)
 	}
 }
+
+func TestFilterHgbuildFlags_Arch(t *testing.T) {
+	orig := wrapArch
+	defer func() { wrapArch = orig }()
+
+	wrapArch = ""
+	filtered := filterHgbuildFlags([]string{"--arch", "arm64", "-c", "a.c"})
+	if wrapArch != "arm64" {
+		t.Fatalf("space-form --arch ignored: got %q", wrapArch)
+	}
+	if containsArg(filtered, "--arch") || containsArg(filtered, "arm64") {
+		t.Fatalf("--arch leaked into compiler args: %v", filtered)
+	}
+
+	filtered = filterHgbuildFlags([]string{"--arch=x86_64", "-c", "a.c"})
+	if wrapArch != "x86_64" {
+		t.Fatalf("equals-form --arch ignored: got %q", wrapArch)
+	}
+	if containsArg(filtered, "--arch=x86_64") {
+		t.Fatalf("--arch leaked into compiler args: %v", filtered)
+	}
+}
