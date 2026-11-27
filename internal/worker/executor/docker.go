@@ -179,7 +179,9 @@ func (e *DockerExecutor) Execute(ctx context.Context, req *Request) (*Result, er
 	// (rootless/userns dockerd) the container runs under a remapped uid
 	// that cannot enter the mount — the compiler then reports
 	// "Cannot create temporary file in ./: Permission denied".
-	if err := os.Chmod(workDir, 0o777); err != nil {
+	// 01777: the container uid is remapped (userns) and must create output
+	// files in this per-task directory; sticky prevents clobbering.
+	if err := os.Chmod(workDir, os.ModeSticky|0o777); err != nil { // #nosec G302 -- per-task temp dir shared with a remapped container uid
 		return nil, fmt.Errorf("failed to open temp dir to container: %w", err)
 	}
 
