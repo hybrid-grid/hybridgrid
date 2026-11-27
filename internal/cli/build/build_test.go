@@ -1173,3 +1173,52 @@ func TestCacheKeyRaw_DistinguishesInputs(t *testing.T) {
 		t.Fatal("cache key must differ by flags")
 	}
 }
+
+// TestBuild_RawCrossArchSkipsPreprocess: a cross-arch request must ship raw
+// source (the worker preprocesses with its own arch-correct headers), never
+// a locally preprocessed .i.
+func TestBuild_RawCrossArchSkipsPreprocess(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	capture := &captureCompileServer{requests: make(chan *pb.CompileRequest, 2)}
+	grpcServer := grpc.NewServer()
+	pb.RegisterBuildServiceServer(grpcServer, capture)
+	go func() { _ = grpcServer.Serve(listener) }()
+	defer grpcServer.Stop()
+	grpcClient, err := client.New(client.Config{Address: listener.Addr().String(), Insecure: true, Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer grpcClient.Close()
+
+	source := filepath.Join(t.TempDir(), "hello.c")
+	if err := os.WriteFile(source, []byte("int main(void){ return 0; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := &Service{client: grpcClient, maxRetries: 1}
+	req := &Request{
+		TaskID:       "task",
+		SourceFile:   source,
+		Args:         &compiler.ParsedArgs{Compiler: "gcc"},
+		TargetArch:   pb.Architecture_ARCH_ARM64,
+		RawCrossArch: true,
+		Timeout:      time.Second,
+	}
+	if _, err := svc.Build(context.Background(), req); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	got := <-capture.requests
+	if len(got.RawSource) == 0 {
+		t.Fatal("expected RawSource for a cross-arch request")
+	}
+	if len(got.PreprocessedSource) != 0 {
+		t.Fatalf("cross-arch request carried %d bytes of preprocessed source", len(got.PreprocessedSource))
+	}
+	if got.TargetArch != pb.Architecture_ARCH_ARM64 {
+		t.Fatalf("TargetArch = %v, want ARM64", got.TargetArch)
+	}
+}

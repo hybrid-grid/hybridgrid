@@ -46,6 +46,7 @@ var (
 	tlsCert           string
 	tlsKey            string
 	tlsCA             string
+	wrapArch          string
 	tracingEnable     bool
 	tracingEndpoint   string
 	tracingSampleRate float64
@@ -1085,6 +1086,8 @@ func filterHgbuildFlags(args []string) []string {
 				if d, err := time.ParseDuration(arg); err == nil {
 					timeout = d
 				}
+			case "arch":
+				wrapArch = arg
 			}
 			pending = ""
 			continue
@@ -1100,6 +1103,12 @@ func filterHgbuildFlags(args []string) []string {
 			continue
 		case strings.HasPrefix(arg, "--coordinator="):
 			coordinator = strings.TrimPrefix(arg, "--coordinator=")
+			continue
+		case arg == "--arch":
+			pending = "arch"
+			continue
+		case strings.HasPrefix(arg, "--arch="):
+			wrapArch = strings.TrimPrefix(arg, "--arch=")
 			continue
 		case arg == "--timeout":
 			pending = "timeout"
@@ -1219,6 +1228,16 @@ func runCompiler(defaultCompiler, envVar string, args []string) error {
 		outputFile = base + ".o"
 	}
 
+	// Target arch: an explicit --arch wins over -march-derived hints.
+	arch := parseArch(parsed.TargetArch)
+	if wrapArch != "" {
+		var archErr error
+		arch, archErr = parseArchStrict(wrapArch)
+		if archErr != nil {
+			return fmt.Errorf("--arch: %w", archErr)
+		}
+	}
+
 	// Build request
 	req := &build.Request{
 		TaskID:     taskid.NewTaskID(),
@@ -1226,8 +1245,11 @@ func runCompiler(defaultCompiler, envVar string, args []string) error {
 		SourceFile: parsed.InputFiles[0],
 		OutputFile: outputFile,
 		Args:       parsed,
-		TargetArch: parseArch(parsed.TargetArch),
-		Timeout:    workerTimeout(),
+		TargetArch: arch,
+		// Cross-arch: local preprocessing would bake this machine's
+		// headers into the .i — silently wrong on the other arch.
+		RawCrossArch: arch != pb.Architecture_ARCH_UNSPECIFIED && arch != clientArch(),
+		Timeout:      workerTimeout(),
 	}
 
 	ctx := context.Background()

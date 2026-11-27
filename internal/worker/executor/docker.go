@@ -175,6 +175,14 @@ func (e *DockerExecutor) Execute(ctx context.Context, req *Request) (*Result, er
 	}
 	defer os.RemoveAll(workDir)
 
+	// MkdirTemp creates 0700 owned by the worker's uid. With userns-remap
+	// (rootless/userns dockerd) the container runs under a remapped uid
+	// that cannot enter the mount — the compiler then reports
+	// "Cannot create temporary file in ./: Permission denied".
+	if err := os.Chmod(workDir, 0o777); err != nil {
+		return nil, fmt.Errorf("failed to open temp dir to container: %w", err)
+	}
+
 	// Determine source file and write it
 	var srcFile string
 	if len(req.RawSource) > 0 {
@@ -266,6 +274,10 @@ func (e *DockerExecutor) Execute(ctx context.Context, req *Request) (*Result, er
 		hostConfig.CapDrop = []string{"ALL"}
 		hostConfig.SecurityOpt = []string{"no-new-privileges"}
 		hostConfig.ReadonlyRootfs = true
+		// Compilers (gcc/cc1/as) write intermediate files to TMPDIR;
+		// a read-only rootfs without a writable /tmp makes them fail
+		// with "Cannot create temporary file".
+		hostConfig.Tmpfs = map[string]string{"/tmp": "rw,exec,nosuid,nodev,size=256m"}
 	}
 
 	// Create container
