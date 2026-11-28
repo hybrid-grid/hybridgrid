@@ -33,25 +33,32 @@ coordinator.
 
 ## `hgbuild cc`/`make` fail with "error reading server preface: EOF"
 
-Known bug: `--coordinator` (and mDNS auto-discovery) don't reliably reach the
-compile path for `cc`/`c++`/`make`/`ninja`, even when the address is
-TCP-reachable and works fine for `hgbuild build`/`hg-worker`. **Workaround:**
-set the `HG_COORDINATOR` environment variable instead of the flag.
+Earlier versions silently ignored `--coordinator` for `cc`/`c++` (they run
+with flag parsing disabled); `hgbuild cc`/`c++` now parse `--coordinator`/`-C`
+themselves. Whether the `server preface: EOF` failure itself is gone is **not
+confirmed**: it points at a transport mismatch (plaintext vs. TLS, or an
+mDNS-advertised address that isn't the coordinator's gRPC port). If you still
+hit it, check that `--insecure`/TLS flags match the coordinator, and set the
+`HG_COORDINATOR` environment variable explicitly (`host:9000`) instead of
+relying on mDNS. `make`/`ninja`/`wrap` don't parse `--coordinator` from their
+arguments — use `HG_COORDINATOR` for those.
 
-## Builds via `make`/`cc` never show up grouped on the dashboard
+## `cc`/`c++` tasks show up ungrouped on the dashboard
 
-`hgbuild cc`/`make` never set `build_id` on the compile request, despite
-appearances in the code — only `hgbuild build file1 file2 ...` does. Tasks
-from `make`/`cc` still get scheduled and cached normally, they just show up
-as individual ungrouped tasks rather than one "build" on the dashboard's
-Builds page.
+`hgbuild build`, `hgbuild make`, `ninja`, and `wrap` each create a build
+session (the wrappers export `HG_BUILD_ID`), so their tasks group into one
+build on the Builds page. A bare `hgbuild cc`/`c++` call only sends a
+`build_id` when `HG_BUILD_ID` is already exported — otherwise it shows up as
+an individual task. Export `HG_BUILD_ID` yourself (any non-empty value) when
+driving `cc`/`c++` from your own build script.
 
 ## Running two workers on the same machine collapses into one
 
-`hg-worker`'s ID is `worker-<hostname>` with no port/PID suffix and no
-override flag — a second worker process on the same host overwrites the
-first one's coordinator registry entry. Use separate containers/VMs (each
-gets its own hostname) instead, e.g. `docker compose up -d --scale worker=N`.
+`hg-worker`'s default ID is `worker-<hostname>` with no port/PID suffix — a
+second worker process on the same host overwrites the first one's coordinator
+registry entry unless you pass a distinct `--worker-id` to each. Alternatively
+use separate containers/VMs (each gets its own hostname), e.g.
+`docker compose up -d --scale worker=N`.
 
 ## Cache not working
 

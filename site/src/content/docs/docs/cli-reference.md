@@ -9,9 +9,19 @@ auto-discovers via mDNS if empty), `--insecure` (default `true`), `--no-fallback
 OpenTelemetry.
 
 :::note
-`hgbuild cc`/`c++`/`make`/`ninja` currently ignore `--coordinator` in some
-paths — set `HG_COORDINATOR` as an environment variable instead if remote
-compilation isn't connecting. Tracked in the repo's `TODO.md`.
+The coordinator address is resolved in this order: `--coordinator`/`-C`, the
+`HG_COORDINATOR` environment variable, then mDNS auto-discovery. `hgbuild cc`
+and `hgbuild c++` run with flag parsing disabled and parse `--coordinator`/`-C`
+(plus `--timeout`, `--arch`, `--insecure`, `--no-fallback`, `-v`) themselves
+before handing the rest to the compiler. `hgbuild make`, `ninja`, and `wrap`
+pass their arguments straight through to the wrapped tool (`make -C dir` is
+make's own flag), so for those set `HG_COORDINATOR` in the environment.
+:::
+
+:::caution
+If `cc`/`c++`/`make` still fail with `error reading server preface: EOF`, see
+[Troubleshooting](/docs/troubleshooting/) — that symptom has not been confirmed
+fixed.
 :::
 
 ## Compiling
@@ -19,21 +29,24 @@ compilation isn't connecting. Tracked in the repo's `TODO.md`.
 **`hgbuild cc [flags] [files...]`** / **`hgbuild c++ ...`**
 Drop-in `gcc`/`g++` replacement. Preprocesses locally, checks the local cache,
 sends the translation unit to the coordinator, falls back to local compile on
-any coordinator/network failure (unless `--no-fallback`).
+any coordinator/network failure (unless `--no-fallback`). The request carries a
+`build_id` only when `HG_BUILD_ID` is set in the environment (`hgbuild make`
+does this for you); a lone `cc` call is not grouped into a build.
 
 **`hgbuild make [make-args...]`** / **`hgbuild ninja [ninja-args...]`**
 Wraps the build tool: sets `CC`/`CXX` to route through `hgbuild cc`/`c++` so
-every translation unit in the build gets distributed. Use `-v` for
-`[cache]`/`[remote]`/`[local]` per-file status.
+every translation unit in the build gets distributed, and exports one
+`HG_BUILD_ID` so all of them are grouped as a single build on the dashboard.
+Use `-v` for `[cache]`/`[remote]`/`[local]` per-file status.
 
 **`hgbuild wrap <command> [args...]`**
 Generic version of `make`/`ninja` — wraps any build command that respects
-`CC`/`CXX` env vars.
+`CC`/`CXX` env vars (also exports `HG_BUILD_ID`).
 
 **`hgbuild build [files...]`**
 Submits files directly as one build session (sets `build_id`, so it shows up
-grouped on the dashboard's Builds page — unlike `cc`/`make`, see the note
-above). Flags: `--compiler`, `--args` (compiler args), `--arch`, `-o`/`--output`,
+grouped on the dashboard's Builds page). Reads the coordinator address the same
+way as the other subcommands (`--coordinator`, `HG_COORDINATOR`, mDNS). Flags: `--compiler`, `--args` (compiler args), `--arch`, `-o`/`--output`,
 `-t`/`--type` (`cpp`, `flutter`, `unity`, `rust`, `go` — only `cpp`/`flutter`/`unity`
 have a working executor today).
 

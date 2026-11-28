@@ -17,8 +17,8 @@ Brings up `coordinator` (ports 9000 gRPC, 8080 HTTP), `dashboard` (8081), and
 docker compose up -d --scale worker=8
 ```
 
-Each container gets its own hostname, which sidesteps a real worker-ID
-collision bug (see below) — this is the easy way to see a multi-worker
+Each container gets its own hostname, which sidesteps the worker-ID
+collision described below — this is the easy way to see a multi-worker
 cluster without touching a second physical machine.
 
 For Flutter, use the separate `docker-compose.flutter.yml` (a Flutter-capable
@@ -43,11 +43,17 @@ Docker Compose on one host:
   You'll need to write a `Deployment`/`Service` for `hg-coord` and a
   `Deployment`/`StatefulSet` for `hg-worker` yourself.
 
-## Known limitation: worker-ID collisions on one host
+## Multiple workers on one host need `--worker-id`
 
-`hg-worker`'s ID is generated as `worker-<hostname>` — hostname only, no
-port or PID suffix, and there's no `--worker-id` override flag. Two
-`hg-worker` processes on the **same machine** (different `--port`, not in
-separate containers) will silently overwrite each other's registry entry on
-the coordinator instead of showing up as two workers. Containers/pods each
-get their own hostname and aren't affected. Tracked in the repo's `TODO.md`.
+`hg-worker` defaults its ID to `worker-<hostname>` — hostname only, no port
+or PID suffix. Two `hg-worker` processes on the **same machine** (different
+`--port`, not in separate containers) must each be given a distinct
+`--worker-id`; otherwise they silently overwrite each other's registry entry
+on the coordinator instead of showing up as two workers.
+
+```bash
+hg-worker serve --coordinator=localhost:9000 --port 50052 --worker-id=worker-a
+hg-worker serve --coordinator=localhost:9000 --port 50053 --worker-id=worker-b
+```
+
+Containers/pods each get their own hostname and aren't affected.
