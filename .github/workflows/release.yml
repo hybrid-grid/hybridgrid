@@ -15,7 +15,7 @@ permissions:
 
 env:
   # Must satisfy go.mod (>=1.26.0); tracks ci.yml's GO_VERSION.
-  GO_VERSION: "1.27.2"
+  GO_VERSION: "1.27.4"
 
 jobs:
   release:
