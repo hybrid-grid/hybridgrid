@@ -46,11 +46,11 @@ func (s *Server) handleCustomBuild(ctx context.Context, req *pb.BuildRequest, bu
 		atomic.AddInt64(&s.cacheMisses, 1)
 	}
 
-	worker, queueWait, err := s.selectBuildWorker(ctx,
-		func(w *registry.WorkerInfo) bool {
-			return w != nil && w.Capabilities != nil &&
-				containsString(w.Capabilities.GetCustomBuilders(), builderID)
-		}, builderID)
+	filter := func(w *registry.WorkerInfo) bool {
+		return w != nil && w.Capabilities != nil &&
+			containsString(w.Capabilities.GetCustomBuilders(), builderID)
+	}
+	worker, queueWait, err := s.selectBuildWorker(ctx, filter, builderID)
 	if err != nil {
 		s.countNoWorker()
 		log.Error().Err(err).Str("task_id", req.TaskId).
@@ -59,7 +59,7 @@ func (s *Server) handleCustomBuild(ctx context.Context, req *pb.BuildRequest, bu
 		return s.noWorkerResponse(meta, start, err), nil
 	}
 
-	conn, failed := s.connectBuildWorker(ctx, meta, start, worker)
+	worker, conn, failed := s.connectBuildWorker(ctx, meta, start, worker, filter, builderID)
 	if failed != nil {
 		return failed, nil
 	}

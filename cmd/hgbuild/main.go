@@ -302,6 +302,7 @@ func newWorkersCmd() *cobra.Command {
 					MemoryGB:     float64(w.MemoryBytes) / (1024 * 1024 * 1024),
 					ActiveTasks:  int(w.ActiveTasks),
 					CircuitState: w.CircuitState,
+					Unhealthy:    w.Healthy != nil && !*w.Healthy,
 				}
 			}
 

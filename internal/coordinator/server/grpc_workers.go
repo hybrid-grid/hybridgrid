@@ -131,6 +131,11 @@ func (s *Server) GetWorkerStatus(ctx context.Context, req *pb.WorkerStatusReques
 			ActiveTasks:         w.ActiveTasks,
 			TotalTasksCompleted: w.TotalTasks,
 			LastHeartbeatUnix:   w.LastHeartbeat.Unix(),
+			Healthy:             &healthy,
+			CircuitState:        "CLOSED",
+		}
+		if s.circuitManager != nil {
+			info.CircuitState = string(s.circuitManager.GetState(w.ID))
 		}
 		infos = append(infos, info)
 	}

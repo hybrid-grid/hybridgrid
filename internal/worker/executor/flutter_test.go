@@ -144,7 +144,11 @@ func TestFlutterExecutor_Execute_CommandError(t *testing.T) {
 	}
 }
 
-func TestFlutterExecutor_Execute_GradleDaemonStopped(t *testing.T) {
+// TestFlutterExecutor_Execute_NoGlobalGradleStop: builds run Gradle in a
+// single-use daemon (see flutterGradleOpts), so the executor must never run
+// "gradlew --stop" — that stops every daemon of the user and killed other
+// Flutter builds running on the same machine.
+func TestFlutterExecutor_Execute_NoGlobalGradleStop(t *testing.T) {
 	setupFakeFlutter(t)
 	gradleStopMarker := filepath.Join(t.TempDir(), "gradle-stop-called")
 	t.Setenv("HG_GRADLE_STOP_MARKER", gradleStopMarker)
@@ -173,16 +177,8 @@ func TestFlutterExecutor_Execute_GradleDaemonStopped(t *testing.T) {
 		t.Fatalf("Expected success, stderr=%q", result.Stderr)
 	}
 
-	if _, err := os.Stat(gradleStopMarker); err != nil {
-		t.Fatalf("Expected gradle --stop to be called (marker file missing): %v", err)
-	}
-
-	data, err := os.ReadFile(gradleStopMarker)
-	if err != nil {
-		t.Fatalf("Failed to read marker file: %v", err)
-	}
-	if !strings.Contains(string(data), "--stop") {
-		t.Fatalf("Expected --stop argument, got: %q", string(data))
+	if data, err := os.ReadFile(gradleStopMarker); err == nil {
+		t.Fatalf("gradlew must not be invoked after the build, got: %q", string(data))
 	}
 }
 

@@ -11,10 +11,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 )
@@ -68,7 +69,23 @@ const (
 )
 
 type FlutterExecutor struct {
-	command string
+	command     string
+	gradleCache GradleCache
+}
+
+// SetGradleCache points this executor's Gradle builds at a shared remote
+// build cache; a zero GradleCache turns it off.
+func (e *FlutterExecutor) SetGradleCache(cache GradleCache) {
+	e.gradleCache = cache
+}
+
+// buildEnv is the environment for flutter and the Gradle it starts.
+func (e *FlutterExecutor) buildEnv() []string {
+	env := flutterGradleEnv(os.Environ())
+	if e.gradleCache.Token != "" {
+		env = append(env, gradleCacheTokenEnv+"="+e.gradleCache.Token)
+	}
+	return env
 }
 
 func NewFlutterExecutor() *FlutterExecutor {
@@ -119,7 +136,6 @@ func (e *FlutterExecutor) Execute(ctx context.Context, req *Request) (*Result, e
 		return nil, fmt.Errorf("failed to create temp dir: %w", err)
 	}
 	defer os.RemoveAll(workDir)
-	defer stopGradleDaemon(workDir)
 
 	if len(req.SourceArchive) > 0 {
 		if err := extractSourceArchive(workDir, req.SourceArchive); err != nil {
@@ -134,7 +150,11 @@ func (e *FlutterExecutor) Execute(ctx context.Context, req *Request) (*Result, e
 
 	pubGetOut := newLimitedBuffer(maxFlutterLogBytes)
 	pubGetErr := newLimitedBuffer(maxFlutterLogBytes)
-	if err := runFlutterPubGet(execCtx, e.command, workDir, pubGetOut, pubGetErr); err != nil {
+	if err := configureGradleCache(workDir, e.gradleCache); err != nil {
+		// A cache problem must not fail the build; it just runs uncached.
+		log.Warn().Err(err).Str("task_id", req.TaskID).Msg("Gradle remote cache not configured")
+	}
+	if err := runFlutterPubGet(execCtx, e.command, workDir, e.buildEnv(), pubGetOut, pubGetErr); err != nil {
 		result := &Result{
 			Success:  false,
 			ExitCode: 1,
@@ -149,7 +169,7 @@ func (e *FlutterExecutor) Execute(ctx context.Context, req *Request) (*Result, e
 	args := buildFlutterArgs(outputType, modeFlag, flutterConfig)
 	cmd := exec.CommandContext(execCtx, e.command, args...)
 	cmd.Dir = workDir
-	cmd.Env = append(os.Environ(), "GRADLE_OPTS=-Dorg.gradle.vfs.watch=false")
+	cmd.Env = e.buildEnv()
 
 	stdout := newLimitedBuffer(maxFlutterLogBytes)
 	stderr := newLimitedBuffer(maxFlutterLogBytes)
@@ -201,35 +221,36 @@ func (e *FlutterExecutor) Execute(ctx context.Context, req *Request) (*Result, e
 	return result, nil
 }
 
-func runFlutterPubGet(ctx context.Context, flutterCmd, workDir string, stdout, stderr *limitedBuffer) error {
+func runFlutterPubGet(ctx context.Context, flutterCmd, workDir string, env []string, stdout, stderr *limitedBuffer) error {
 	cmd := exec.CommandContext(ctx, flutterCmd, "pub", "get")
 	cmd.Dir = workDir
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	cmd.Env = append(os.Environ(), "GRADLE_OPTS=-Dorg.gradle.vfs.watch=false")
+	cmd.Env = env
 	return cmd.Run()
 }
 
-// stopGradleDaemon kills the Gradle daemon to ensure build isolation.
-// Best-effort: errors are swallowed since daemon cleanup is non-critical.
-func stopGradleDaemon(workDir string) {
-	// Windows cannot exec the extensionless gradlew shell script; Gradle
-	// projects ship gradlew.bat alongside it for exactly this case.
-	gradlewName := "gradlew"
-	if runtime.GOOS == "windows" {
-		gradlewName = "gradlew.bat"
-	}
-	gradlewPath := filepath.Join(workDir, "android", gradlewName)
-	if _, err := os.Stat(gradlewPath); err != nil {
-		return
-	}
+// flutterGradleOpts runs each build's Gradle in a single-use daemon that
+// exits with the build. A shared daemon had to be stopped afterwards with
+// "gradlew --stop", which stops every daemon of the user — killing any
+// other Flutter build running on the same machine (a worker with
+// --max-parallel > 1, or several workers on one host). vfs.watch is off
+// because the work dir is deleted right after the build.
+const flutterGradleOpts = "-Dorg.gradle.vfs.watch=false -Dorg.gradle.daemon=false"
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, gradlewPath, "--stop")
-	cmd.Dir = filepath.Join(workDir, "android")
-	_ = cmd.Run()
+// flutterGradleEnv returns env with GRADLE_OPTS set for an isolated build,
+// keeping any GRADLE_OPTS the operator already exported.
+func flutterGradleEnv(env []string) []string {
+	out := make([]string, 0, len(env)+1)
+	existing := ""
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "GRADLE_OPTS=") {
+			existing = strings.TrimPrefix(kv, "GRADLE_OPTS=")
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, "GRADLE_OPTS="+strings.TrimSpace(existing+" "+flutterGradleOpts))
 }
 
 func resolveFlutterBuildOptions(buildMode string) (flutterOutputType, string, error) {
@@ -275,6 +296,13 @@ func buildFlutterArgs(outputType flutterOutputType, modeFlag string, cfg *pb.Flu
 	}
 	if cfg.Flavor != "" {
 		args = append(args, "--flavor", cfg.Flavor)
+	}
+	if platforms := validTargetPlatforms(cfg.GetTargetPlatforms()); len(platforms) > 0 {
+		args = append(args, "--target-platform", strings.Join(platforms, ","))
+	}
+	// --split-per-abi only exists for APKs; an app bundle always carries every ABI.
+	if cfg.GetSplitPerAbi() && outputType == flutterOutputAPK {
+		args = append(args, "--split-per-abi")
 	}
 	if len(cfg.DartDefines) > 0 {
 		keys := make([]string, 0, len(cfg.DartDefines))
@@ -343,6 +371,7 @@ func collectFlutterArtifacts(workDir string, outputType flutterOutputType) ([]*p
 		return nil, nil, fmt.Errorf("no %s artifacts found", wantExt)
 	}
 
+	entries = dedupeFlutterArtifacts(entries)
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].info.Path < entries[j].info.Path
 	})
@@ -539,4 +568,52 @@ func isZstdArchive(data []byte) bool {
 		return false
 	}
 	return data[0] == 0x28 && data[1] == 0xB5 && data[2] == 0x2F && data[3] == 0xFD
+}
+
+// flutterTargetPlatforms are the Android --target-platform values Flutter
+// accepts; anything else is dropped rather than passed to the command line.
+var flutterTargetPlatforms = map[string]bool{"android-arm": true, "android-arm64": true, "android-x64": true}
+
+func validTargetPlatforms(platforms []string) []string {
+	out := make([]string, 0, len(platforms))
+	for _, p := range platforms {
+		if flutterTargetPlatforms[p] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// dedupeFlutterArtifacts drops byte-identical copies: Gradle writes each APK
+// under outputs/apk/<variant>/ and Flutter copies it to outputs/flutter-apk/,
+// which doubled the archive sent back to the client. Flutter's own output
+// directory (flutter-apk/, bundle/) wins; otherwise the shortest path.
+func dedupeFlutterArtifacts(entries []flutterArtifact) []flutterArtifact {
+	preferred := func(path string) bool {
+		return strings.Contains(path, "/outputs/flutter-apk/") || strings.Contains(path, "/outputs/bundle/")
+	}
+	better := func(a, b flutterArtifact) bool {
+		if pa, pb := preferred(a.info.Path), preferred(b.info.Path); pa != pb {
+			return pa
+		}
+		return len(a.info.Path) < len(b.info.Path)
+	}
+	byChecksum := make(map[string]int)
+	out := make([]flutterArtifact, 0, len(entries))
+	for _, e := range entries {
+		key := e.info.Checksum
+		if key == "" {
+			out = append(out, e)
+			continue
+		}
+		if i, ok := byChecksum[key]; ok {
+			if better(e, out[i]) {
+				out[i] = e
+			}
+			continue
+		}
+		byChecksum[key] = len(out)
+		out = append(out, e)
+	}
+	return out
 }

@@ -163,6 +163,9 @@ hgbuild flutter build <apk|appbundle> [flags]
 |------|---------|-------------|
 | `--build-mode` | `release` | Build mode: `debug`, `profile`, `release` |
 | `--flavor` | (none) | Build flavor (e.g., `staging`, `production`) |
+| `--output`, `-o` | (none) | Save the built APK/AAB files into this directory |
+| `--distribute-abis` | `false` | APK only: build each ABI as its own task, in parallel on different workers (produces split APKs, not a universal APK) |
+| `--abis` | `arm64,arm,x64` | ABIs for `--distribute-abis` |
 
 ### Examples
 
@@ -297,6 +300,41 @@ hgbuild -v flutter build apk --project ~/projects/my_app
 # Second run shows:
 # [cache]  Flutter APK cache hit
 ```
+
+### Shared Gradle Build Cache
+
+The cache above only helps when the source is unchanged. After a Dart
+edit, Gradle would normally redo its Kotlin/Java compile, dexing, R8 and
+resource merging on whatever worker gets the build. The coordinator can
+serve a Gradle remote build cache so those task outputs are reused by every
+worker:
+
+```bash
+# Coordinator: on by default, served on the HTTP port at /cache/gradle/
+hg-coord serve --gradle-cache-dir ~/.cache/hybridgrid/gradle-cache \
+  --gradle-cache-max-total-mb 5120
+
+# Workers: point Flutter builds at it (or set HG_GRADLE_CACHE_URL)
+hg-worker serve --coordinator coord:9000 \
+  --gradle-cache-url http://coord:8080/cache/gradle/
+```
+
+The worker only edits its temporary copy of the project (`android/gradle.properties`
+and `android/settings.gradle[.kts]`), never `~/.gradle`. With `--token`, the
+cache requires it as the HTTP password; the token reaches Gradle through an
+environment variable and is never written to disk. `GET /cache/gradle/`
+returns hit/miss/store counters as JSON.
+
+Measured on the demo app (release APK, Dart file changed between builds):
+
+| Build | Time |
+|-------|------|
+| Cold, cache empty | 40.0s |
+| Same worker, warm cache | 22.9s |
+| New worker with empty `~/.gradle` build cache, remote cache warm (25/26 Gradle tasks from cache) | 27.0s |
+
+The Dart compile itself (`compileFlutterBuild*`) is not cacheable by Gradle,
+so it still runs on every source change.
 
 ---
 

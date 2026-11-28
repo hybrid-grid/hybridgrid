@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/cespare/xxhash/v2"
@@ -172,9 +173,19 @@ func FlutterCacheKey(config *pb.FlutterConfig, pubspecHash string, flutterVersio
 			kb.AddString(k)
 			kb.AddString(config.GetDartDefines()[k])
 		}
+		// Which ABIs are built and whether they are split change the APKs
+		// produced: an arm64-only split build must never be served the
+		// universal APK of the same source (or vice versa).
+		platforms := append([]string(nil), config.GetTargetPlatforms()...)
+		sort.Strings(platforms)
+		kb.AddString(strings.Join(platforms, ","))
+		kb.AddString(strconv.FormatBool(config.GetSplitPerAbi()))
 	} else {
+		// Same values an empty config contributes, so nil ≡ empty config.
 		kb.AddString("")
 		kb.AddString("")
+		kb.AddString("")
+		kb.AddString(strconv.FormatBool(false))
 	}
 	kb.AddString(flutterVersion)
 

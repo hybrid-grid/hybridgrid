@@ -20,6 +20,7 @@ import (
 	coordserver "github.com/h3nr1-d14z/hybridgrid/internal/coordinator/server"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/webhook"
 	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
+	"github.com/h3nr1-d14z/hybridgrid/internal/gradlecache"
 	"github.com/h3nr1-d14z/hybridgrid/internal/logging"
 	observabilitymetrics "github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
@@ -83,6 +84,9 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			artifactDir, _ := cmd.Flags().GetString("artifact-dir")
 			artifactMaxFileMB, _ := cmd.Flags().GetInt64("artifact-max-file-mb")
 			artifactMaxTotalMB, _ := cmd.Flags().GetInt64("artifact-max-total-mb")
+			gradleCacheDir, _ := cmd.Flags().GetString("gradle-cache-dir")
+			gradleCacheMaxEntryMB, _ := cmd.Flags().GetInt64("gradle-cache-max-entry-mb")
+			gradleCacheMaxTotalMB, _ := cmd.Flags().GetInt64("gradle-cache-max-total-mb")
 			dispatchQueueTimeout, _ := cmd.Flags().GetDuration("dispatch-queue-timeout")
 			epsilonValue, _ := cmd.Flags().GetFloat64("epsilon")
 			alphaValue, _ := cmd.Flags().GetFloat64("alpha")
@@ -359,6 +363,22 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 
 			// Start ops HTTP server (health, metrics, log-level).
 			opsSrv := &opshttp.Server{Port: httpPort, AuthToken: token, EventSink: srv, DispatchCounter: srv}
+			if gradleCacheDir != "" {
+				gc, err := gradlecache.New(gradlecache.Config{
+					Dir:           gradleCacheDir,
+					MaxEntryBytes: gradleCacheMaxEntryMB << 20,
+					MaxTotalBytes: gradleCacheMaxTotalMB << 20,
+					Token:         token,
+				})
+				if err != nil {
+					log.Warn().Err(err).Str("dir", gradleCacheDir).Msg("Gradle build cache disabled")
+				} else {
+					opsSrv.GradleCache = gc
+					log.Info().Str("dir", gradleCacheDir).Int("http_port", httpPort).
+						Str("path", gradlecache.Prefix).Int64("max_total_mb", gradleCacheMaxTotalMB).
+						Msg("Gradle remote build cache enabled")
+				}
+			}
 			go func() {
 				if err := opsSrv.Start(); err != nil {
 					errCh <- fmt.Errorf("ops http server: %w", err)
@@ -435,6 +455,9 @@ func registerServeFlags(cmd *cobra.Command) {
 	cmd.Flags().String("artifact-dir", defaultArtifactDir(), "Keep build outputs here for download from the dashboard (empty disables)")
 	cmd.Flags().Int64("artifact-max-file-mb", 1024, "Largest single artifact accepted, in MiB")
 	cmd.Flags().Int64("artifact-max-total-mb", 10240, "Total artifact storage in MiB; the oldest builds' artifacts are evicted beyond it")
+	cmd.Flags().String("gradle-cache-dir", defaultCacheSubdir("gradle-cache"), "Serve a Gradle remote build cache from this directory at /cache/gradle/ on the HTTP port, shared by Flutter workers (empty disables)")
+	cmd.Flags().Int64("gradle-cache-max-entry-mb", 256, "Largest single Gradle cache entry accepted, in MiB")
+	cmd.Flags().Int64("gradle-cache-max-total-mb", 5120, "Total Gradle cache size in MiB; least recently used entries are evicted beyond it")
 	cmd.Flags().String("builder-cache-dir", "", "Cache per-builder (plugin builder) build results in this directory, keyed by builder version + source hash (default: off)")
 	cmd.Flags().Float64("epsilon", 0.1, "Exploration rate for epsilon-greedy scheduler (in [0, 1]; ignored otherwise)")
 	cmd.Flags().Float64("alpha", 1.0, "LinUCB exploration coefficient α (in [0, 10]; ignored for other schedulers)")
@@ -574,9 +597,14 @@ func (f *fanoutNotifier) NotifyTaskCompleted(event *coordserver.TaskEvent) {
 // defaultArtifactDir is the per-user cache location for stored build
 // outputs (e.g. ~/Library/Caches/hybridgrid/artifacts on macOS).
 func defaultArtifactDir() string {
+	return defaultCacheSubdir("artifacts")
+}
+
+// defaultCacheSubdir is <user cache dir>/hybridgrid/<name>.
+func defaultCacheSubdir(name string) string {
 	base, err := os.UserCacheDir()
 	if err != nil {
 		base = os.TempDir()
 	}
-	return filepath.Join(base, "hybridgrid", "artifacts")
+	return filepath.Join(base, "hybridgrid", name)
 }

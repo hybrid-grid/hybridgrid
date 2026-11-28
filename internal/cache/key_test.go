@@ -308,3 +308,21 @@ func TestUnityCacheKey_NilConfig(t *testing.T) {
 		t.Errorf("nil config and empty config produced different keys: %q vs %q", keyNil, keyEmpty)
 	}
 }
+
+func TestFlutterCacheKey_TargetPlatformsAndSplit(t *testing.T) {
+	cfg := func(split bool, platforms ...string) *pb.FlutterConfig {
+		return &pb.FlutterConfig{BuildMode: "apk-release", TargetPlatforms: platforms, SplitPerAbi: split}
+	}
+	universal := FlutterCacheKey(cfg(false), "src", "3.33")
+	arm64 := FlutterCacheKey(cfg(true, "android-arm64"), "src", "3.33")
+	x64 := FlutterCacheKey(cfg(true, "android-x64"), "src", "3.33")
+	if universal == arm64 || arm64 == x64 {
+		t.Fatal("per-ABI builds must not share a cache entry with each other or the universal build")
+	}
+	if FlutterCacheKey(cfg(false, "android-arm64"), "src", "3.33") == arm64 {
+		t.Fatal("split and non-split builds of one ABI must differ")
+	}
+	if FlutterCacheKey(cfg(false, "android-arm", "android-x64"), "src", "3.33") != FlutterCacheKey(cfg(false, "android-x64", "android-arm"), "src", "3.33") {
+		t.Fatal("platform order must not change the key")
+	}
+}

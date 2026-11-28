@@ -33,8 +33,8 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest, b
 	atomic.AddInt64(&s.queuedTasks, 1)
 	defer atomic.AddInt64(&s.queuedTasks, -1)
 
-	worker, queueWait, err := s.selectBuildWorker(ctx,
-		func(w *registry.WorkerInfo) bool { return workerSupportsFlutterPlatform(w, req.TargetPlatform) }, "flutter")
+	filter := func(w *registry.WorkerInfo) bool { return workerSupportsFlutterPlatform(w, req.TargetPlatform) }
+	worker, queueWait, err := s.selectBuildWorker(ctx, filter, "flutter")
 	if err != nil {
 		s.countNoWorker()
 		log.Error().Err(err).Str("task_id", req.TaskId).
@@ -43,7 +43,7 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest, b
 		return s.noWorkerResponse(meta, start, err), nil
 	}
 
-	conn, failed := s.connectBuildWorker(ctx, meta, start, worker)
+	worker, conn, failed := s.connectBuildWorker(ctx, meta, start, worker, filter, "flutter")
 	if failed != nil {
 		return failed, nil
 	}

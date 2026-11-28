@@ -33,8 +33,8 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 	atomic.AddInt64(&s.queuedTasks, 1)
 	defer atomic.AddInt64(&s.queuedTasks, -1)
 
-	worker, queueWait, err := s.selectBuildWorker(ctx,
-		func(w *registry.WorkerInfo) bool { return workerSupportsUnity(w, req.TargetPlatform, unityVersion) }, "unity")
+	filter := func(w *registry.WorkerInfo) bool { return workerSupportsUnity(w, req.TargetPlatform, unityVersion) }
+	worker, queueWait, err := s.selectBuildWorker(ctx, filter, "unity")
 	if err != nil {
 		s.countNoWorker()
 		log.Error().Err(err).Str("task_id", req.TaskId).
@@ -43,7 +43,7 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 		return s.noWorkerResponse(meta, start, err), nil
 	}
 
-	conn, failed := s.connectBuildWorker(ctx, meta, start, worker)
+	worker, conn, failed := s.connectBuildWorker(ctx, meta, start, worker, filter, "unity")
 	if failed != nil {
 		return failed, nil
 	}

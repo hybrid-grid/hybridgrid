@@ -26,6 +26,7 @@ import (
 	observabilitymetrics "github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 	"github.com/h3nr1-d14z/hybridgrid/internal/worker/builders"
+	"github.com/h3nr1-d14z/hybridgrid/internal/worker/executor"
 	workerserver "github.com/h3nr1-d14z/hybridgrid/internal/worker/server"
 )
 
@@ -230,6 +231,16 @@ It executes build tasks received from the coordinator.`,
 			if len(dockerCCs) > 0 {
 				cfg.DockerToolchains = dockerCCs
 			}
+			gradleCacheURL, _ := cmd.Flags().GetString("gradle-cache-url")
+			if gradleCacheURL == "" {
+				gradleCacheURL = os.Getenv("HG_GRADLE_CACHE_URL")
+			}
+			if u, err := executor.NormalizeGradleCacheURL(gradleCacheURL); err != nil {
+				return err
+			} else if u != "" {
+				cfg.GradleCache = executor.GradleCache{URL: u, Token: token}
+				log.Info().Str("url", u).Msg("Flutter builds use the shared Gradle build cache")
+			}
 			if builderDir != "" {
 				registry := builders.NewRegistry()
 				builderIDs = registry.Discover(builderDir)
@@ -401,6 +412,7 @@ It executes build tasks received from the coordinator.`,
 	serveCmd.Flags().String("tls-cert", "", "Path to TLS certificate file (PEM format)")
 	serveCmd.Flags().String("tls-key", "", "Path to TLS private key file (PEM format)")
 	serveCmd.Flags().String("tls-ca", "", "Path to CA certificate for client verification (mTLS)")
+	serveCmd.Flags().String("gradle-cache-url", "", "Gradle remote build cache for Flutter builds, e.g. http://<coordinator>:8080/cache/gradle/ (env HG_GRADLE_CACHE_URL; empty disables)")
 	serveCmd.Flags().String("builder-dir", "", "Directory containing plugin builder executables (hg-exec-<id>)")
 	serveCmd.Flags().String("docker-image-x86", "", "Override compile image for x86_64 targets (default: dockcross/linux-x64)")
 	serveCmd.Flags().String("docker-image-arm64", "", "Override compile image for arm64 targets (default: dockcross/linux-arm64)")
