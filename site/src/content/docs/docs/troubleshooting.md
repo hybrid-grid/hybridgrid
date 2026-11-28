@@ -33,15 +33,20 @@ coordinator.
 
 ## `hgbuild cc`/`make` fail with "error reading server preface: EOF"
 
-Earlier versions silently ignored `--coordinator` for `cc`/`c++` (they run
-with flag parsing disabled); `hgbuild cc`/`c++` now parse `--coordinator`/`-C`
-themselves. Whether the `server preface: EOF` failure itself is gone is **not
-confirmed**: it points at a transport mismatch (plaintext vs. TLS, or an
-mDNS-advertised address that isn't the coordinator's gRPC port). If you still
-hit it, check that `--insecure`/TLS flags match the coordinator, and set the
-`HG_COORDINATOR` environment variable explicitly (`host:9000`) instead of
-relying on mDNS. `make`/`ninja`/`wrap` don't parse `--coordinator` from their
-arguments — use `HG_COORDINATOR` for those.
+Earlier versions silently ignored `--coordinator` for `cc`/`c++`/`make`/`ninja`/
+`wrap` (they run with flag parsing disabled), so a build could quietly fall
+back to mDNS discovery or the wrong address. All of them now honour
+`--coordinator`/`-C` (see the [CLI reference](/docs/cli-reference/)), and the
+wrappers export it as `HG_COORDINATOR` to the compile steps they spawn.
+
+Whether the `server preface: EOF` failure itself is gone is **not confirmed**
+against a live coordinator. It points at a transport mismatch (plaintext vs.
+TLS, or an mDNS-advertised address that isn't the coordinator's gRPC port). One
+known mismatch: `--tls-cert`/`--tls-key`/`--tls-ca` and `--insecure` given to
+`hgbuild make`/`ninja`/`wrap` are not forwarded to the compiler calls the build
+spawns, so those dial the coordinator in plaintext. If you still hit the error,
+check that the coordinator is not TLS-only, and set `HG_COORDINATOR` explicitly
+(`host:9000`) instead of relying on mDNS.
 
 ## `cc`/`c++` tasks show up ungrouped on the dashboard
 

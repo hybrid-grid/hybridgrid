@@ -8,20 +8,28 @@ design in `docs/v030-plan.md`, plugin design notes in
 
 ## Backend bugs (found while demoing the dashboard, 2026-09-18)
 
-- [ ] **`hgbuild cc`/`c++`/`make`: remote compile via mDNS-discovered or
-      `--coordinator` address may still fail with `Unavailable ... error
-      reading server preface: EOF`.**
+- [ ] **Remote compile via `hgbuild cc`/`c++` (and builds wrapped by
+      `make`/`ninja`/`wrap`) may fail with `Unavailable ... error reading
+      server preface: EOF`; needs a live repro.**
       Original report: the address was TCP-reachable (`nc` succeeds) and the
       same coordinator worked for workers and `hgbuild build`, but remote
-      compiles failed unless the `HG_COORDINATOR` env var was used instead.
-      Partly fixed: these subcommands run with `DisableFlagParsing`, and the
-      wrapper now parses and strips `--coordinator`/`-C` itself
-      (`filterHgbuildFlags` in `cmd/hgbuild/main.go`), where before the flag
-      was silently ignored. Still unconfirmed: whether the preface-EOF failure
-      itself is gone (it points at a transport/TLS or wrong-port mismatch, e.g.
-      a plaintext/TLS mismatch or an mDNS-advertised address that is not the
-      gRPC port). Needs a live repro with `--coordinator` and with mDNS
-      discovery before closing.
+      compiles failed unless `HG_COORDINATOR` was set instead of the flag.
+      Fixed: the `--coordinator`/`-C` flag was silently ignored (these
+      subcommands run with `DisableFlagParsing`); `cc`/`c++` now parse it
+      themselves, and `make`/`ninja`/`wrap` honour it before the subcommand
+      (`--coordinator`/`-C`) or as `--coordinator` right after it, exporting
+      `HG_COORDINATOR` to the spawned compiler calls (pinned by
+      `cmd/hgbuild/wrapper_flags_test.go`; `-C dir` after `make`/`ninja` still
+      reaches the tool).
+      Still open, unconfirmed without a live coordinator: the preface-EOF
+      failure itself (a transport mismatch, e.g. plaintext vs TLS or an
+      mDNS-advertised address that is not the gRPC port). One known gap found
+      in code: `--tls-cert`/`--tls-key`/`--tls-ca`/`--insecure` given to
+      `hgbuild make`/`ninja`/`wrap` are not exported to the compiler calls the
+      build spawns (only `HG_COORDINATOR`, `HG_NO_FALLBACK`, `HG_VERBOSE`
+      are), so those dial plaintext against a TLS-only coordinator. Fix idea:
+      export the TLS settings (or add `HG_TLS_*` env vars read by
+      `newClientConfig`) and repro against a TLS coordinator.
 
 - [ ] **Worker ID still defaults to `worker-<hostname>`, so 2+ workers on one
       host collide unless `--worker-id` is set.**

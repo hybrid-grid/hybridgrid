@@ -10,12 +10,28 @@ OpenTelemetry.
 
 :::note
 The coordinator address is resolved in this order: `--coordinator`/`-C`, the
-`HG_COORDINATOR` environment variable, then mDNS auto-discovery. `hgbuild cc`
-and `hgbuild c++` run with flag parsing disabled and parse `--coordinator`/`-C`
-(plus `--timeout`, `--arch`, `--insecure`, `--no-fallback`, `-v`) themselves
-before handing the rest to the compiler. `hgbuild make`, `ninja`, and `wrap`
-pass their arguments straight through to the wrapped tool (`make -C dir` is
-make's own flag), so for those set `HG_COORDINATOR` in the environment.
+`HG_COORDINATOR` environment variable, then mDNS auto-discovery. An explicit flag
+always wins over the environment variable.
+
+`hgbuild cc` and `hgbuild c++` run with flag parsing disabled and parse
+`--coordinator`/`-C` (plus `--timeout`, `--arch`, `--insecure`, `--no-fallback`,
+`-v`) themselves before handing the rest to the compiler.
+
+`hgbuild make`, `ninja`, and `wrap` also pass their arguments straight through
+to the wrapped tool, so they take the coordinator in two places only:
+
+- before the subcommand, as `--coordinator host:9000` or `-C host:9000`
+  (`hgbuild -C host:9000 make -j8`);
+- as `--coordinator=host:9000` or `--coordinator host:9000` immediately after the
+  subcommand name, ahead of the tool's own arguments
+  (`hgbuild make --coordinator=host:9000 -j8`).
+
+The address is exported as `HG_COORDINATOR` to the wrapped build, so every
+`cc`/`c++` it spawns uses it. `-C` *after* `make`/`ninja` is the tool's own
+change-directory flag and is never consumed (`hgbuild make -C subdir`). For
+`wrap`, everything after the command name, and everything after a bare `--`, is
+passed through untouched. TLS flags (`--tls-cert`/`--tls-key`/`--tls-ca`) and
+`--insecure` are not forwarded to the wrapped build's compiler calls.
 :::
 
 :::caution
