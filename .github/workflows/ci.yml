@@ -10,10 +10,11 @@ on:
     branches: [main]
 
 env:
-  # Track the latest 1.25 patch release. Pinning an exact patch
-  # (previously 1.25.8) let the toolchain drift behind security fixes,
-  # and govulncheck scans the stdlib of the toolchain in use — three
-  # patch releases of stdlib CVEs turned the Security Scan red.
+  # Track the latest 1.27 patch release of the CI toolchain (go.mod
+  # only requires 1.26.0 as the minimum). Pinning a stale exact patch
+  # let the toolchain drift behind security fixes, and govulncheck
+  # scans the stdlib of the toolchain in use — several patch releases
+  # of stdlib CVEs once turned the Security Scan red.
   GO_VERSION: "1.27.4"
   NODE_VERSION: "22"
 
@@ -204,7 +205,11 @@ jobs:
           npm run build
 
       - name: Run Gosec
-        uses: securego/gosec@master
+        # Pinned to a release tag (not @master) so results are
+        # reproducible: an upstream commit to master can add rules or
+        # change findings under an open PR. Bumping the pin is a
+        # one-line, reviewable change.
+        uses: securego/gosec@v2.30.0
         with:
           # G104: Unhandled errors (intentional fire-and-forget)
           # G109/G115: Integer overflow (bounded by protocol, worker counts)

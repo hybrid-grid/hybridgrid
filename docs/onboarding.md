@@ -460,8 +460,8 @@ td_error = actual_cost - Q_predicted              // sai lệch
 ### Prerequisites
 
 ```bash
-# Go 1.24+
-go version   # expect: go1.24.x
+# Go 1.26+
+go version   # expect: go1.26.x or newer
 
 # Docker + Docker Compose
 docker --version          # expect: 28.x

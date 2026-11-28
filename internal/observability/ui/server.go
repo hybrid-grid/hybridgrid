@@ -71,6 +71,12 @@ type Config struct {
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
 	ShutdownTimeout time.Duration
+
+	// AllowedOrigins lists extra browser origins (for example
+	// "http://localhost:5173") that may open the /ws WebSocket in
+	// addition to same-origin pages and clients that send no Origin
+	// header. A single "*" entry allows every origin.
+	AllowedOrigins []string
 }
 
 // DefaultConfig returns sensible defaults matching the embedded
@@ -108,9 +114,7 @@ func New(cfg Config, client Client) *Server {
 	upgrader := websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
-		CheckOrigin: func(r *http.Request) bool {
-			return true // The dashboard is a same-LAN admin surface.
-		},
+		CheckOrigin:     newOriginChecker(cfg.AllowedOrigins),
 	}
 	s := &Server{
 		config:   cfg,

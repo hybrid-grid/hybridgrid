@@ -204,6 +204,8 @@ Returns current system statistics.
 
 Receives real-time events.
 
+Browser connections are origin-checked: the upgrade is accepted when the request has no `Origin` header, when the `Origin` host matches the request `Host`, or when the origin is listed in `--allowed-origins`. Anything else gets `403`.
+
 **Event Types:**
 ```json
 // Worker connected

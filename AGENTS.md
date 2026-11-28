@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Go 1.25 distributed build system using gRPC, protobuf, zerolog, Viper, and cobra.
+Go 1.26+ distributed build system using gRPC, protobuf, zerolog, Viper, and cobra.
 Three binaries: `hgbuild` (CLI client), `hg-coord` (coordinator), `hg-worker` (worker node).
 
 ## Build / Run / Test Commands
@@ -68,7 +68,7 @@ internal/               # Core application packages
   coordinator/          # Coordinator: registry, scheduler, resilience, metrics
   discovery/            # mDNS/Zeroconf service discovery
   graph/                # Build dependency graph parsing and visualization
-  grpc/                 # gRPC client/server wrappers
+  grpc/                 # gRPC client wrapper + interceptors (server wiring is in coordinator/server, worker/server)
   observability/        # OpenTelemetry tracing, Prometheus metrics, dashboard
   platform/             # Platform-specific code
   security/             # Auth (token), TLS/mTLS, input validation

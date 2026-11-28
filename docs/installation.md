@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Go 1.24+ (for building from source)
+- Go 1.26+ (for building from source)
 - Docker 20.10+ (optional, for containerized deployment)
 - GCC/Clang (on worker nodes for native compilation)
 
