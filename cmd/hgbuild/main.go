@@ -75,6 +75,16 @@ func main() {
 	log.Logger = logger
 	defer logCloser.Close()
 
+	rootCmd := newRootCmd()
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+// newRootCmd builds the hgbuild command tree. It is separate from main so
+// tests can drive argument routing without a process boundary.
+func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "hgbuild",
 		Short: "Hybrid-Grid Build - Distributed multi-platform build system",
@@ -92,6 +102,14 @@ Environment:
   HG_COORDINATOR    Coordinator address (default: auto-discover via mDNS)
   HG_CC             C compiler to use (default: gcc)
   HG_CXX            C++ compiler to use (default: g++)`,
+		// The cc/c++/make/ninja/wrap subcommands set DisableFlagParsing so
+		// the wrapped tool receives its own flags verbatim. Without
+		// TraverseChildren, cobra hands those subcommands every argument
+		// except the subcommand name, including root flags written before
+		// it (`hgbuild -C host:9000 make` would run `make -C host:9000`).
+		// Traversal parses root flags first and passes only the arguments
+		// after the subcommand name through.
+		TraverseChildren: true,
 		Run: func(cmd *cobra.Command, args []string) {
 			cmd.Help()
 		},
@@ -202,10 +220,7 @@ Environment:
 		newWrapCmd(),
 	)
 
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	return rootCmd
 }
 
 func newVersionCmd() *cobra.Command {
@@ -1463,7 +1478,12 @@ func newMakeCmd() *cobra.Command {
 Examples:
   hgbuild make
   hgbuild make -j8
-  hgbuild make clean all`,
+  hgbuild make clean all
+  hgbuild --coordinator=host:9000 make -j8
+
+The coordinator may be given before the subcommand (--coordinator or -C) or as
+--coordinator ADDR right after it. -C after "make" is make's own change-directory
+flag and is passed through. Without a flag, HG_COORDINATOR or mDNS is used.`,
 		DisableFlagParsing: true,
 		SilenceUsage:       true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1480,7 +1500,12 @@ func newNinjaCmd() *cobra.Command {
 
 Examples:
   hgbuild ninja
-  hgbuild ninja -j8`,
+  hgbuild ninja -j8
+  hgbuild --coordinator=host:9000 ninja -j8
+
+The coordinator may be given before the subcommand (--coordinator or -C) or as
+--coordinator ADDR right after it. -C after "ninja" is ninja's own change-directory
+flag and is passed through. Without a flag, HG_COORDINATOR or mDNS is used.`,
 		DisableFlagParsing: true,
 		SilenceUsage:       true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1498,23 +1523,48 @@ Sets CC and CXX to use hgbuild for distributed compilation.
 
 Examples:
   hgbuild wrap cmake --build .
-  hgbuild wrap ./build.sh`,
+  hgbuild wrap ./build.sh
+  hgbuild --coordinator=host:9000 wrap cmake --build .
+  hgbuild wrap --coordinator=host:9000 -- ./build.sh --jobs 8
+
+The coordinator may be given before the subcommand (--coordinator or -C) or as
+--coordinator ADDR right after it. Everything after the command name, and
+everything after a bare --, is passed to the wrapped command untouched.`,
 		DisableFlagParsing: true,
 		SilenceUsage:       true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			filteredArgs := filterHgbuildWrapperFlags(args)
-			if len(filteredArgs) == 0 {
-				return fmt.Errorf("no command specified")
+			command, commandArgs, err := wrapCommandArgs(filterHgbuildWrapperFlags(args))
+			if err != nil {
+				return err
 			}
-			return wrapBuildCommand(filteredArgs[0], filteredArgs[1:])
+			return wrapBuildCommand(command, commandArgs)
 		},
 	}
 }
 
+// filterHgbuildWrapperFlags strips hgbuild's own flags from the arguments of
+// make/ninja/wrap, which run with DisableFlagParsing and forward everything
+// else to the wrapped tool.
+//
+//   - --no-fallback[=bool] is consumed wherever it appears before a `--`.
+//   - --coordinator=ADDR and --coordinator ADDR are consumed only while still
+//     in the leading run of hgbuild flags, i.e. before the first argument
+//     that belongs to the wrapped tool. The short -C is never consumed here:
+//     it is make's and ninja's "change directory" flag. Use it (or the long
+//     form) before the subcommand name instead.
+//   - A bare `--` ends hgbuild's argument handling: it and everything after
+//     it reach the wrapped tool untouched.
 func filterHgbuildWrapperFlags(args []string) []string {
 	filtered := make([]string, 0, len(args))
+	leading := true
 
-	for _, arg := range args {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+
+		if arg == "--" {
+			return append(filtered, args[i:]...)
+		}
+
 		switch {
 		case arg == "--no-fallback":
 			noFallback = true
@@ -1527,12 +1577,34 @@ func filterHgbuildWrapperFlags(args []string) []string {
 				}
 				continue
 			}
+		case leading && strings.HasPrefix(arg, "--coordinator="):
+			coordinator = strings.TrimPrefix(arg, "--coordinator=")
+			continue
+		case leading && arg == "--coordinator" && i+1 < len(args):
+			i++
+			coordinator = args[i]
+			continue
 		}
 
+		leading = false
 		filtered = append(filtered, arg)
 	}
 
 	return filtered
+}
+
+// wrapCommandArgs splits the filtered `hgbuild wrap` arguments into the
+// command to run and its arguments. A single leading `--` separator is
+// dropped so `hgbuild wrap -- cmd args` works; everything after the command
+// name is returned untouched.
+func wrapCommandArgs(args []string) (string, []string, error) {
+	if len(args) > 0 && args[0] == "--" {
+		args = args[1:]
+	}
+	if len(args) == 0 {
+		return "", nil, fmt.Errorf("no command specified")
+	}
+	return args[0], args[1:], nil
 }
 
 // wrapBuildCommand wraps a build command with CC/CXX set to hgbuild.
