@@ -1031,55 +1031,60 @@ func TestBuild_Unity_QueuesUntilSlotFrees(t *testing.T) {
 
 // --- StreamBuild ---
 
-func TestStreamBuild_NoMetadata(t *testing.T) {
-	_, client, cleanup := setupTestServer(t, Config{Port: 0, HeartbeatTTL: 30 * time.Second})
-	defer cleanup()
-
-	stream, err := client.StreamBuild(context.Background())
-	require.NoError(t, err)
-
-	// Send source without metadata first
-	err = stream.Send(&pb.BuildChunk{
-		Payload: &pb.BuildChunk_SourceChunk{
-			SourceChunk: []byte("int main() {}"),
+func TestStreamBuild_Unimplemented(t *testing.T) {
+	tests := []struct {
+		name   string
+		chunks []*pb.BuildChunk
+	}{
+		{
+			name: "no chunks",
 		},
-	})
-	require.NoError(t, err)
-
-	_, err = stream.CloseAndRecv()
-	require.Error(t, err)
-}
-
-func TestStreamBuild_WithMetadata(t *testing.T) {
-	_, client, cleanup := setupTestServer(t, Config{Port: 0, HeartbeatTTL: 30 * time.Second})
-	defer cleanup()
-
-	stream, err := client.StreamBuild(context.Background())
-	require.NoError(t, err)
-
-	// Send metadata
-	err = stream.Send(&pb.BuildChunk{
-		Payload: &pb.BuildChunk_Metadata{
-			Metadata: &pb.BuildMetadata{
-				TaskId:    "stream-1",
-				BuildType: pb.BuildType_BUILD_TYPE_CPP,
+		{
+			name: "source without metadata",
+			chunks: []*pb.BuildChunk{
+				{Payload: &pb.BuildChunk_SourceChunk{SourceChunk: []byte("int main() {}")}},
 			},
 		},
-	})
-	require.NoError(t, err)
-
-	// Send source
-	err = stream.Send(&pb.BuildChunk{
-		Payload: &pb.BuildChunk_SourceChunk{
-			SourceChunk: []byte("int main() { return 0; }"),
+		{
+			name: "metadata and source",
+			chunks: []*pb.BuildChunk{
+				{Payload: &pb.BuildChunk_Metadata{Metadata: &pb.BuildMetadata{
+					TaskId:    "stream-1",
+					BuildType: pb.BuildType_BUILD_TYPE_CPP,
+				}}},
+				{Payload: &pb.BuildChunk_SourceChunk{SourceChunk: []byte("int main() { return 0; }")}},
+			},
 		},
-	})
-	require.NoError(t, err)
+	}
 
-	resp, err := stream.CloseAndRecv()
-	require.NoError(t, err)
-	assert.Equal(t, pb.TaskStatus_STATUS_FAILED, resp.Status)
-	assert.Contains(t, resp.Stderr, "not implemented")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, client, cleanup := setupTestServer(t, Config{Port: 0, HeartbeatTTL: 30 * time.Second})
+			defer cleanup()
+
+			stream, err := client.StreamBuild(context.Background())
+			if err != nil {
+				t.Fatalf("StreamBuild() error = %v", err)
+			}
+
+			// The server rejects the call without reading the stream, so Send may
+			// fail with io.EOF once the RPC has terminated; the status comes from
+			// CloseAndRecv.
+			for _, chunk := range tt.chunks {
+				if err := stream.Send(chunk); err != nil {
+					break
+				}
+			}
+
+			resp, err := stream.CloseAndRecv()
+			if got := status.Code(err); got != codes.Unimplemented {
+				t.Fatalf("status code = %v (err = %v), want %v", got, err, codes.Unimplemented)
+			}
+			if resp != nil {
+				t.Errorf("response = %v, want nil", resp)
+			}
+		})
+	}
 }
 
 // --- HealthCheck ---

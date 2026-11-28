@@ -32,7 +32,8 @@ Everything goes through one `BuildService` (see `proto/hybridgrid/v1/build.proto
 - `Compile` — the legacy unary C/C++ path (`hgbuild cc`/`make`)
 - `Build` — generic path for Flutter/Unity/Rust/Go/Node (only C++/Flutter/Unity
   have a working executor)
-- `StreamBuild` — client-streamed variant for projects over ~10MB
+- `StreamBuild` — client-streamed variant for large projects; declared in the
+  proto but not implemented — the coordinator returns gRPC `Unimplemented`
 - `HealthCheck`, `GetWorkerStatus`, `GetWorkersForBuild`, `ReportCacheHit` — housekeeping
 
 A separate `TelemetryService` (read-only, token-gated) exists purely for the

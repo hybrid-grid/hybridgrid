@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Hybrid-Grid is a Go 1.25 distributed build system that spreads C/C++ (and Flutter Android) compilation
+Hybrid-Grid is a Go 1.26+ distributed build system that spreads C/C++ (and Flutter Android) compilation
 across worker machines discovered via mDNS on a LAN, using gRPC/protobuf for coordination. Four binaries:
 
 - `hgbuild` — CLI client; wraps `make`/`ninja` or acts as a drop-in `cc`/`c++` replacement
@@ -78,7 +78,7 @@ Compilation flow (`hgbuild make`/`cc`/`c++`):
 | `coordinator/server` | gRPC server wiring |
 | `discovery` | mDNS/Zeroconf service discovery |
 | `graph` | Build dependency graph parsing/visualization (`hgbuild graph`) |
-| `grpc` | gRPC client/server wrapper helpers |
+| `grpc` | gRPC client wrapper (`client`) and interceptors (`interceptors`); server wiring lives in `coordinator/server` and `worker/server` |
 | `logging` | zerolog setup |
 | `observability` | OpenTelemetry tracing + Prometheus metrics wiring |
 | `platform` | Platform-specific code |

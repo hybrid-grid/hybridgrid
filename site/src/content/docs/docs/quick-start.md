@@ -5,8 +5,7 @@ description: Build the binaries and run a coordinator, worker, and dashboard on 
 
 ## Build from source
 
-Requires Go 1.25 (the module pins it via a `toolchain` directive — `go build`
-will download it automatically if your local Go is older).
+Requires Go 1.26 or newer (the minimum in `go.mod`).
 
 ```bash
 git clone https://github.com/h3nr1-d14z/hybridgrid.git

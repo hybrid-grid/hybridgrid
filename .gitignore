@@ -3,6 +3,9 @@ bin/
 /hg-coord
 /hg-worker
 /hgbuild
+/hgbuild-*
+/hg-dashboard
+/leastloaded-plugin
 *.exe
 *.exe~
 *.dll
@@ -102,3 +105,6 @@ scratch/
 # omp session state
 .omo/
 test/stress/docker-compose-exp.yml
+
+# Local build output markers
+/.hg-outputs

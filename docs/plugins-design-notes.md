@@ -1,7 +1,8 @@
 # Everything-as-a-Plugin — Research & Design Notes
 
-Working notes for the plugin architecture campaign. These feed the final
-`docs/plugins.md` and the thesis report. Vietnamese summary at the bottom.
+Working notes behind [`plugins.md`](plugins.md) (the user-facing reference) and the
+thesis report: prior art, design decisions D1-D7 and the implementation log.
+Vietnamese summary at the bottom.
 
 ## 1. Prior art researched (with sources)
 

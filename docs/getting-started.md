@@ -6,7 +6,7 @@ This guide will help you set up Hybrid-Grid for distributed C/C++ compilation in
 
 Before you begin, ensure you have:
 
-- **Go 1.21+** (for building from source)
+- **Go 1.26+** (for building from source)
 - **GCC/Clang** (for compilation on workers)
 - **Network access** between machines (LAN or WAN)
 

@@ -33,25 +33,37 @@ coordinator.
 
 ## `hgbuild cc`/`make` fail with "error reading server preface: EOF"
 
-Known bug: `--coordinator` (and mDNS auto-discovery) don't reliably reach the
-compile path for `cc`/`c++`/`make`/`ninja`, even when the address is
-TCP-reachable and works fine for `hgbuild build`/`hg-worker`. **Workaround:**
-set the `HG_COORDINATOR` environment variable instead of the flag.
+Earlier versions silently ignored `--coordinator` for `cc`/`c++`/`make`/`ninja`/
+`wrap` (they run with flag parsing disabled), so a build could quietly fall
+back to mDNS discovery or the wrong address. All of them now honour
+`--coordinator`/`-C` (see the [CLI reference](/docs/cli-reference/)), and the
+wrappers export it as `HG_COORDINATOR` to the compile steps they spawn.
 
-## Builds via `make`/`cc` never show up grouped on the dashboard
+Whether the `server preface: EOF` failure itself is gone is **not confirmed**
+against a live coordinator. It points at a transport mismatch (plaintext vs.
+TLS, or an mDNS-advertised address that isn't the coordinator's gRPC port). One
+known mismatch: `--tls-cert`/`--tls-key`/`--tls-ca` and `--insecure` given to
+`hgbuild make`/`ninja`/`wrap` are not forwarded to the compiler calls the build
+spawns, so those dial the coordinator in plaintext. If you still hit the error,
+check that the coordinator is not TLS-only, and set `HG_COORDINATOR` explicitly
+(`host:9000`) instead of relying on mDNS.
 
-`hgbuild cc`/`make` never set `build_id` on the compile request, despite
-appearances in the code — only `hgbuild build file1 file2 ...` does. Tasks
-from `make`/`cc` still get scheduled and cached normally, they just show up
-as individual ungrouped tasks rather than one "build" on the dashboard's
-Builds page.
+## `cc`/`c++` tasks show up ungrouped on the dashboard
+
+`hgbuild build`, `hgbuild make`, `ninja`, and `wrap` each create a build
+session (the wrappers export `HG_BUILD_ID`), so their tasks group into one
+build on the Builds page. A bare `hgbuild cc`/`c++` call only sends a
+`build_id` when `HG_BUILD_ID` is already exported — otherwise it shows up as
+an individual task. Export `HG_BUILD_ID` yourself (any non-empty value) when
+driving `cc`/`c++` from your own build script.
 
 ## Running two workers on the same machine collapses into one
 
-`hg-worker`'s ID is `worker-<hostname>` with no port/PID suffix and no
-override flag — a second worker process on the same host overwrites the
-first one's coordinator registry entry. Use separate containers/VMs (each
-gets its own hostname) instead, e.g. `docker compose up -d --scale worker=N`.
+`hg-worker`'s default ID is `worker-<hostname>` with no port/PID suffix — a
+second worker process on the same host overwrites the first one's coordinator
+registry entry unless you pass a distinct `--worker-id` to each. Alternatively
+use separate containers/VMs (each gets its own hostname), e.g.
+`docker compose up -d --scale worker=N`.
 
 ## Cache not working
 

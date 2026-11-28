@@ -88,6 +88,12 @@ hg-worker serve --coordinator=coordinator:9000 \
 its gRPC connection to the coordinator — pass `--insecure` instead while
 TLS isn't configured.
 
+`hg-dashboard serve --allowed-origins=<origin>[,<origin>...]` lists extra
+browser origins allowed to open the `/ws` WebSocket (for example
+`http://localhost:5173`; `*` allows any origin). Same-origin pages and clients
+that send no `Origin` header are always allowed. It's needed when a reverse
+proxy rewrites `Host` or the UI is served from a different origin.
+
 :::caution
 `hg-dashboard` only accepts `--coordinator`/`--insecure` via CLI flags today,
 not environment variables (unlike `hg-worker`/`hgbuild`). Set them explicitly

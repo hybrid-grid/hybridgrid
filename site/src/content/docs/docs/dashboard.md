@@ -16,6 +16,22 @@ Browser ──HTTP/REST + WS──▶ hg-dashboard (:8081) ──gRPC──▶ h
 ./bin/hg-dashboard serve --insecure --coordinator=localhost:9000 --port 8081
 ```
 
+## WebSocket origin check
+
+The `/ws` WebSocket only accepts upgrades from same-origin browser pages
+(the `Origin` host matches the request `Host`), clients that send no `Origin`
+header (CLI tools, scripts), and origins on the allowlist. Anything else gets
+`403`. If you serve the UI from a different origin (for example the Vite dev
+server) or a reverse proxy rewrites `Host`, allow the extra origin explicitly:
+
+```bash
+./bin/hg-dashboard serve --insecure --coordinator=localhost:9000 \
+  --allowed-origins=http://localhost:5173
+```
+
+`--allowed-origins` takes a comma-separated list (or repeat the flag);
+`--allowed-origins='*'` allows any origin.
+
 ## Pages
 
 **Overview** — 8 fleet metrics (active/queued/succeeded/failed tasks, cache

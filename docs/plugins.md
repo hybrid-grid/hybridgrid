@@ -270,4 +270,4 @@ seam — the reference for "plugin UIs".
 | OpenTelemetry Collector | the counter-example: they dropped runtime plugins for compile-time composition because contract stability is a permanent tax — we keep contracts tiny instead |
 | Terraform SDKv1 → plugin-framework | get the contract right early or pay an ecosystem rewrite |
 
-Full research notes with sources: `NOTES-plugins.md`.
+Full research notes with sources: [`plugins-design-notes.md`](plugins-design-notes.md).
