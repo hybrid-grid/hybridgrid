@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"strings"
 
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc/codes"
@@ -99,7 +100,7 @@ func (s *Server) retainBuildArtifacts(buildID, kind string, resp *pb.BuildRespon
 		}
 		files = append(files, artifacts.File{Path: path, SizeBytes: a.GetSizeBytes()})
 	}
-	name := kind + "-artifacts.tar.zst"
+	name := kind + "-artifacts" + archiveExt(resp.GetArtifacts())
 	if _, err := s.artifacts.Put(buildID, name, artifacts.SourceWorker, bytes.NewReader(resp.GetArtifacts()), files); err != nil {
 		log.Warn().Err(err).Str("build_id", buildID).Str("name", name).Msg("Failed to retain build artifacts")
 	}
@@ -111,10 +112,27 @@ func buildKind(req *pb.BuildRequest) string {
 	case req.GetCustomBuilder() != "":
 		return "builder-" + req.GetCustomBuilder()
 	case req.GetFlutterConfig() != nil:
+		// Per-ABI builds of one build must not overwrite each other.
+		if platforms := req.GetFlutterConfig().GetTargetPlatforms(); len(platforms) > 0 {
+			return "flutter-" + strings.Join(platforms, "+")
+		}
 		return "flutter"
 	case req.GetUnityConfig() != nil:
 		return "unity"
 	default:
 		return "build"
+	}
+}
+
+// archiveExt names an artifact archive by its actual format: workers send
+// a plain tar today, but the proto allows zstd, and builder plugins may gzip.
+func archiveExt(data []byte) string {
+	switch {
+	case bytes.HasPrefix(data, []byte{0x28, 0xb5, 0x2f, 0xfd}):
+		return ".tar.zst"
+	case bytes.HasPrefix(data, []byte{0x1f, 0x8b}):
+		return ".tar.gz"
+	default:
+		return ".tar"
 	}
 }

@@ -145,6 +145,17 @@ type WorkerInfo struct {
 	ActiveTasks  int
 	Status       string
 	CircuitState string
+	// Unhealthy marks a worker the coordinator no longer hears from.
+	Unhealthy bool
+}
+
+// workerStatusCell is the STATUS column: a missed heartbeat outranks the
+// circuit breaker state.
+func workerStatusCell(w WorkerInfo) string {
+	if w.Unhealthy {
+		return Error("unhealthy")
+	}
+	return WorkerStatus(w.CircuitState)
 }
 
 // PrintWorkersTable prints a colored workers table.
@@ -161,7 +172,7 @@ func PrintWorkersTable(workers []WorkerInfo, totalWorkers, healthyWorkers int) {
 	table := NewTable([]string{"ID", "ARCH", "CORES", "MEMORY", "TASKS", "STATUS"})
 
 	for _, w := range workers {
-		status := WorkerStatus(w.CircuitState)
+		status := workerStatusCell(w)
 
 		table.Append([]string{
 			truncateString(w.ID, 20),
@@ -190,7 +201,7 @@ func PrintWorkersTableCompact(workers []WorkerInfo, totalWorkers, healthyWorkers
 	table := NewTable([]string{"ID", "ARCH", "CORES", "STATUS"})
 
 	for _, w := range workers {
-		status := WorkerStatus(w.CircuitState)
+		status := workerStatusCell(w)
 
 		table.Append([]string{
 			truncateString(w.ID, 20),

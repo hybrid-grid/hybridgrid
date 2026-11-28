@@ -62,6 +62,11 @@ message FlutterConfig {
   string build_mode = 2;            // debug, profile, release
   string flavor = 3;
   map<string, string> dart_defines = 4;
+  // Flutter --target-platform values (android-arm, android-arm64,
+  // android-x64); empty builds Flutter's default set in one go.
+  repeated string target_platforms = 5;
+  // Build one APK per ABI (flutter build apk --split-per-abi).
+  bool split_per_abi = 6;
 }
 
 message UnityConfig {
@@ -269,7 +274,8 @@ message BuildResponse {
   // Result
   TaskStatus status = 1;
 
-  // Output artifacts (tar.zst compressed)
+  // Output artifacts as a tar archive: plain tar from the built-in
+  // executors; builder plugins may send zstd- or gzip-compressed tar.
   bytes artifacts = 2;
 
   // Artifact metadata
@@ -379,6 +385,9 @@ message WorkerStatusResponse {
     string circuit_state = 10;      // CLOSED, HALF_OPEN, OPEN
     string discovery_source = 11;   // LAN, WAN
     int64 last_heartbeat_unix = 12;
+    // Heartbeat within the coordinator's TTL and not marked unreachable.
+    // Unset when talking to an older coordinator.
+    optional bool healthy = 13;
   }
 
   repeated WorkerInfo workers = 1;

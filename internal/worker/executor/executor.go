@@ -112,6 +112,14 @@ func NewManager(nativeArch pb.Architecture, dockerAvailable bool, dockerImages m
 	return m
 }
 
+// SetFlutterGradleCache points Flutter builds at a shared Gradle remote
+// build cache (a zero GradleCache turns it off).
+func (m *Manager) SetFlutterGradleCache(cache GradleCache) {
+	if f, ok := m.flutter.(*FlutterExecutor); ok {
+		f.SetGradleCache(cache)
+	}
+}
+
 // SetDockerToolchain overrides the compiler command used inside the
 // docker executor's image for a target architecture (no-op when the
 // docker executor is unavailable).

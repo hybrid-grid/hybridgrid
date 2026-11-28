@@ -134,7 +134,7 @@ func TestBuild_RetainsRemoteArtifacts(t *testing.T) {
 	list, err := store.List("release-7")
 	require.NoError(t, err)
 	require.Len(t, list, 1)
-	assert.Equal(t, "builder-demo-artifacts.tar.zst", list[0].Name)
+	assert.Equal(t, "builder-demo-artifacts.tar", list[0].Name, "plain tar payload is named .tar")
 	assert.Equal(t, artifacts.SourceWorker, list[0].Source)
 	assert.Equal(t, []artifacts.File{{Path: "build/app.apk", SizeBytes: 42}}, list[0].Files)
 
@@ -146,4 +146,19 @@ func TestBuild_RetainsRemoteArtifacts(t *testing.T) {
 	entries, err := store.List("t2")
 	require.NoError(t, err)
 	assert.Empty(t, entries)
+}
+
+func TestArchiveExtAndBuildKind(t *testing.T) {
+	assert.Equal(t, ".tar.zst", archiveExt([]byte{0x28, 0xb5, 0x2f, 0xfd, 0x00}))
+	assert.Equal(t, ".tar.gz", archiveExt([]byte{0x1f, 0x8b, 0x08}))
+	assert.Equal(t, ".tar", archiveExt([]byte("ustar...")))
+	assert.Equal(t, ".tar", archiveExt(nil))
+
+	flutter := func(platforms ...string) *pb.BuildRequest {
+		return &pb.BuildRequest{Config: &pb.BuildRequest_FlutterConfig{FlutterConfig: &pb.FlutterConfig{TargetPlatforms: platforms}}}
+	}
+	assert.Equal(t, "flutter", buildKind(flutter()))
+	assert.Equal(t, "flutter-android-arm64", buildKind(flutter("android-arm64")))
+	assert.Equal(t, "flutter-android-arm+android-x64", buildKind(flutter("android-arm", "android-x64")))
+	assert.Equal(t, "builder-demo", buildKind(&pb.BuildRequest{CustomBuilder: "demo"}))
 }

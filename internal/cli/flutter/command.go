@@ -67,11 +67,16 @@ func newBuildTargetCmd(outputType string, deps Dependencies) *cobra.Command {
 		projectPath string
 		buildMode   string
 		flavor      string
+		outputDir   string
+		distribute  bool
+		abis        []string
 	)
 
 	cmd := &cobra.Command{
 		Use:   outputType,
 		Short: fmt.Sprintf("Build Flutter %s artifacts", outputType),
+		// A failed build is not a usage mistake; keep the real error visible.
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectPath = strings.TrimSpace(projectPath)
 			if projectPath == "" {
@@ -96,18 +101,37 @@ func newBuildTargetCmd(outputType string, deps Dependencies) *cobra.Command {
 				return err
 			}
 
+			if distribute {
+				if outputType != outputAPK {
+					return errors.New("--distribute-abis only applies to apk: an app bundle must contain every ABI")
+				}
+				abiList, err := normalizeABIs(abis)
+				if err != nil {
+					return err
+				}
+				return runDistributedBuild(cmd, deps, req, abiList, outputDir)
+			}
+
 			resp, err := runBuild(cmd.Context(), deps, req)
 			if err != nil {
 				return err
 			}
 
-			return printBuildResult(cmd, resp)
+			if err := printBuildResult(cmd, resp); err != nil {
+				return err
+			}
+			return saveOutputs(cmd, outputDir, resp)
 		},
 	}
 
 	cmd.Flags().StringVar(&projectPath, "project", "", "path to Flutter project")
 	cmd.Flags().StringVar(&buildMode, "build-mode", defaultBuildMode, "build mode (debug, profile, release)")
 	cmd.Flags().StringVar(&flavor, "flavor", "", "build flavor")
+	cmd.Flags().StringVarP(&outputDir, "output", "o", "", "write the built APK/AAB files into this directory")
+	if outputType == outputAPK {
+		cmd.Flags().BoolVar(&distribute, "distribute-abis", false, "build each ABI as its own task, in parallel on different workers (one APK per ABI)")
+		cmd.Flags().StringSliceVar(&abis, "abis", nil, "ABIs for --distribute-abis: arm64, arm, x64 (default all three)")
+	}
 
 	return cmd
 }
@@ -175,7 +199,8 @@ func formatBuildMode(outputType, buildMode string) (string, error) {
 	return fmt.Sprintf("%s-%s", outputType, mode), nil
 }
 
-func runBuild(ctx context.Context, deps Dependencies, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+// connect resolves the coordinator and opens a build client.
+func connect(deps Dependencies) (BuildClient, error) {
 	if deps.CoordinatorAddr == nil {
 		return nil, fmt.Errorf("coordinator resolver not configured")
 	}
@@ -191,6 +216,14 @@ func runBuild(ctx context.Context, deps Dependencies, req *pb.BuildRequest) (*pb
 	c, err := deps.NewClient(addr, deps.RequestTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect: %w", err)
+	}
+	return c, nil
+}
+
+func runBuild(ctx context.Context, deps Dependencies, req *pb.BuildRequest) (*pb.BuildResponse, error) {
+	c, err := connect(deps)
+	if err != nil {
+		return nil, err
 	}
 	defer c.Close()
 
@@ -233,4 +266,78 @@ func printBuildResult(cmd *cobra.Command, resp *pb.BuildResponse) error {
 	}
 
 	return nil
+}
+
+// saveOutputs writes the response's APK/AAB files into dir when --output
+// was given. Without it the files stay downloadable from the dashboard.
+func saveOutputs(cmd *cobra.Command, dir string, resp *pb.BuildResponse) error {
+	if dir == "" || resp == nil {
+		return nil
+	}
+	paths, err := extractOutputs(resp.GetArtifacts(), dir)
+	if err != nil {
+		return err
+	}
+	for _, p := range paths {
+		cmd.Printf("Saved %s\n", p)
+	}
+	return nil
+}
+
+// runDistributedBuild builds one APK per ABI as parallel tasks of one
+// build and reports each, the wall time, and the serial time it saved.
+func runDistributedBuild(cmd *cobra.Command, deps Dependencies, base *pb.BuildRequest, abis []string, outputDir string) error {
+	c, err := connect(deps)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd.Printf("Building %d ABIs in parallel (build %s): %s\n", len(abis), base.GetBuildId(), strings.Join(abis, ", "))
+	start := time.Now()
+	results := runDistributed(ctx, c, abiRequests(base, abis))
+	wall := time.Since(start)
+
+	var serial time.Duration
+	var failed []string
+	for _, r := range results {
+		serial += r.Took
+		switch {
+		case r.Err != nil:
+			failed = append(failed, r.ABI)
+			cmd.Printf("  %-14s failed: %v\n", r.ABI, r.Err)
+		case r.Resp.GetStatus() != pb.TaskStatus_STATUS_COMPLETED:
+			failed = append(failed, r.ABI)
+			cmd.Printf("  %-14s failed on %s (exit %d): %s\n", r.ABI, r.Resp.GetWorkerId(), r.Resp.GetExitCode(), lastLine(r.Resp.GetStderr()))
+		default:
+			cache := ""
+			if r.Resp.GetFromCache() {
+				cache = " (cache hit)"
+			}
+			cmd.Printf("  %-14s %-22s %6.1fs%s\n", r.ABI, r.Resp.GetWorkerId(), r.Took.Seconds(), cache)
+			for _, a := range r.Resp.GetArtifactList() {
+				cmd.Printf("      %s (%d bytes)\n", a.GetPath(), a.GetSizeBytes())
+			}
+			if err := saveOutputs(cmd, outputDir, r.Resp); err != nil {
+				return err
+			}
+		}
+	}
+	cmd.Printf("Done in %.1fs (tasks summed %.1fs)\n", wall.Seconds(), serial.Seconds())
+	if len(failed) > 0 {
+		return fmt.Errorf("%d of %d ABI builds failed: %s", len(failed), len(abis), strings.Join(failed, ", "))
+	}
+	return nil
+}
+
+func lastLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.LastIndexByte(s, '\n'); i >= 0 {
+		return s[i+1:]
+	}
+	return s
 }

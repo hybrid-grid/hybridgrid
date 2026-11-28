@@ -333,8 +333,13 @@ type FlutterConfig struct {
 	BuildMode      string                 `protobuf:"bytes,2,opt,name=build_mode,json=buildMode,proto3" json:"build_mode,omitempty"` // debug, profile, release
 	Flavor         string                 `protobuf:"bytes,3,opt,name=flavor,proto3" json:"flavor,omitempty"`
 	DartDefines    map[string]string      `protobuf:"bytes,4,rep,name=dart_defines,json=dartDefines,proto3" json:"dart_defines,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Flutter --target-platform values (android-arm, android-arm64,
+	// android-x64); empty builds Flutter's default set in one go.
+	TargetPlatforms []string `protobuf:"bytes,5,rep,name=target_platforms,json=targetPlatforms,proto3" json:"target_platforms,omitempty"`
+	// Build one APK per ABI (flutter build apk --split-per-abi).
+	SplitPerAbi   bool `protobuf:"varint,6,opt,name=split_per_abi,json=splitPerAbi,proto3" json:"split_per_abi,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FlutterConfig) Reset() {
@@ -393,6 +398,20 @@ func (x *FlutterConfig) GetDartDefines() map[string]string {
 		return x.DartDefines
 	}
 	return nil
+}
+
+func (x *FlutterConfig) GetTargetPlatforms() []string {
+	if x != nil {
+		return x.TargetPlatforms
+	}
+	return nil
+}
+
+func (x *FlutterConfig) GetSplitPerAbi() bool {
+	if x != nil {
+		return x.SplitPerAbi
+	}
+	return false
 }
 
 type UnityConfig struct {
@@ -1900,7 +1919,8 @@ type BuildResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Result
 	Status TaskStatus `protobuf:"varint,1,opt,name=status,proto3,enum=hybridgrid.v1.TaskStatus" json:"status,omitempty"`
-	// Output artifacts (tar.zst compressed)
+	// Output artifacts as a tar archive: plain tar from the built-in
+	// executors; builder plugins may send zstd- or gzip-compressed tar.
 	Artifacts []byte `protobuf:"bytes,2,opt,name=artifacts,proto3" json:"artifacts,omitempty"`
 	// Artifact metadata
 	ArtifactList []*ArtifactInfo `protobuf:"bytes,3,rep,name=artifact_list,json=artifactList,proto3" json:"artifact_list,omitempty"`
@@ -3167,8 +3187,11 @@ type WorkerStatusResponse_WorkerInfo struct {
 	CircuitState        string                 `protobuf:"bytes,10,opt,name=circuit_state,json=circuitState,proto3" json:"circuit_state,omitempty"`          // CLOSED, HALF_OPEN, OPEN
 	DiscoverySource     string                 `protobuf:"bytes,11,opt,name=discovery_source,json=discoverySource,proto3" json:"discovery_source,omitempty"` // LAN, WAN
 	LastHeartbeatUnix   int64                  `protobuf:"varint,12,opt,name=last_heartbeat_unix,json=lastHeartbeatUnix,proto3" json:"last_heartbeat_unix,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// Heartbeat within the coordinator's TTL and not marked unreachable.
+	// Unset when talking to an older coordinator.
+	Healthy       *bool `protobuf:"varint,13,opt,name=healthy,proto3,oneof" json:"healthy,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *WorkerStatusResponse_WorkerInfo) Reset() {
@@ -3285,6 +3308,13 @@ func (x *WorkerStatusResponse_WorkerInfo) GetLastHeartbeatUnix() int64 {
 	return 0
 }
 
+func (x *WorkerStatusResponse_WorkerInfo) GetHealthy() bool {
+	if x != nil && x.Healthy != nil {
+		return *x.Healthy
+	}
+	return false
+}
+
 var File_hybridgrid_v1_build_proto protoreflect.FileDescriptor
 
 const file_hybridgrid_v1_build_proto_rawDesc = "" +
@@ -3295,13 +3325,15 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\x05flags\x18\x02 \x03(\tR\x05flags\x12<\n" +
 	"\vtarget_arch\x18\x03 \x01(\x0e2\x1b.hybridgrid.v1.ArchitectureR\n" +
 	"targetArch\x12#\n" +
-	"\rcmake_options\x18\x04 \x01(\tR\fcmakeOptions\"\x81\x02\n" +
+	"\rcmake_options\x18\x04 \x01(\tR\fcmakeOptions\"\xd0\x02\n" +
 	"\rFlutterConfig\x12'\n" +
 	"\x0fflutter_version\x18\x01 \x01(\tR\x0eflutterVersion\x12\x1d\n" +
 	"\n" +
 	"build_mode\x18\x02 \x01(\tR\tbuildMode\x12\x16\n" +
 	"\x06flavor\x18\x03 \x01(\tR\x06flavor\x12P\n" +
-	"\fdart_defines\x18\x04 \x03(\v2-.hybridgrid.v1.FlutterConfig.DartDefinesEntryR\vdartDefines\x1a>\n" +
+	"\fdart_defines\x18\x04 \x03(\v2-.hybridgrid.v1.FlutterConfig.DartDefinesEntryR\vdartDefines\x12)\n" +
+	"\x10target_platforms\x18\x05 \x03(\tR\x0ftargetPlatforms\x12\"\n" +
+	"\rsplit_per_abi\x18\x06 \x01(\bR\vsplitPerAbi\x1a>\n" +
 	"\x10DartDefinesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x8a\x02\n" +
@@ -3530,11 +3562,11 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\x11cpu_usage_percent\x18\x04 \x01(\x02R\x0fcpuUsagePercent\x120\n" +
 	"\x14memory_usage_percent\x18\x05 \x01(\x02R\x12memoryUsagePercent\x12%\n" +
 	"\x0euptime_seconds\x18\x06 \x01(\x03R\ruptimeSeconds\"\x15\n" +
-	"\x13WorkerStatusRequest\"\xfd\x04\n" +
+	"\x13WorkerStatusRequest\"\xa8\x05\n" +
 	"\x14WorkerStatusResponse\x12H\n" +
 	"\aworkers\x18\x01 \x03(\v2..hybridgrid.v1.WorkerStatusResponse.WorkerInfoR\aworkers\x12#\n" +
 	"\rtotal_workers\x18\x02 \x01(\x05R\ftotalWorkers\x12'\n" +
-	"\x0fhealthy_workers\x18\x03 \x01(\x05R\x0ehealthyWorkers\x1a\xcc\x03\n" +
+	"\x0fhealthy_workers\x18\x03 \x01(\x05R\x0ehealthyWorkers\x1a\xf7\x03\n" +
 	"\n" +
 	"WorkerInfo\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\tR\bworkerId\x12\x12\n" +
@@ -3550,7 +3582,10 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\rcircuit_state\x18\n" +
 	" \x01(\tR\fcircuitState\x12)\n" +
 	"\x10discovery_source\x18\v \x01(\tR\x0fdiscoverySource\x12.\n" +
-	"\x13last_heartbeat_unix\x18\f \x01(\x03R\x11lastHeartbeatUnix\"\x99\x01\n" +
+	"\x13last_heartbeat_unix\x18\f \x01(\x03R\x11lastHeartbeatUnix\x12\x1d\n" +
+	"\ahealthy\x18\r \x01(\bH\x00R\ahealthy\x88\x01\x01B\n" +
+	"\n" +
+	"\b_healthy\"\x99\x01\n" +
 	"\x16WorkersForBuildRequest\x127\n" +
 	"\n" +
 	"build_type\x18\x01 \x01(\x0e2\x18.hybridgrid.v1.BuildTypeR\tbuildType\x12F\n" +
@@ -3789,6 +3824,7 @@ func file_hybridgrid_v1_build_proto_init() {
 		(*BuildChunk_Metadata)(nil),
 		(*BuildChunk_SourceChunk)(nil),
 	}
+	file_hybridgrid_v1_build_proto_msgTypes[45].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

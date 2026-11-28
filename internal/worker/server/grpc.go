@@ -48,6 +48,10 @@ type Config struct {
 	// aarch64-linux-gnu-gcc for cross images whose plain gcc targets
 	// the host. Empty keeps the client-requested compiler.
 	DockerToolchains map[pb.Architecture]string
+
+	// GradleCache points Flutter builds at the coordinator's shared
+	// Gradle remote build cache (zero value: off).
+	GradleCache executor.GradleCache
 }
 
 // DefaultConfig returns sensible defaults.
@@ -83,10 +87,12 @@ func New(cfg Config) *Server {
 	// Set max parallel tasks from config
 	caps.MaxParallelTasks = int32(cfg.MaxConcurrent)
 
+	mgr := executor.NewManager(caps.NativeArch, caps.DockerAvailable, cfg.DockerImages, cfg.DockerToolchains)
+	mgr.SetFlutterGradleCache(cfg.GradleCache)
 	return &Server{
 		config:       cfg,
 		capabilities: caps,
-		executor:     executor.NewManager(caps.NativeArch, caps.DockerAvailable, cfg.DockerImages, cfg.DockerToolchains),
+		executor:     mgr,
 		builders:     cfg.Builders,
 	}
 }

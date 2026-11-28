@@ -20,6 +20,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
 
+	"github.com/h3nr1-d14z/hybridgrid/internal/gradlecache"
 	"github.com/h3nr1-d14z/hybridgrid/internal/logging"
 	"github.com/h3nr1-d14z/hybridgrid/internal/security/auth"
 )
@@ -40,6 +41,9 @@ type Server struct {
 	AuthToken       string
 	EventSink       EventSink
 	DispatchCounter DispatchCounter
+	// GradleCache, when set, serves Gradle's HTTP build cache protocol
+	// under /cache/gradle/ (see internal/gradlecache).
+	GradleCache http.Handler
 
 	server *http.Server
 }
@@ -73,6 +77,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/log-level", logging.NewLogLevelHandler(s.AuthToken))
 	mux.HandleFunc("/dispatch-count", s.handleDispatchCount)
 	mux.HandleFunc("/events", s.handleEvents)
+	if s.GradleCache != nil {
+		mux.Handle(gradlecache.Prefix, s.GradleCache)
+	}
 	return mux
 }
 

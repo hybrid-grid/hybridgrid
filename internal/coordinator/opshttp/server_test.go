@@ -95,3 +95,21 @@ func TestServer_DispatchCount(t *testing.T) {
 		t.Errorf("response=%d %s", w.Code, w.Body.String())
 	}
 }
+
+func TestServer_GradleCacheMount(t *testing.T) {
+	served := false
+	cache := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		served = r.URL.Path == "/cache/gradle/abc"
+		w.WriteHeader(http.StatusNotFound)
+	})
+	rec := httptest.NewRecorder()
+	(&Server{}).Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/cache/gradle/abc", nil))
+	if rec.Code != http.StatusNotFound || served {
+		t.Fatalf("without a cache: status %d, served %v", rec.Code, served)
+	}
+	rec = httptest.NewRecorder()
+	(&Server{GradleCache: cache}).Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/cache/gradle/abc", nil))
+	if !served {
+		t.Fatal("gradle cache handler not mounted at /cache/gradle/")
+	}
+}

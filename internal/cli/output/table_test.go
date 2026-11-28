@@ -413,3 +413,26 @@ func TestPrintCacheStats(t *testing.T) {
 		t.Fatalf("did not expect miss or hit-rate rows in zero-hit output: %q", zeroMissOutput)
 	}
 }
+
+func TestWorkerStatusCell(t *testing.T) {
+	DisableColors()
+	defer EnableColors()
+
+	tests := []struct {
+		name string
+		w    WorkerInfo
+		want string
+	}{
+		{"healthy closed", WorkerInfo{CircuitState: "CLOSED"}, "healthy"},
+		{"missed heartbeat", WorkerInfo{CircuitState: "CLOSED", Unhealthy: true}, "unhealthy"},
+		{"missed heartbeat outranks open", WorkerInfo{CircuitState: "OPEN", Unhealthy: true}, "unhealthy"},
+		{"open circuit", WorkerInfo{CircuitState: "OPEN"}, "OPEN"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := workerStatusCell(tt.w); got != tt.want {
+				t.Errorf("workerStatusCell(%+v) = %q, want %q", tt.w, got, tt.want)
+			}
+		})
+	}
+}
