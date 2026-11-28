@@ -63,6 +63,12 @@ type WorkerInfo struct {
 	BuildTypes        []string `json:"build_types"`
 	Healthy           bool     `json:"healthy"`
 	LastSeen          int64    `json:"last_seen"`
+	// Latest live resource reading; UsageAtMs is 0 when none was reported.
+	CPUPercent       float64 `json:"cpu_percent"`
+	MemoryUsedBytes  uint64  `json:"memory_used_bytes"`
+	MemoryTotalBytes uint64  `json:"memory_total_bytes"`
+	Load1            float64 `json:"load1"`
+	UsageAtMs        int64   `json:"usage_at_ms"`
 }
 
 // TaskInfo represents task information. ExitCode is omitempty in the

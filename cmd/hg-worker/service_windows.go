@@ -166,6 +166,9 @@ func (s *workerService) Execute(args []string, r <-chan svc.ChangeRequest, chang
 		}
 	}()
 
+	// Live CPU/memory for the dashboard's per-worker charts.
+	go runUsageReporter(cli, regReq.GetCapabilities().GetWorkerId(), s.token, defaultUsageInterval, stopHeartbeat)
+
 	changes <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
 
 	// Main service loop

@@ -24,6 +24,7 @@ const (
 	MessageTypeTaskStarted  MessageType = "task_started"
 	MessageTypeTaskComplete MessageType = "task_completed"
 	MessageTypePing         MessageType = "ping"
+	MessageTypeWorkerUsage  MessageType = "worker_usage"
 	MessageTypePong         MessageType = "pong"
 )
 
@@ -218,6 +219,8 @@ func newEventType(t string) MessageType {
 		return MessageTypeTaskComplete
 	case "ping":
 		return MessageTypePing
+	case "worker_usage":
+		return MessageTypeWorkerUsage
 	default:
 		return ""
 	}

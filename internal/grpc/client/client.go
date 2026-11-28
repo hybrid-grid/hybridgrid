@@ -235,3 +235,8 @@ func (c *Client) UploadArtifact(ctx context.Context, buildID, name string, size 
 	}
 	return stream.CloseAndRecv()
 }
+
+// ReportUsage sends one live CPU/memory reading of this worker machine.
+func (c *Client) ReportUsage(ctx context.Context, req *pb.WorkerUsageReport) (*pb.ReportUsageResponse, error) {
+	return c.client.ReportUsage(ctx, req)
+}

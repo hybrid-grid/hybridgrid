@@ -29,6 +29,9 @@ type Service struct {
 
 	subsMu sync.Mutex
 	subs   map[chan *pb.TelemetryEvent]struct{}
+
+	usageMu sync.Mutex
+	usage   map[string][]UsageSample
 }
 
 // NewService creates a telemetry service. provider may be nil, in
@@ -313,6 +316,11 @@ func workerToProto(w *WorkerInfo) *pb.TelemetryWorker {
 		BuildTypes:        w.BuildTypes,
 		Healthy:           w.Healthy,
 		LastSeen:          w.LastSeen,
+		CpuPercent:        w.CPUPercent,
+		MemoryUsedBytes:   w.MemoryUsedBytes,
+		MemoryTotalBytes:  w.MemoryTotalBytes,
+		Load1:             w.Load1,
+		UsageAtMs:         w.UsageAtMs,
 	}
 }
 

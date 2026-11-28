@@ -11,9 +11,9 @@ import { Panel } from '@/components/Panel'
 import { StatStrip, type StatCell } from '@/components/StatStrip'
 import { CircuitBadge } from '@/components/StatusBadge'
 import { WorkerThroughputChart } from '@/components/WorkerThroughputChart'
-import { WorkerHeartbeat } from '@/components/WorkerHeartbeat'
+import { WorkerUsage } from '@/components/WorkerUsage'
 import { Button } from '@/components/ui/button'
-import { mergeLiveTasks } from '@/lib/dispatch'
+import { mergeLiveTasks, uniqueWorkerNames } from '@/lib/dispatch'
 import { useT } from '@/lib/i18n'
 import { averageFinishedBuildMs, fleetCapacity, passRate } from '@/lib/metrics'
 import { useBuilds, useStats, useTasks, useWorkers } from '@/lib/queries'
@@ -191,6 +191,8 @@ function overviewCells(t: Translate, stats: Stats | undefined, workers: WorkerIn
 
 function FleetList({ workers }: { workers: WorkerInfo[] }) {
   const t = useT()
+  // Several workers on one machine share a host name; label them by id then.
+  const names = uniqueWorkerNames(workers.map((w) => ({ id: w.id, host: w.host })))
 
   if (workers.length === 0) {
     return <div className="px-4 py-10 text-center text-[12px] text-(--color-ink-muted)">{t('overview.noWorkers')}</div>
@@ -199,7 +201,6 @@ function FleetList({ workers }: { workers: WorkerInfo[] }) {
   return (
     <div className="divide-y divide-(--color-hairline)">
       {workers.map((worker) => {
-        const loadRatio = worker.max_parallel_tasks > 0 ? worker.active_tasks / worker.max_parallel_tasks : 0
         return (
           <div
             key={worker.id}
@@ -212,7 +213,7 @@ function FleetList({ workers }: { workers: WorkerInfo[] }) {
                 className="block truncate font-mono text-[12px] font-medium text-(--color-ink) hover:text-(--color-signal)"
                 title={worker.id}
               >
-                {worker.host || worker.id}
+                {names.get(worker.id) ?? worker.id}
               </Link>
               <div className="flex items-center gap-2">
                 <CircuitBadge state={worker.circuit_state} className="px-0" />
@@ -223,12 +224,7 @@ function FleetList({ workers }: { workers: WorkerInfo[] }) {
                 )}
               </div>
             </div>
-            <WorkerHeartbeat
-              workerId={worker.id}
-              circuitState={worker.circuit_state}
-              loadRatio={loadRatio}
-              className="hidden sm:block"
-            />
+            <WorkerUsage worker={worker} variant="row" className="hidden sm:flex" />
             <div className="text-right">
               <div className="font-tabular text-[13px] font-medium text-(--color-ink-secondary)">
                 {worker.active_tasks}/{worker.max_parallel_tasks}

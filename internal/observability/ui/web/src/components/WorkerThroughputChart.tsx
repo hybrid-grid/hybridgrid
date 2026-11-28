@@ -4,6 +4,7 @@ import { useT } from '@/lib/i18n'
 import { niceCeil, workerThroughput } from '@/lib/metrics'
 import type { TaskInfo, WorkerInfo } from '@/lib/types'
 import { cn, formatClock, formatDuration } from '@/lib/utils'
+import { uniqueWorkerNames } from '@/lib/dispatch'
 
 const SERIES_COUNT = 6
 const LABEL_EVERY = 3
@@ -28,7 +29,8 @@ export function WorkerThroughputChart({ tasks, workers }: WorkerThroughputChartP
   const t = useT()
   const now = useNow(5000)
   const data = useMemo(() => workerThroughput(tasks, now), [tasks, now])
-  const hostById = useMemo(() => new Map(workers.map((w) => [w.id, w.host || w.id])), [workers])
+  // Host when it identifies one worker, else the id (several workers on one machine).
+  const hostById = useMemo(() => uniqueWorkerNames(workers.map((w) => ({ id: w.id, host: w.host }))), [workers])
 
   if (data.series.length === 0) {
     return <div className="px-4 py-10 text-center text-[12px] text-(--color-ink-muted)">{t('overview.throughputEmpty')}</div>

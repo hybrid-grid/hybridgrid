@@ -59,6 +59,7 @@ type Client interface {
 	GetBuild(ctx context.Context, in *pb.GetTelemetryBuildRequest, opts ...grpc.CallOption) (*pb.GetTelemetryBuildResponse, error)
 	GetConsole(ctx context.Context, in *pb.GetTelemetryConsoleRequest, opts ...grpc.CallOption) (*pb.GetTelemetryConsoleResponse, error)
 	StreamEvents(ctx context.Context, in *pb.StreamTelemetryEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[pb.TelemetryEvent], error)
+	ListWorkerUsage(ctx context.Context, in *pb.ListTelemetryWorkerUsageRequest, opts ...grpc.CallOption) (*pb.ListTelemetryWorkerUsageResponse, error)
 	ListArtifacts(ctx context.Context, in *pb.ListTelemetryArtifactsRequest, opts ...grpc.CallOption) (*pb.ListTelemetryArtifactsResponse, error)
 	DownloadArtifact(ctx context.Context, in *pb.DownloadTelemetryArtifactRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[pb.TelemetryArtifactChunk], error)
 }
@@ -143,6 +144,7 @@ func (s *Server) routes() http.Handler {
 
 	mux.HandleFunc("/api/v1/stats", s.handleStats)
 	mux.HandleFunc("/api/v1/workers", s.handleWorkers)
+	mux.HandleFunc("GET /api/v1/workers/usage", s.handleWorkerUsage)
 	mux.HandleFunc("/api/v1/events", s.handleEvents)
 	mux.HandleFunc("/api/v1/tasks", s.handleTasks)
 	mux.HandleFunc("/api/v1/builds", s.handleBuilds)

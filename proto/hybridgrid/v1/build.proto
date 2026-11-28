@@ -429,6 +429,26 @@ service BuildService {
   // --artifact` produced) at the coordinator, so the dashboard can list
   // and serve it. Streamed in chunks; the first chunk carries the header.
   rpc UploadArtifact(stream ArtifactChunk) returns (UploadArtifactResponse);
+
+  // Live machine resource use (Worker → Coordinator), sent every few
+  // seconds so the dashboard can chart CPU and memory per worker.
+  rpc ReportUsage(WorkerUsageReport) returns (ReportUsageResponse);
+}
+
+message WorkerUsageReport {
+  string worker_id = 1;
+  string auth_token = 2;
+  double cpu_percent = 3;           // whole machine, 0..100
+  uint64 memory_used_bytes = 4;     // total - available
+  uint64 memory_total_bytes = 5;
+  double load1 = 6;                 // 1-minute load average; 0 if unsupported
+  int64 sampled_at_ms = 7;
+}
+
+message ReportUsageResponse {
+  // False when the coordinator does not know this worker (it re-registers
+  // on its next heartbeat).
+  bool accepted = 1;
 }
 
 // One piece of an artifact upload. Header fields are read from the first

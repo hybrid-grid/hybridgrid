@@ -641,3 +641,35 @@ func TestServer_ArtifactErrors(t *testing.T) {
 		t.Fatalf("list without store = %d, want 503", rec.Code)
 	}
 }
+
+// --- Worker usage ---
+
+func TestServer_WorkerUsageHistory(t *testing.T) {
+	s, _, teleSvc, cleanup := setupServer(t, &fakeProvider{}, telemetry.NewStore())
+	defer cleanup()
+	teleSvc.RecordUsage("w1", telemetry.UsageSample{AtMs: 1, CPUPercent: 10, MemoryUsedBytes: 2, MemoryTotalBytes: 8, Load1: 0.5})
+	teleSvc.RecordUsage("w1", telemetry.UsageSample{AtMs: 2, CPUPercent: 20, MemoryUsedBytes: 3, MemoryTotalBytes: 8})
+
+	rec := doGETRouted(s, "/api/v1/workers/usage")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Workers []WorkerUsage `json:"workers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Workers) != 1 || body.Workers[0].WorkerID != "w1" || len(body.Workers[0].Samples) != 2 {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if first := body.Workers[0].Samples[0]; first.CPUPercent != 10 || first.MemoryTotalBytes != 8 || first.Load1 != 0.5 {
+		t.Fatalf("first sample = %+v", first)
+	}
+}
+
+func TestNewEventTypeForwardsWorkerUsage(t *testing.T) {
+	if got := newEventType("worker_usage"); got != MessageTypeWorkerUsage {
+		t.Fatalf("newEventType(worker_usage) = %q", got)
+	}
+}

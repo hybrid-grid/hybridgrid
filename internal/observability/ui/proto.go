@@ -71,6 +71,11 @@ func workerFromProto(w *pb.TelemetryWorker) *WorkerInfo {
 		BuildTypes:        w.GetBuildTypes(),
 		Healthy:           w.GetHealthy(),
 		LastSeen:          w.GetLastSeen(),
+		CPUPercent:        w.GetCpuPercent(),
+		MemoryUsedBytes:   w.GetMemoryUsedBytes(),
+		MemoryTotalBytes:  w.GetMemoryTotalBytes(),
+		Load1:             w.GetLoad1(),
+		UsageAtMs:         w.GetUsageAtMs(),
 	}
 }
 

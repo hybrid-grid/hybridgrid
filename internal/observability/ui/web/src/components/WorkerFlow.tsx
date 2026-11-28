@@ -17,6 +17,7 @@ import { GitBranch, Layers, Radio } from 'lucide-react'
 import { useCallback, useMemo, useState, useSyncExternalStore } from 'react'
 import { useT } from '@/lib/i18n'
 import { archLabel, osLabel, powerTone } from '@/lib/machine'
+import { isFresh, memoryPercent } from '@/lib/usage'
 import {
   NODE_SIZE,
   UNGROUPED,
@@ -30,6 +31,7 @@ import {
 import { cn, formatDuration, tailEllipsis, taskLabel } from '@/lib/utils'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { MachineIllustration } from './MachineIllustration'
+import { useWorkerUsage } from './WorkerUsage'
 
 /** File chips per worker card (a 320px card fits two plus "+N"). */
 const MAX_CHIPS = 2
@@ -314,6 +316,12 @@ function WorkerNode({ data }: NodeProps<WorkerFlowNode>) {
   const power = worker ? powerTone(worker) : 'failed'
   const platform = worker ? [osLabel(worker.os), archLabel(worker.architecture)].filter(Boolean).join(' · ') : t('workers.flowOffline')
   const shown = entry.running.slice(0, MAX_CHIPS)
+  // Live machine load replaces the platform line while readings are fresh.
+  const { latest } = useWorkerUsage(worker ?? { id: entry.id })
+  const usageLine =
+    latest && isFresh(latest.at_ms, now)
+      ? t('workers.usageShort', { cpu: Math.round(latest.cpu_percent), ram: Math.round(memoryPercent(latest)) })
+      : undefined
 
   return (
     <div
@@ -332,7 +340,9 @@ function WorkerNode({ data }: NodeProps<WorkerFlowNode>) {
         <MachineIllustration os={worker?.os ?? ''} slots={max} busy={busy} power={power} caption="" label={entry.name} className="w-[52px] shrink-0" />
         <div className="min-w-0 flex-1">
           <div className="truncate font-mono text-[12px] font-semibold text-(--color-ink)">{entry.name}</div>
-          <div className="truncate text-[11px] text-(--color-ink-muted)">{platform}</div>
+          <div className="truncate font-tabular text-[11px] text-(--color-ink-muted)" title={platform}>
+            {usageLine ?? platform}
+          </div>
           <SlotBar busy={busy} max={max} />
         </div>
         <span className="self-start font-tabular text-[12px] font-medium text-(--color-ink-secondary)">

@@ -8,7 +8,7 @@ import { StatStrip, type StatCell } from '@/components/StatStrip'
 import { CircuitBadge } from '@/components/StatusBadge'
 import { TaskTable } from '@/components/TaskTable'
 import { WorkerMachine } from '@/components/WorkerMachine'
-import { WorkerHeartbeat } from '@/components/WorkerHeartbeat'
+import { WorkerUsage } from '@/components/WorkerUsage'
 import { WorkerThroughputChart } from '@/components/WorkerThroughputChart'
 import { Button } from '@/components/ui/button'
 import { useNow } from '@/hooks/useNow'
@@ -65,7 +65,7 @@ function WorkerDetail() {
         </Panel>
         <Panel eyebrow={t('overview.workerFleetTitle')} className="xl:col-span-2">
           {worker && (
-            <WorkerHeartbeat workerId={worker.id} circuitState={worker.circuit_state} loadRatio={loadRatio(worker)} className="mb-3" />
+            <WorkerUsage worker={worker} variant="detail" className="mb-4" />
           )}
           <ExecutorSlots active={worker?.active_tasks ?? running.length} max={worker?.max_parallel_tasks ?? 0} running={running} now={now} />
         </Panel>
@@ -98,10 +98,6 @@ function WorkerDetail() {
       </Panel>
     </div>
   )
-}
-
-function loadRatio(worker: WorkerInfo): number {
-  return worker.max_parallel_tasks > 0 ? worker.active_tasks / worker.max_parallel_tasks : 0
 }
 
 function summaryCells(t: ReturnType<typeof useT>, tasks: TaskInfo[]): StatCell[] {

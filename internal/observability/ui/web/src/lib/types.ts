@@ -62,6 +62,25 @@ export interface WorkerInfo {
   build_types: string[] | null
   healthy: boolean
   last_seen: number
+  /** Latest live machine reading; usage_at_ms is 0 until the worker reports. */
+  cpu_percent: number
+  memory_used_bytes: number
+  memory_total_bytes: number
+  load1: number
+  usage_at_ms: number
+}
+
+/** One live CPU/memory reading of a worker machine (coordinator clock). */
+export interface UsageSample {
+  at_ms: number
+  cpu_percent: number
+  memory_used_bytes: number
+  memory_total_bytes: number
+  load1: number
+}
+
+export interface WorkerUsageResponse {
+  workers: { worker_id: string; samples: UsageSample[] }[]
 }
 
 export interface TaskInfo {
@@ -151,7 +170,7 @@ export interface BuildsResponse extends ListEnvelope {
   builds: BuildInfo[]
 }
 
-export type WsMessageType = 'stats' | 'task_started' | 'task_completed' | 'ping' | 'pong'
+export type WsMessageType = 'stats' | 'task_started' | 'task_completed' | 'worker_usage' | 'ping' | 'pong'
 
 export interface WsMessage<T = unknown> {
   type: WsMessageType
