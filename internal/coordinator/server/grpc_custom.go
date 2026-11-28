@@ -13,7 +13,6 @@ import (
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/registry"
-	"github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
 )
 
 // handleCustomBuild routes a plugin-builder build (BuildRequest.
@@ -24,9 +23,9 @@ import (
 // the builder itself (it owns its outputs and can fingerprint them).
 func (s *Server) handleCustomBuild(ctx context.Context, req *pb.BuildRequest, buildID string) (*pb.BuildResponse, error) {
 	start := time.Now()
-	m := metrics.Default()
-
 	builderID := req.CustomBuilder
+	meta := buildTaskMeta{taskID: req.TaskId, buildID: buildID, buildType: builderID}
+
 	atomic.AddInt64(&s.queuedTasks, 1)
 	defer atomic.AddInt64(&s.queuedTasks, -1)
 
@@ -36,35 +35,7 @@ func (s *Server) handleCustomBuild(ctx context.Context, req *pb.BuildRequest, bu
 	cacheKey := s.builderCacheKey(builderID, req.SourceHash, req.SourceArchive)
 	if cacheKey != "" {
 		if cached, ok := s.builderCacheLookup(cacheKey); ok {
-			atomic.AddInt64(&s.cacheHits, 1)
-			atomic.AddInt64(&s.builderCacheHits, 1)
-			atomic.AddInt64(&s.totalTasks, 1)
-			atomic.AddInt64(&s.successTasks, 1)
-			taskStartMs := start.UnixMilli()
-			if s.eventNotifier != nil {
-				s.eventNotifier.NotifyTaskStarted(&TaskEvent{
-					ID:          req.TaskId,
-					BuildType:   builderID,
-					BuildID:     buildID,
-					Status:      "running",
-					WorkerID:    "",
-					StartedAtMs: taskStartMs,
-				})
-				s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
-					ID:            req.TaskId,
-					BuildType:     builderID,
-					BuildID:       buildID,
-					Status:        "completed",
-					WorkerID:      "",
-					StartedAtMs:   taskStartMs,
-					CompletedAtMs: time.Now().UnixMilli(),
-					DurationMs:    cached.GetBuildTimeMs(),
-					QueueTimeMs:   0,
-					CompileTimeMs: cached.GetBuildTimeMs(),
-					ExitCode:      0,
-					FromCache:     true,
-				})
-			}
+			s.recordCacheServed(meta, start, cached.GetBuildTimeMs(), &s.builderCacheHits)
 			log.Info().Str("builder", builderID).Str("task_id", req.TaskId).
 				Msg("Custom build served from builder cache")
 			// The stored response has FromCache unset (the worker
@@ -81,137 +52,32 @@ func (s *Server) handleCustomBuild(ctx context.Context, req *pb.BuildRequest, bu
 				containsString(w.Capabilities.GetCustomBuilders(), builderID)
 		}, builderID)
 	if err != nil {
-		atomic.AddInt64(&s.totalTasks, 1)
-		atomic.AddInt64(&s.failedTasks, 1)
+		s.countNoWorker()
 		log.Error().Err(err).Str("task_id", req.TaskId).
 			Str("builder", builderID).
 			Msg("No worker available for custom build")
-
-		if s.eventNotifier != nil {
-			taskStartMs := start.UnixMilli()
-			s.eventNotifier.NotifyTaskStarted(&TaskEvent{
-				ID:          req.TaskId,
-				BuildType:   builderID,
-				BuildID:     buildID,
-				Status:      "running",
-				WorkerID:    "",
-				StartedAtMs: taskStartMs,
-			})
-			s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
-				ID:            req.TaskId,
-				BuildType:     builderID,
-				BuildID:       buildID,
-				Status:        "failed",
-				WorkerID:      "",
-				StartedAtMs:   taskStartMs,
-				CompletedAtMs: time.Now().UnixMilli(),
-				DurationMs:    0,
-				ExitCode:      1,
-				ErrorMessage:  fmt.Sprintf("no worker available: %v", err),
-			})
-		}
-
-		return &pb.BuildResponse{
-			Status:   pb.TaskStatus_STATUS_FAILED,
-			ExitCode: 1,
-			Stderr:   fmt.Sprintf("no worker available: %v", err),
-		}, nil
+		return s.noWorkerResponse(meta, start, err), nil
 	}
 
-	conn, err := s.workerConns.get(ctx, worker.Address)
-	if err != nil {
-		log.Error().Err(err).Str("worker", worker.ID).Msg("Failed to connect to worker")
-		return &pb.BuildResponse{
-			Status:   pb.TaskStatus_STATUS_FAILED,
-			ExitCode: 1,
-			Stderr:   fmt.Sprintf("failed to connect to worker: %v", err),
-		}, nil
+	conn, failed := s.connectBuildWorker(ctx, worker)
+	if failed != nil {
+		return failed, nil
 	}
 
-	atomic.AddInt64(&s.activeTasks, 1)
-	atomic.AddInt64(&s.totalTasks, 1)
-
-	val, _ := s.activeTasksByWorker.LoadOrStore(worker.ID, new(int64))
-	count := atomic.AddInt64(val.(*int64), 1)
-	m.SetActiveTaskCount(worker.ID, float64(count))
-
-	defer func() {
-		atomic.AddInt64(&s.activeTasks, -1)
-		if val, ok := s.activeTasksByWorker.Load(worker.ID); ok {
-			c := atomic.AddInt64(val.(*int64), -1)
-			m.SetActiveTaskCount(worker.ID, float64(c))
-		}
-	}()
+	release := s.beginWorkerTask(worker.ID)
+	defer release()
 
 	taskStartTime := time.Now()
+	s.notifyBuildStarted(meta, worker.ID, taskStartTime)
 
-	if s.eventNotifier != nil {
-		s.eventNotifier.NotifyTaskStarted(&TaskEvent{
-			ID:          req.TaskId,
-			BuildType:   builderID,
-			BuildID:     buildID,
-			Status:      "running",
-			WorkerID:    worker.ID,
-			StartedAtMs: taskStartTime.UnixMilli(),
-		})
-	}
+	buildResp, err := pb.NewBuildServiceClient(conn).Build(ctx, req)
 
-	client := pb.NewBuildServiceClient(conn)
-	buildResp, err := client.Build(ctx, req)
-
-	success := err == nil && buildResp != nil && buildResp.Status == pb.TaskStatus_STATUS_COMPLETED
-
-	s.registry.DecrementTasks(worker.ID, success, time.Duration(0))
-	s.signalDispatchCapacity()
-
-	taskCompletedTime := time.Now()
-
-	if success {
-		atomic.AddInt64(&s.successTasks, 1)
-	} else {
-		atomic.AddInt64(&s.failedTasks, 1)
-	}
-
-	if buildResp != nil {
-		s.console.Put(req.TaskId, buildResp.Stdout, buildResp.Stderr)
-	}
-	if s.eventNotifier != nil {
-		event := &TaskEvent{
-			ID:            req.TaskId,
-			BuildType:     builderID,
-			BuildID:       buildID,
-			WorkerID:      worker.ID,
-			StartedAtMs:   taskStartTime.UnixMilli(),
-			CompletedAtMs: taskCompletedTime.UnixMilli(),
-			DurationMs:    taskCompletedTime.Sub(taskStartTime).Milliseconds(),
-			QueueTimeMs:   queueWait.Milliseconds(),
-			CompileTimeMs: buildResp.GetBuildTimeMs(),
-			FromCache:     false,
-		}
-		if success {
-			event.Status = "completed"
-			event.ExitCode = buildResp.ExitCode
-		} else {
-			event.Status = "failed"
-			event.ExitCode = 1
-			if err != nil {
-				event.ErrorMessage = err.Error()
-			} else {
-				event.ExitCode = buildResp.GetExitCode()
-				event.ErrorMessage = buildResp.Stderr
-			}
-		}
-		s.eventNotifier.NotifyTaskCompleted(event)
-	}
+	s.finishWorkerBuild(meta, worker.ID, taskStartTime, queueWait, buildResp, err)
 
 	if err != nil {
 		log.Error().Err(err).Str("task_id", req.TaskId).Str("worker", worker.ID).
 			Msg("Worker custom build failed")
-		return &pb.BuildResponse{
-			Status:   pb.TaskStatus_STATUS_FAILED,
-			ExitCode: 1,
-			Stderr:   fmt.Sprintf("worker error: %v", err),
-		}, nil
+		return workerErrorResponse(err), nil
 	}
 
 	// Success with an active cache key: persist for future identical
