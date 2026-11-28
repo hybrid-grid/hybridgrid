@@ -38,7 +38,12 @@ func (s *Server) settleWorker(st *compileRun) bool {
 	if resp != nil {
 		compileTime = time.Duration(resp.CompilationTimeMs) * time.Millisecond
 	}
-	s.registry.DecrementTasks(st.worker.ID, success, compileTime)
+	// A rejected final attempt was already unbooked (with success=false)
+	// by handleWorkerRejected; decrementing again would free a slot that
+	// belongs to another task and double-count the failure.
+	if !st.unbooked {
+		s.registry.DecrementTasks(st.worker.ID, success, compileTime)
+	}
 	// A cpp slot just freed — wake queued Compile() waiters.
 	s.signalDispatchCapacity()
 	return success

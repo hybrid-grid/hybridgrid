@@ -76,6 +76,12 @@ type compileRun struct {
 	// stays bounded.
 	queued        bool
 	queueDeadline time.Time
+
+	// unbooked is set when the last attempt's booking (registry slot and
+	// per-worker active counter) was already released by
+	// handleWorkerRejected, so the completion bookkeeping must not
+	// release it a second time.
+	unbooked bool
 }
 
 // newCompileRun builds the request-scoped state, records the upload size
@@ -201,6 +207,7 @@ func (s *Server) bookAndAnnounce(ctx context.Context, span trace.Span, st *compi
 	req := st.req
 	worker := selection.worker
 	st.worker, st.dispatchInfo, st.activeAtDispatch = worker, selection.info, selection.activeAtDispatch
+	st.unbooked = false
 
 	tracing.AddEvent(ctx, "scheduler.select.done")
 	st.dispatchSeq, st.dispatchTS, st.candidates = selection.seq, selection.dispatchTS, selection.candidates
@@ -254,9 +261,28 @@ func (s *Server) releaseWorkerSlot(m *metrics.Metrics, workerID string) {
 	}
 }
 
-// backoffSleep waits the linear 25ms-per-attempt backoff between attempts.
-func backoffSleep(attempt int) {
-	time.Sleep(time.Duration(attempt) * 25 * time.Millisecond)
+// backoffSleep waits the linear 25ms-per-attempt backoff between attempts. It
+// returns false without waiting the full interval when ctx is done, so a
+// cancelled or timed-out client does not keep the handler retrying.
+func backoffSleep(ctx context.Context, attempt int) bool {
+	timer := time.NewTimer(time.Duration(attempt) * 25 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// dispatchCancelledResponse is the failure returned when the client's context
+// ends while Compile is still waiting for a worker.
+func dispatchCancelledResponse(ctx context.Context) *pb.CompileResponse {
+	return &pb.CompileResponse{
+		Status:   pb.TaskStatus_STATUS_FAILED,
+		ExitCode: 1,
+		Stderr:   fmt.Sprintf("dispatch cancelled while waiting for a worker: %v", ctx.Err()),
+	}
 }
 
 // queueTimeoutResponse is the failure returned when the dispatch queue wait
@@ -324,7 +350,10 @@ func (s *Server) handleNoWorker(ctx context.Context, span trace.Span, st *compil
 			Str("task_id", req.TaskId).
 			Int("attempt", attempt).
 			Msg("No worker currently has capacity; retrying")
-		backoffSleep(attempt)
+		if !backoffSleep(ctx, attempt) {
+			span.SetStatus(otelcodes.Error, "dispatch cancelled")
+			return loopReturn, dispatchCancelledResponse(ctx)
+		}
 		return loopRetry, nil
 	}
 	switch s.queueForCapacity(ctx, st, "All workers at capacity; queued for dispatch") {
@@ -362,6 +391,7 @@ func (s *Server) handleWorkerRejected(ctx context.Context, span trace.Span, st *
 	req, worker, err := st.req, st.worker, st.err
 	s.registry.DecrementTasks(worker.ID, false, 0)
 	s.releaseWorkerSlot(st.m, worker.ID)
+	st.unbooked = true
 	log.Warn().
 		Str("task_id", req.TaskId).
 		Str("worker_id", worker.ID).
@@ -370,7 +400,10 @@ func (s *Server) handleWorkerRejected(ctx context.Context, span trace.Span, st *
 	// Brief backoff lets the racing bookings land in the
 	// registry before the next Select reads it.
 	if attempt < maxDispatchAttempts {
-		backoffSleep(attempt)
+		if !backoffSleep(ctx, attempt) {
+			span.SetStatus(otelcodes.Error, "dispatch cancelled")
+			return loopReturn, dispatchCancelledResponse(ctx)
+		}
 		return loopRetry, nil
 	}
 	// Fast budget exhausted while every selected worker rejects
@@ -388,6 +421,8 @@ func (s *Server) handleWorkerRejected(ctx context.Context, span trace.Span, st *
 			Msg("Dispatch queue timeout exceeded while workers rejected at capacity")
 		return loopReturn, s.queueTimeoutResponse(err)
 	}
-	// Queue disabled (ablation): pre-backpressure reject.
+	// Queue disabled (ablation): pre-backpressure reject. The booking is
+	// already released above (st.unbooked), so the caller's completion
+	// bookkeeping records the failure without releasing it again.
 	return loopBreak, nil
 }

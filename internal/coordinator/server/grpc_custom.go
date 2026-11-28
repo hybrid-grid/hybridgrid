@@ -59,7 +59,7 @@ func (s *Server) handleCustomBuild(ctx context.Context, req *pb.BuildRequest, bu
 		return s.noWorkerResponse(meta, start, err), nil
 	}
 
-	conn, failed := s.connectBuildWorker(ctx, worker)
+	conn, failed := s.connectBuildWorker(ctx, meta, start, worker)
 	if failed != nil {
 		return failed, nil
 	}

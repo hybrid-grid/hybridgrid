@@ -43,7 +43,7 @@ func (s *Server) handleFlutterBuild(ctx context.Context, req *pb.BuildRequest, b
 		return s.noWorkerResponse(meta, start, err), nil
 	}
 
-	conn, failed := s.connectBuildWorker(ctx, worker)
+	conn, failed := s.connectBuildWorker(ctx, meta, start, worker)
 	if failed != nil {
 		return failed, nil
 	}

@@ -360,7 +360,9 @@ func (s *Server) selectBuildWorker(ctx context.Context, filter func(*registry.Wo
 			return worker, queueWait, nil
 		}
 		if attempt < maxAttempts {
-			time.Sleep(time.Duration(attempt) * 25 * time.Millisecond)
+			if !backoffSleep(ctx, attempt) {
+				return nil, 0, fmt.Errorf("dispatch cancelled while waiting for a worker: %w", ctx.Err())
+			}
 			continue
 		}
 		// Fast budget exhausted (~700 ms): queue instead of failing,

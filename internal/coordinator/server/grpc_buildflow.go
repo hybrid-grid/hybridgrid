@@ -141,15 +141,43 @@ func (s *Server) noWorkerResponse(meta buildTaskMeta, start time.Time, err error
 }
 
 // connectBuildWorker returns a connection to worker. On failure it
-// logs and returns the failure response to hand back to the client.
-func (s *Server) connectBuildWorker(ctx context.Context, worker *registry.WorkerInfo) (*grpc.ClientConn, *pb.BuildResponse) {
+// logs, settles the task as failed and returns the failure response to
+// hand back to the client.
+//
+// selectBuildWorker already booked a registry slot on worker, so a
+// failed connect must release it: otherwise every build that selects an
+// unreachable worker leaks one slot until the worker looks permanently
+// full. The failure is also counted and reported like any other failed
+// build, so it does not vanish from the stats and the dashboard.
+func (s *Server) connectBuildWorker(ctx context.Context, meta buildTaskMeta, start time.Time, worker *registry.WorkerInfo) (*grpc.ClientConn, *pb.BuildResponse) {
 	conn, err := s.workerConns.get(ctx, worker.Address)
 	if err != nil {
 		log.Error().Err(err).Str("worker", worker.ID).Msg("Failed to connect to worker")
+		msg := fmt.Sprintf("failed to connect to worker: %v", err)
+
+		s.registry.DecrementTasks(worker.ID, false, 0)
+		s.signalDispatchCapacity()
+		atomic.AddInt64(&s.totalTasks, 1)
+		atomic.AddInt64(&s.failedTasks, 1)
+		if s.eventNotifier != nil {
+			startedMs := start.UnixMilli()
+			s.eventNotifier.NotifyTaskStarted(startedEvent(meta, worker.ID, startedMs))
+			s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
+				ID:            meta.taskID,
+				BuildType:     meta.buildType,
+				BuildID:       meta.buildID,
+				Status:        "failed",
+				WorkerID:      worker.ID,
+				StartedAtMs:   startedMs,
+				CompletedAtMs: time.Now().UnixMilli(),
+				ExitCode:      1,
+				ErrorMessage:  msg,
+			})
+		}
 		return nil, &pb.BuildResponse{
 			Status:   pb.TaskStatus_STATUS_FAILED,
 			ExitCode: 1,
-			Stderr:   fmt.Sprintf("failed to connect to worker: %v", err),
+			Stderr:   msg,
 		}
 	}
 	return conn, nil

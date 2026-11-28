@@ -43,7 +43,7 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 		return s.noWorkerResponse(meta, start, err), nil
 	}
 
-	conn, failed := s.connectBuildWorker(ctx, worker)
+	conn, failed := s.connectBuildWorker(ctx, meta, start, worker)
 	if failed != nil {
 		return failed, nil
 	}
@@ -56,11 +56,7 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 
 	buildResp, err := pb.NewBuildServiceClient(conn).Build(ctx, archiveForwardRequest(req))
 
-	// The unity completion event has never carried a BuildID (flutter
-	// and custom do); keep that wire behaviour as-is.
-	completedMeta := meta
-	completedMeta.buildID = ""
-	s.finishWorkerBuild(completedMeta, worker.ID, taskStartTime, queueWait, buildResp, err)
+	s.finishWorkerBuild(meta, worker.ID, taskStartTime, queueWait, buildResp, err)
 
 	if err != nil {
 		log.Error().Err(err).Str("task_id", req.TaskId).Str("worker", worker.ID).

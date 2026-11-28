@@ -77,7 +77,11 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 
 	atomic.AddInt64(&s.totalTasks, 1)
 
-	defer s.releaseWorkerSlot(st.m, st.worker.ID)
+	// A final rejected attempt already released its slot in the dispatch
+	// loop; releasing again would drive the per-worker counter negative.
+	if !st.unbooked {
+		defer s.releaseWorkerSlot(st.m, st.worker.ID)
+	}
 
 	success := s.settleWorker(st)
 	s.recordSchedulerReward(st, success)
