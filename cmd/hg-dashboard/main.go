@@ -73,14 +73,15 @@ Quick start:
 	}
 
 	var (
-		port           int
-		coordinator    string
-		coordinatorTok string
-		insecureDial   bool
-		tlsCert        string
-		tlsKey         string
-		tlsCA          string
-		allowedOrigins []string
+		port                 int
+		coordinator          string
+		workerConnectAddress string
+		coordinatorTok       string
+		insecureDial         bool
+		tlsCert              string
+		tlsKey               string
+		tlsCA                string
+		allowedOrigins       []string
 	)
 
 	serveCmd := &cobra.Command{
@@ -105,6 +106,8 @@ Quick start:
 
 			cfg := ui.DefaultConfig()
 			cfg.Port = port
+			cfg.CoordinatorAddress = coordinator
+			cfg.WorkerConnectAddress = workerConnectAddress
 			cfg.AuthToken = coordinatorTok
 			cfg.AllowedOrigins = allowedOrigins
 
@@ -139,6 +142,7 @@ Quick start:
 	}
 
 	serveCmd.Flags().IntVar(&port, "port", 8081, "HTTP port for the dashboard server (coordinator ops keeps 8080)")
+	serveCmd.Flags().StringVar(&workerConnectAddress, "worker-connect-address", "", "Coordinator host:port reachable by workers (for Docker or NAT, :port uses the dashboard hostname)")
 	serveCmd.Flags().StringVar(&coordinator, "coordinator", "localhost:9000", "coordinator gRPC TelemetryService address")
 	serveCmd.Flags().StringVar(&coordinatorTok, "coordinator-token", "", "auth token forwarded to the coordinator as auth_token")
 	serveCmd.Flags().BoolVar(&insecureDial, "insecure", false, "connect to the coordinator with plaintext gRPC (no TLS)")
