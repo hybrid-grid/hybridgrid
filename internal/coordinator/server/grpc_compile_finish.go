@@ -164,6 +164,18 @@ func (s *Server) recordTaskResult(span trace.Span, st *compileRun, success bool)
 	}
 }
 
+// countDispatchFailure counts a request that ended in dispatchAndForward's
+// terminal failure (no worker, queue timeout, client cancellation) as one
+// failed task, like the build handlers do for their no-worker failures.
+// Those paths return before recordTaskResult, so without this the stats
+// under-report failed compiles. It must be called exactly once per such
+// failure and never for a request that reaches recordTaskResult, which
+// counts its own outcome (including the queue-disabled final rejection).
+func (s *Server) countDispatchFailure() {
+	atomic.AddInt64(&s.totalTasks, 1)
+	atomic.AddInt64(&s.failedTasks, 1)
+}
+
 // completedEvent builds the dashboard completion event for a finished
 // compile.
 func completedEvent(st *compileRun, success bool, completedAt time.Time) *TaskEvent {
