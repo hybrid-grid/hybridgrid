@@ -214,6 +214,7 @@ hg-dashboard serve --port=8081 --coordinator=coord:9000 \
 | `--coordinator` | `localhost:9000` | Coordinator gRPC address (TelemetryService) |
 | `--coordinator-token` | `""` | Auth token forwarded as `auth_token` on every TelemetryService call; required when the coordinator enforces auth |
 | `--insecure` | `false` | Use a plaintext coordinator gRPC link (no TLS); mirror this with the coordinator's TLS config. Without it, `hg-dashboard` expects coordinator TLS like `hgbuild` does |
+| `--allowed-origins` | `""` | Extra browser origins allowed to open the `/ws` WebSocket, comma-separated or repeated (e.g. `http://localhost:5173`). Same-origin pages and clients that send no `Origin` header are always allowed; `*` allows any origin. Needed when a reverse proxy rewrites `Host` or the UI is served from a different origin |
 
 > When the coordinator runs without TLS (e.g. local/compose setups), pass `--insecure`.
 > In compose, open the dashboard at `http://localhost:8081`.

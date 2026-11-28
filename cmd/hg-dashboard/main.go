@@ -80,6 +80,7 @@ Quick start:
 		tlsCert        string
 		tlsKey         string
 		tlsCA          string
+		allowedOrigins []string
 	)
 
 	serveCmd := &cobra.Command{
@@ -105,6 +106,7 @@ Quick start:
 			cfg := ui.DefaultConfig()
 			cfg.Port = port
 			cfg.AuthToken = coordinatorTok
+			cfg.AllowedOrigins = allowedOrigins
 
 			srv := ui.New(cfg, pb.NewTelemetryServiceClient(conn))
 
@@ -143,6 +145,7 @@ Quick start:
 	serveCmd.Flags().StringVar(&tlsCert, "tls-cert", "", "path to TLS client certificate (PEM format)")
 	serveCmd.Flags().StringVar(&tlsKey, "tls-key", "", "path to TLS client private key (PEM format)")
 	serveCmd.Flags().StringVar(&tlsCA, "tls-ca", "", "path to CA certificate for coordinator verification")
+	serveCmd.Flags().StringSliceVar(&allowedOrigins, "allowed-origins", nil, `extra browser origins allowed to open the /ws WebSocket, comma-separated or repeated (e.g. http://localhost:5173); "*" allows any origin. Same-origin pages and clients without an Origin header are always allowed`)
 
 	rootCmd.AddCommand(versionCmd, serveCmd)
 
