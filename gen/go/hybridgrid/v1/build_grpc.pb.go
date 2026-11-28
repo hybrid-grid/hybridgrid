@@ -27,6 +27,8 @@ const (
 	BuildService_GetWorkerStatus_FullMethodName    = "/hybridgrid.v1.BuildService/GetWorkerStatus"
 	BuildService_GetWorkersForBuild_FullMethodName = "/hybridgrid.v1.BuildService/GetWorkersForBuild"
 	BuildService_ReportCacheHit_FullMethodName     = "/hybridgrid.v1.BuildService/ReportCacheHit"
+	BuildService_UploadArtifact_FullMethodName     = "/hybridgrid.v1.BuildService/UploadArtifact"
+	BuildService_ReportUsage_FullMethodName        = "/hybridgrid.v1.BuildService/ReportUsage"
 )
 
 // BuildServiceClient is the client API for BuildService service.
@@ -49,6 +51,13 @@ type BuildServiceClient interface {
 	GetWorkersForBuild(ctx context.Context, in *WorkersForBuildRequest, opts ...grpc.CallOption) (*WorkersForBuildResponse, error)
 	// Report client-side cache hit (for dashboard stats)
 	ReportCacheHit(ctx context.Context, in *ReportCacheHitRequest, opts ...grpc.CallOption) (*ReportCacheHitResponse, error)
+	// Store a build output (e.g. the linked binary `hgbuild make
+	// --artifact` produced) at the coordinator, so the dashboard can list
+	// and serve it. Streamed in chunks; the first chunk carries the header.
+	UploadArtifact(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[ArtifactChunk, UploadArtifactResponse], error)
+	// Live machine resource use (Worker → Coordinator), sent every few
+	// seconds so the dashboard can chart CPU and memory per worker.
+	ReportUsage(ctx context.Context, in *WorkerUsageReport, opts ...grpc.CallOption) (*ReportUsageResponse, error)
 }
 
 type buildServiceClient struct {
@@ -142,6 +151,29 @@ func (c *buildServiceClient) ReportCacheHit(ctx context.Context, in *ReportCache
 	return out, nil
 }
 
+func (c *buildServiceClient) UploadArtifact(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[ArtifactChunk, UploadArtifactResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &BuildService_ServiceDesc.Streams[1], BuildService_UploadArtifact_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ArtifactChunk, UploadArtifactResponse]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type BuildService_UploadArtifactClient = grpc.ClientStreamingClient[ArtifactChunk, UploadArtifactResponse]
+
+func (c *buildServiceClient) ReportUsage(ctx context.Context, in *WorkerUsageReport, opts ...grpc.CallOption) (*ReportUsageResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportUsageResponse)
+	err := c.cc.Invoke(ctx, BuildService_ReportUsage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // BuildServiceServer is the server API for BuildService service.
 // All implementations must embed UnimplementedBuildServiceServer
 // for forward compatibility.
@@ -162,6 +194,13 @@ type BuildServiceServer interface {
 	GetWorkersForBuild(context.Context, *WorkersForBuildRequest) (*WorkersForBuildResponse, error)
 	// Report client-side cache hit (for dashboard stats)
 	ReportCacheHit(context.Context, *ReportCacheHitRequest) (*ReportCacheHitResponse, error)
+	// Store a build output (e.g. the linked binary `hgbuild make
+	// --artifact` produced) at the coordinator, so the dashboard can list
+	// and serve it. Streamed in chunks; the first chunk carries the header.
+	UploadArtifact(grpc.ClientStreamingServer[ArtifactChunk, UploadArtifactResponse]) error
+	// Live machine resource use (Worker → Coordinator), sent every few
+	// seconds so the dashboard can chart CPU and memory per worker.
+	ReportUsage(context.Context, *WorkerUsageReport) (*ReportUsageResponse, error)
 	mustEmbedUnimplementedBuildServiceServer()
 }
 
@@ -195,6 +234,12 @@ func (UnimplementedBuildServiceServer) GetWorkersForBuild(context.Context, *Work
 }
 func (UnimplementedBuildServiceServer) ReportCacheHit(context.Context, *ReportCacheHitRequest) (*ReportCacheHitResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReportCacheHit not implemented")
+}
+func (UnimplementedBuildServiceServer) UploadArtifact(grpc.ClientStreamingServer[ArtifactChunk, UploadArtifactResponse]) error {
+	return status.Error(codes.Unimplemented, "method UploadArtifact not implemented")
+}
+func (UnimplementedBuildServiceServer) ReportUsage(context.Context, *WorkerUsageReport) (*ReportUsageResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportUsage not implemented")
 }
 func (UnimplementedBuildServiceServer) mustEmbedUnimplementedBuildServiceServer() {}
 func (UnimplementedBuildServiceServer) testEmbeddedByValue()                      {}
@@ -350,6 +395,31 @@ func _BuildService_ReportCacheHit_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _BuildService_UploadArtifact_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(BuildServiceServer).UploadArtifact(&grpc.GenericServerStream[ArtifactChunk, UploadArtifactResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type BuildService_UploadArtifactServer = grpc.ClientStreamingServer[ArtifactChunk, UploadArtifactResponse]
+
+func _BuildService_ReportUsage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkerUsageReport)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BuildServiceServer).ReportUsage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BuildService_ReportUsage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BuildServiceServer).ReportUsage(ctx, req.(*WorkerUsageReport))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // BuildService_ServiceDesc is the grpc.ServiceDesc for BuildService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -385,11 +455,20 @@ var BuildService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "ReportCacheHit",
 			Handler:    _BuildService_ReportCacheHit_Handler,
 		},
+		{
+			MethodName: "ReportUsage",
+			Handler:    _BuildService_ReportUsage_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "StreamBuild",
 			Handler:       _BuildService_StreamBuild_Handler,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "UploadArtifact",
+			Handler:       _BuildService_UploadArtifact_Handler,
 			ClientStreams: true,
 		},
 	},

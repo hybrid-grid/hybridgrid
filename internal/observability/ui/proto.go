@@ -71,6 +71,11 @@ func workerFromProto(w *pb.TelemetryWorker) *WorkerInfo {
 		BuildTypes:        w.GetBuildTypes(),
 		Healthy:           w.GetHealthy(),
 		LastSeen:          w.GetLastSeen(),
+		CPUPercent:        w.GetCpuPercent(),
+		MemoryUsedBytes:   w.GetMemoryUsedBytes(),
+		MemoryTotalBytes:  w.GetMemoryTotalBytes(),
+		Load1:             w.GetLoad1(),
+		UsageAtMs:         w.GetUsageAtMs(),
 	}
 }
 
@@ -92,6 +97,8 @@ func taskFromProto(t *pb.TelemetryTask) *TaskInfo {
 		ExitCode:      t.GetExitCode(),
 		FromCache:     t.GetFromCache(),
 		ErrorMessage:  t.GetErrorMessage(),
+		SourceFile:    t.GetSourceFile(),
+		Command:       t.GetCommand(),
 	}
 }
 

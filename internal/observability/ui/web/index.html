@@ -6,14 +6,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Hybrid-Grid Control</title>
     <script>
-      // Applied before paint to avoid a light/dark flash: mirrors the
+      // Applied before paint to avoid a light/dark flash (light is the default): mirrors the
       // zustand-persisted value in useSettingsStore (key "hg-settings").
       try {
         var raw = localStorage.getItem('hg-settings')
-        var theme = raw ? JSON.parse(raw).state.theme : 'dark'
-        document.documentElement.dataset.theme = theme || 'dark'
+        var theme = raw ? JSON.parse(raw).state.theme : 'light'
+        document.documentElement.dataset.theme = theme || 'light'
       } catch (e) {
-        document.documentElement.dataset.theme = 'dark'
+        document.documentElement.dataset.theme = 'light'
       }
     </script>
   </head>

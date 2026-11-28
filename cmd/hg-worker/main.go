@@ -77,6 +77,7 @@ It executes build tasks received from the coordinator.`,
 			token, _ := cmd.Flags().GetString("token")
 			maxParallel, _ := cmd.Flags().GetInt("max-parallel")
 			workerID, _ := cmd.Flags().GetString("worker-id")
+			usageInterval, _ := cmd.Flags().GetDuration("usage-interval")
 			discoveryTimeout, _ := cmd.Flags().GetDuration("discovery-timeout")
 			advertiseAddr, _ := cmd.Flags().GetString("advertise-address")
 			tlsCert, _ := cmd.Flags().GetString("tls-cert")
@@ -369,6 +370,9 @@ It executes build tasks received from the coordinator.`,
 				}
 			}()
 
+			// Live CPU/memory for the dashboard's per-worker charts.
+			go runUsageReporter(cli, workerID, token, usageInterval, stopHeartbeatCh)
+
 			select {
 			case sig := <-sigCh:
 				stopHeartbeat()
@@ -388,6 +392,7 @@ It executes build tasks received from the coordinator.`,
 	serveCmd.Flags().Int("port", 50052, "Worker gRPC port")
 	serveCmd.Flags().Int("http-port", 9090, "Worker HTTP/metrics port")
 	serveCmd.Flags().String("coordinator", "", "Coordinator address (empty for mDNS auto-discovery)")
+	serveCmd.Flags().Duration("usage-interval", defaultUsageInterval, "How often to report CPU/memory use to the coordinator (0 disables)")
 	serveCmd.Flags().String("worker-id", "", "Unique worker identity (default: worker-<hostname>; REQUIRED when several workers share a hostname)")
 	serveCmd.Flags().String("advertise-address", "", "Address to advertise to coordinator (default: hostname:port)")
 	serveCmd.Flags().String("token", "", "Authentication token")

@@ -19,10 +19,10 @@ interface StatStripProps {
 }
 
 /**
- * One continuous instrument panel instead of a row of identical boxed
- * cards: cells share a single border and are split by 1px hairlines
- * (a gap over a hairline-colored backdrop), so the strip reads as one
- * readout and the lead cell can be wider and louder than the rest.
+ * A row of Paperclip metric cards sharing one bordered container, split
+ * by hairlines (a 1px gap over a hairline-colored backdrop). Each cell
+ * reads value-first, then label, then hint — Paperclip's MetricCard
+ * order — and the lead cell can span wider.
  */
 export function StatStrip({ cells, className }: StatStripProps) {
   return (
@@ -33,23 +33,23 @@ export function StatStrip({ cells, className }: StatStripProps) {
       )}
     >
       {cells.map((cell) => (
-        <div key={cell.label} className={cn('flex flex-col gap-1.5 bg-(--color-surface) px-4 py-3.5', cell.lead && 'xl:col-span-2')}>
-          <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-(--color-ink-faint)">{cell.label}</span>
+        <div key={cell.label} className={cn('flex flex-col bg-(--color-surface) px-5 py-4', cell.lead && 'xl:col-span-2')}>
           <span
-            className={cn('font-tabular font-semibold leading-none tracking-[-0.01em]', cell.lead ? 'text-[30px]' : 'text-[22px]')}
+            className={cn('font-tabular font-semibold leading-none tracking-[-0.02em]', cell.lead ? 'text-[30px]' : 'text-[24px]')}
             style={{ color: cell.color ?? 'var(--color-ink)' }}
           >
             {cell.value}
           </span>
+          <span className="mt-2 text-[13px] font-medium text-(--color-ink-muted)">{cell.label}</span>
           {cell.meter !== undefined && (
-            <span className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-(--color-surface-inset)">
+            <span className="mt-2 h-1 w-full overflow-hidden rounded-full bg-(--color-surface-inset)">
               <span
                 className="block h-full rounded-full transition-[width] duration-500 ease-out"
                 style={{ width: `${Math.min(100, Math.max(0, cell.meter * 100))}%`, backgroundColor: cell.color ?? 'var(--color-signal)' }}
               />
             </span>
           )}
-          {cell.hint && <span className="truncate font-tabular text-[11px] text-(--color-ink-muted)">{cell.hint}</span>}
+          {cell.hint && <span className="mt-1.5 truncate font-tabular text-[12px] text-(--color-ink-faint)">{cell.hint}</span>}
         </div>
       ))}
     </div>

@@ -1,7 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import { useT } from '@/lib/i18n'
 import type { TaskInfo } from '@/lib/types'
-import { cn, formatDuration } from '@/lib/utils'
+import { cn, formatDuration, taskLabel } from '@/lib/utils'
 
 const MAX_LISTED_TASKS = 4
 
@@ -57,13 +57,13 @@ export function ExecutorSlots({ active, max, running = [], now }: ExecutorSlotsP
                   params={{ buildId: task.build_id }}
                   search={{ task: task.id }}
                   className="min-w-0 truncate font-mono text-(--color-ink-secondary) hover:text-(--color-signal)"
-                  title={task.id}
+                  title={task.command || task.id}
                 >
-                  {task.id}
+                  {taskLabel(task)}
                 </Link>
               ) : (
-                <span className="min-w-0 truncate font-mono text-(--color-ink-secondary)" title={task.id}>
-                  {task.id}
+                <span className="min-w-0 truncate font-mono text-(--color-ink-secondary)" title={task.command || task.id}>
+                  {taskLabel(task)}
                 </span>
               )}
               {now !== undefined && task.started_at_ms > 0 && (

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { api } from './api'
+import { ApiError, api } from './api'
 
 export const queryKeys = {
   stats: ['stats'] as const,
@@ -8,6 +8,8 @@ export const queryKeys = {
   builds: ['builds'] as const,
   build: (id: string) => ['builds', id] as const,
   console: (taskId: string) => ['console', taskId] as const,
+  // Under ['builds', id] so the live socket's ['builds'] invalidation refreshes it.
+  artifacts: (buildId: string) => ['builds', buildId, 'artifacts'] as const,
 }
 
 export function useStats() {
@@ -48,6 +50,17 @@ export function useBuildDetail(id: string | undefined) {
     queryFn: () => api.build(id as string),
     enabled: Boolean(id),
     refetchInterval: 5000,
+  })
+}
+
+export function useArtifacts(buildId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.artifacts(buildId ?? ''),
+    queryFn: () => api.artifacts(buildId as string),
+    enabled: Boolean(buildId),
+    refetchInterval: 15_000,
+    // 503 means the coordinator runs without an artifact store: not worth retrying.
+    retry: (count, error) => !(error instanceof ApiError && error.status === 503) && count < 2,
   })
 }
 

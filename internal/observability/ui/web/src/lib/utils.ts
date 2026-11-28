@@ -1,5 +1,6 @@
 import { type ClassValue, clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
+import type { TaskInfo } from './types'
 
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs))
@@ -42,4 +43,36 @@ export function formatClock(ms: number | undefined): string {
 export function formatPercent(ratio: number | undefined, digits = 0): string {
   if (ratio === undefined || Number.isNaN(ratio)) return '—'
   return `${(ratio * 100).toFixed(digits)}%`
+}
+
+/**
+ * The human name for a task: its source file when the coordinator
+ * reported one, otherwise the opaque task id (Flutter/Unity tasks,
+ * older coordinators).
+ */
+export function taskLabel(task: Pick<TaskInfo, 'id' | 'source_file'>): string {
+  return task.source_file || task.id
+}
+
+/**
+ * Shortens a label from the front ("engine058.cc" → "…ine058.cc"): in a
+ * build's file names the distinguishing part — number, extension — is
+ * at the end, while the prefix is usually shared.
+ */
+export function tailEllipsis(label: string, max: number): string {
+  if (max < 2 || label.length <= max) return label
+  return `…${label.slice(-(max - 1))}`
+}
+
+/** Byte count in binary units: "512 B", "1.5 KiB", "12.3 MiB". */
+export function formatSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 1024) return `${Math.max(0, Math.round(bytes || 0))} B`
+  const units = ['KiB', 'MiB', 'GiB', 'TiB']
+  let value = bytes / 1024
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit++
+  }
+  return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unit]}`
 }

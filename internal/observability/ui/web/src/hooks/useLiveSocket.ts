@@ -2,8 +2,9 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
 import { wsURL } from '@/lib/api'
 import { queryKeys } from '@/lib/queries'
-import type { Stats, WsMessage } from '@/lib/types'
+import type { Stats, WsMessage, UsageSample } from '@/lib/types'
 import { useRealtimeStore } from '@/store/useRealtimeStore'
+import { useUsageStore } from '@/store/useUsageStore'
 
 const RECONNECT_BASE_MS = 1000
 const RECONNECT_MAX_MS = 30_000
@@ -44,6 +45,11 @@ export function useLiveSocket(): void {
         const stats = message.data as Stats
         queryClient.setQueryData(queryKeys.stats, stats)
         recordStats(stats, Date.now())
+        return
+      }
+      if (message.type === 'worker_usage' && message.data) {
+        const { worker_id: workerId, ...sample } = message.data as UsageSample & { worker_id: string }
+        if (workerId) useUsageStore.getState().record(workerId, [sample])
         return
       }
       if (message.type === 'task_started' || message.type === 'task_completed') {

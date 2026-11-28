@@ -1,20 +1,22 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { Cpu, MemoryStick } from 'lucide-react'
 import { useMemo } from 'react'
 import { AddWorkerDialog } from '@/components/AddWorkerDialog'
-import { ExecutorSlots } from '@/components/ExecutorSlots'
+import { MachineIllustration } from '@/components/MachineIllustration'
 import { PageHeader } from '@/components/PageHeader'
 import { Panel } from '@/components/Panel'
 import { StatStrip, type StatCell } from '@/components/StatStrip'
-import { CircuitBadge } from '@/components/StatusBadge'
-import { WorkerHeartbeat } from '@/components/WorkerHeartbeat'
+import { WorkerFlow } from '@/components/WorkerFlow'
+import { WorkerUsage } from '@/components/WorkerUsage'
 import { useNow } from '@/hooks/useNow'
+import { mergeLiveTasks, uniqueWorkerNames } from '@/lib/dispatch'
 import { useT, useRelativeTime } from '@/lib/i18n'
+import { archLabel, osLabel, powerTone } from '@/lib/machine'
 import { fleetCapacity } from '@/lib/metrics'
-import { useTasks, useWorkers } from '@/lib/queries'
-import { normalizeStatus } from '@/lib/status'
-import type { TaskInfo, WorkerInfo } from '@/lib/types'
+import { useStats, useTasks, useWorkers } from '@/lib/queries'
+import type { WorkerInfo } from '@/lib/types'
+import { buildTopology, withLiveActivity } from '@/lib/topology'
 import { cn, formatBytes, formatPercent } from '@/lib/utils'
+import { useRealtimeStore } from '@/store/useRealtimeStore'
 
 export const Route = createFileRoute('/workers/')({
   component: Workers,
@@ -24,25 +26,53 @@ const TASK_WINDOW = 200
 
 function Workers() {
   const t = useT()
-  const now = useNow(1000)
   const { data, isLoading } = useWorkers()
   const { data: tasksData } = useTasks(TASK_WINDOW)
-  const workers = useMemo(() => data?.workers ?? [], [data])
+  const { data: stats } = useStats()
+  const events = useRealtimeStore((state) => state.events)
+  const registry = useMemo(() => data?.workers ?? [], [data])
 
-  const runningByWorker = useMemo(() => {
-    const map = new Map<string, TaskInfo[]>()
-    for (const task of tasksData?.tasks ?? []) {
-      if (!task.worker_id || normalizeStatus(task.status) !== 'running') continue
-      map.set(task.worker_id, [...(map.get(task.worker_id) ?? []), task])
-    }
-    return map
-  }, [tasksData])
+  // Polled recent tasks plus live WebSocket frames, so a dispatch shows up
+  // on the map the moment it happens.
+  const liveTasks = useMemo(
+    () => mergeLiveTasks(tasksData?.tasks ?? [], events.map((event) => event.message)),
+    [tasksData, events],
+  )
+  // One source for "busy": the strip, the cards and the map all count live tasks.
+  const workers = useMemo(() => withLiveActivity(registry, liveTasks), [registry, liveTasks])
+  const topology = useMemo(() => buildTopology(workers, liveTasks), [workers, liveTasks])
+  const now = useNow(topology.running > 0 ? 250 : 1000)
+
+  // Several workers on one machine share a host name; label them by id then.
+  const names = useMemo(() => uniqueWorkerNames(workers.map((w) => ({ id: w.id, host: w.host }))), [workers])
+  // The registry returns workers in no stable order; keep cards still between
+  // polls, in the same order as the dispatch map above.
+  const sortedWorkers = useMemo(() => [...workers].sort((a, b) => a.id.localeCompare(b.id)), [workers])
 
   return (
     <div className="flex flex-col gap-4">
       <PageHeader eyebrow={t('workers.eyebrow')} title={t('workers.title')} actions={<AddWorkerDialog />} />
 
       {workers.length > 0 && <StatStrip cells={fleetCells(t, workers)} />}
+
+      {workers.length > 0 && (
+        <Panel
+          title={t('workers.flowTitle')}
+          eyebrow={topology.running > 0 ? t('workers.flowLive') : t('workers.flowIdle')}
+          action={
+            topology.running > 0 && (
+              <span className="flex items-center gap-1.5 rounded-full border border-[color-mix(in_oklch,var(--color-status-running)_35%,transparent)] px-2 py-0.5 text-[11px] font-medium text-(--color-status-running)">
+                <span className="h-1.5 w-1.5 rounded-full bg-(--color-status-running) animate-(--animate-heartbeat)" />
+                {t('workers.flowRunning', { n: topology.running })}
+              </span>
+            )
+          }
+          padded={false}
+          className="overflow-hidden"
+        >
+          <WorkerFlow topology={topology} queued={stats?.queued_tasks ?? 0} now={now} />
+        </Panel>
+      )}
 
       {isLoading && <div className="text-[12px] text-(--color-ink-muted)">{t('workers.loading')}</div>}
 
@@ -52,9 +82,9 @@ function Workers() {
         </Panel>
       )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3">
-        {workers.map((worker) => (
-          <WorkerCard key={worker.id} worker={worker} running={runningByWorker.get(worker.id) ?? []} now={now} />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {sortedWorkers.map((worker) => (
+          <WorkerCard key={worker.id} worker={worker} name={names.get(worker.id) ?? worker.id} />
         ))}
       </div>
     </div>
@@ -72,7 +102,7 @@ function fleetCells(t: ReturnType<typeof useT>, workers: WorkerInfo[]): StatCell
     {
       label: t('workers.summaryHealthy'),
       value: `${healthy}/${workers.length}`,
-      color: healthy < workers.length ? 'var(--color-status-failed)' : 'var(--color-signal)',
+      color: healthy < workers.length ? 'var(--color-status-failed)' : 'var(--color-status-success)',
     },
     {
       label: t('workers.summaryCapacity'),
@@ -86,113 +116,91 @@ function fleetCells(t: ReturnType<typeof useT>, workers: WorkerInfo[]): StatCell
 
 interface WorkerCardProps {
   worker: WorkerInfo
-  running: TaskInfo[]
-  now: number
+  /** Unique display name (host, or id when several workers share a host). */
+  name: string
 }
 
-function WorkerCard({ worker, running, now }: WorkerCardProps) {
+/**
+ * Compact worker summary for the fleet grid (four per row on wide
+ * screens): identity, live slots, CPU/RAM, and one line of history. The
+ * full machine view — files compiling, capabilities, address — lives on
+ * the worker page the whole card links to.
+ */
+function WorkerCard({ worker, name }: WorkerCardProps) {
   const t = useT()
   const relativeTime = useRelativeTime()
-  const loadRatio = worker.max_parallel_tasks > 0 ? worker.active_tasks / worker.max_parallel_tasks : 0
-  const capabilities = workerCapabilities(worker)
+  const power = powerTone(worker)
+  // The machine drawing already shows the OS; the line keeps what it cannot.
+  const platform = [osLabel(worker.os), archLabel(worker.architecture)].filter(Boolean).join(' · ')
+  const specs = [archLabel(worker.architecture), t('workers.cores', { n: worker.cpu_cores }), formatBytes(worker.memory_gb)]
+    .filter(Boolean)
+    .join(' · ')
+  const busy = worker.active_tasks
 
   return (
-    <Panel padded={false} className={cn('flex flex-col', !worker.healthy && 'border-[color-mix(in_oklch,var(--color-status-failed)_35%,transparent)]')}>
-      <div className="flex items-start justify-between gap-3 px-4 pb-2 pt-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span
-              className="h-2 w-2 shrink-0 rounded-full"
-              style={{ backgroundColor: worker.healthy ? 'var(--color-signal)' : 'var(--color-status-failed)' }}
-              title={worker.healthy ? t('workers.healthy') : t('workers.unhealthy')}
-            />
-            <Link
-              to="/workers/$workerId"
-              params={{ workerId: worker.id }}
-              className="truncate font-mono text-[13px] font-semibold text-(--color-ink) hover:text-(--color-signal)"
-            >
-              {worker.host || worker.id}
-            </Link>
-          </div>
-          {worker.host && worker.host !== worker.id && (
-            <div className="truncate pl-4 font-mono text-[10px] text-(--color-ink-faint)">{worker.id}</div>
-          )}
-          <div className="pl-4 text-[11px] text-(--color-ink-muted)">
-            {worker.os} · {worker.architecture}
-          </div>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <CircuitBadge state={worker.circuit_state} className="px-0" />
-          {!worker.healthy && (
-            <span className="text-[10px] uppercase tracking-[0.06em] text-(--color-status-failed)">{t('workers.unhealthy')}</span>
-          )}
-        </div>
-      </div>
-
-      <WorkerHeartbeat workerId={worker.id} circuitState={worker.circuit_state} loadRatio={loadRatio} className="px-4" />
-
-      <div className="border-t border-(--color-hairline) px-4 py-3">
-        <ExecutorSlots active={worker.active_tasks} max={worker.max_parallel_tasks} running={running} now={now} />
-      </div>
-
-      <dl className="grid grid-cols-3 gap-3 border-t border-(--color-hairline) px-4 py-3">
-        <Figure label={t('workers.successLabel')} value={worker.total_tasks > 0 ? formatPercent(worker.success_rate) : '—'} />
-        <Figure label={t('workers.latencyLabel')} value={`${Math.round(worker.avg_latency_ms)}ms`} />
-        <Figure label={t('workers.tasksLabel')} value={worker.total_tasks} />
-      </dl>
-
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-(--color-hairline) px-4 py-2.5 text-[11px] text-(--color-ink-muted)">
-        <span className="flex items-center gap-1.5">
-          <Cpu className="h-3 w-3" /> {t('workers.cores', { n: worker.cpu_cores })}
-        </span>
-        <span className="flex items-center gap-1.5">
-          <MemoryStick className="h-3 w-3" /> {formatBytes(worker.memory_gb)}
-        </span>
-        {worker.version && <span className="font-mono">v{worker.version.replace(/^v/, '')}</span>}
-        <span className="ml-auto">{t('workers.seenLabel', { t: relativeTime(worker.last_seen) })}</span>
-      </div>
-
-      {capabilities.length > 0 && (
-        <div className="mt-auto flex flex-wrap gap-1 border-t border-(--color-hairline) px-4 py-2.5">
-          {capabilities.map((cap) => (
-            <span
-              key={cap}
-              className="rounded-(--radius-xs) bg-(--color-surface-inset) px-1.5 py-0.5 font-mono text-[10px] text-(--color-ink-muted)"
-            >
-              {cap}
-            </span>
-          ))}
-        </div>
+    <Link
+      to="/workers/$workerId"
+      params={{ workerId: worker.id }}
+      title={`${worker.id} · ${worker.address || '—'}`}
+      className={cn(
+        'flex flex-col gap-2.5 rounded-(--radius-lg) border bg-(--color-surface) p-3 transition-colors',
+        power === 'failed'
+          ? 'border-[color-mix(in_oklch,var(--color-status-failed)_40%,transparent)]'
+          : 'border-(--color-hairline) hover:border-(--color-hairline-strong)',
       )}
-
-      <div className="flex items-center justify-between gap-3 border-t border-(--color-hairline) px-4 py-2 font-mono text-[10px] text-(--color-ink-faint)">
-        <span className="truncate" title={t('workers.addressLabel')}>
-          {worker.address || '—'}
+    >
+      <div className="flex items-center gap-2.5">
+        <MachineIllustration
+          os={worker.os}
+          slots={worker.max_parallel_tasks}
+          busy={busy}
+          power={power}
+          caption=""
+          label={name}
+          className="w-11 shrink-0"
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: POWER_DOT[power] }} />
+            <span className="truncate font-mono text-[12px] font-semibold text-(--color-ink)">{name}</span>
+          </div>
+          <div className="truncate text-[11px] text-(--color-ink-muted)" title={`${platform} · ${specs}`}>
+            {specs}
+          </div>
+        </div>
+        <span
+          className={cn(
+            'self-start font-tabular text-[12px] font-medium',
+            busy > 0 ? 'text-(--color-status-running)' : 'text-(--color-ink-faint)',
+          )}
+          title={t('workers.utilizationLabel', { active: busy, max: worker.max_parallel_tasks })}
+        >
+          {busy}/{worker.max_parallel_tasks}
         </span>
-        {worker.discovery_source && (
-          <span className="shrink-0" title={t('workers.discoveryLabel')}>
-            {worker.discovery_source}
-          </span>
-        )}
       </div>
-    </Panel>
+
+      <WorkerUsage worker={worker} variant="compact" />
+
+      <div className="flex items-center justify-between gap-2 border-t border-(--color-hairline) pt-2 text-[11px] text-(--color-ink-muted)">
+        <span className="truncate font-tabular">
+          {worker.total_tasks > 0
+            ? t('workers.cardStats', { rate: formatPercent(worker.success_rate), n: worker.total_tasks })
+            : t('workers.cardNoTasks')}
+        </span>
+        <span className="shrink-0 text-(--color-ink-faint)" title={t('workers.seenLabel', { t: relativeTime(worker.last_seen) })}>
+          {power === 'failed' ? (
+            <span className="text-(--color-status-failed)">{t('workers.unhealthy')}</span>
+          ) : (
+            relativeTime(worker.last_seen)
+          )}
+        </span>
+      </div>
+    </Link>
   )
 }
 
-function workerCapabilities(worker: WorkerInfo): string[] {
-  return [
-    ...(worker.compilers ?? []),
-    ...(worker.docker_available ? ['docker'] : []),
-    ...(worker.flutter_available ? [`flutter${worker.flutter_sdk_version ? ` ${worker.flutter_sdk_version}` : ''}`] : []),
-    ...(worker.unity_available ? (worker.unity_versions ?? ['unity']).map((v) => (v === 'unity' ? v : `unity ${v}`)) : []),
-  ]
-}
-
-function Figure({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-[10px] font-medium uppercase tracking-[0.08em] text-(--color-ink-faint)">{label}</dt>
-      <dd className="mt-0.5 truncate font-tabular text-[15px] font-semibold text-(--color-ink)">{value}</dd>
-    </div>
-  )
+const POWER_DOT: Record<ReturnType<typeof powerTone>, string> = {
+  success: 'var(--color-status-success)',
+  warning: 'var(--color-status-timeout)',
+  failed: 'var(--color-status-failed)',
 }

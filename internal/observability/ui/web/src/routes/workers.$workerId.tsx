@@ -7,7 +7,8 @@ import { Panel } from '@/components/Panel'
 import { StatStrip, type StatCell } from '@/components/StatStrip'
 import { CircuitBadge } from '@/components/StatusBadge'
 import { TaskTable } from '@/components/TaskTable'
-import { WorkerHeartbeat } from '@/components/WorkerHeartbeat'
+import { WorkerMachine } from '@/components/WorkerMachine'
+import { WorkerUsage } from '@/components/WorkerUsage'
 import { WorkerThroughputChart } from '@/components/WorkerThroughputChart'
 import { Button } from '@/components/ui/button'
 import { useNow } from '@/hooks/useNow'
@@ -59,11 +60,12 @@ function WorkerDetail() {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <Panel eyebrow={t('workerDetail.specsTitle')} title={<span className="font-mono text-[12px]">{workerId}</span>} padded={false}>
+          {worker && <WorkerMachine worker={worker} className="border-b border-(--color-hairline)" />}
           {worker ? <MachinePanel worker={worker} /> : <div className="p-4 text-(--color-ink-muted)">—</div>}
         </Panel>
         <Panel eyebrow={t('overview.workerFleetTitle')} className="xl:col-span-2">
           {worker && (
-            <WorkerHeartbeat workerId={worker.id} circuitState={worker.circuit_state} loadRatio={loadRatio(worker)} className="mb-3" />
+            <WorkerUsage worker={worker} variant="detail" className="mb-4" />
           )}
           <ExecutorSlots active={worker?.active_tasks ?? running.length} max={worker?.max_parallel_tasks ?? 0} running={running} now={now} />
         </Panel>
@@ -98,10 +100,6 @@ function WorkerDetail() {
   )
 }
 
-function loadRatio(worker: WorkerInfo): number {
-  return worker.max_parallel_tasks > 0 ? worker.active_tasks / worker.max_parallel_tasks : 0
-}
-
 function summaryCells(t: ReturnType<typeof useT>, tasks: TaskInfo[]): StatCell[] {
   const stats = taskWindowStats(tasks)
   return [
@@ -109,7 +107,7 @@ function summaryCells(t: ReturnType<typeof useT>, tasks: TaskInfo[]): StatCell[]
     {
       label: t('workerDetail.summarySuccess'),
       value: formatPercent(stats.successRate, 1),
-      color: stats.failed > 0 ? 'var(--color-status-timeout)' : 'var(--color-signal)',
+      color: stats.failed > 0 ? 'var(--color-status-timeout)' : 'var(--color-status-success)',
       hint: stats.failed > 0 ? `${stats.failed} ${t('status.failed').toLowerCase()}` : undefined,
     },
     { label: t('workerDetail.summaryAvgCompile'), value: stats.avgCompileMs !== undefined ? formatDuration(stats.avgCompileMs) : '—' },

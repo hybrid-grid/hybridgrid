@@ -196,6 +196,8 @@ func completedEvent(st *compileRun, success bool, completedAt time.Time) *TaskEv
 		// queues).
 		QueueTimeMs:   st.queueTime.Milliseconds(),
 		CompileTimeMs: resp.GetCompilationTimeMs(),
+		SourceFile:    st.req.GetSourceFilename(),
+		Command:       compileCommand(st.req),
 	}
 	if success {
 		event.Status = "completed"
@@ -238,6 +240,8 @@ func (s *Server) notifyDispatchFailed(st *compileRun, failure *pb.CompileRespons
 		QueueTimeMs:   st.queueTime.Milliseconds(),
 		ExitCode:      1,
 		ErrorMessage:  failure.Stderr,
+		SourceFile:    st.req.GetSourceFilename(),
+		Command:       compileCommand(st.req),
 	})
 }
 

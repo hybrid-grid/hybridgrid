@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
+	"github.com/h3nr1-d14z/hybridgrid/internal/artifacts"
 	"github.com/h3nr1-d14z/hybridgrid/internal/config"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/opshttp"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/scheduler"
@@ -78,6 +80,9 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			taskLogPath, _ := cmd.Flags().GetString("task-log")
 			buildHistoryPath, _ := cmd.Flags().GetString("build-history")
 			builderCacheDir, _ := cmd.Flags().GetString("builder-cache-dir")
+			artifactDir, _ := cmd.Flags().GetString("artifact-dir")
+			artifactMaxFileMB, _ := cmd.Flags().GetInt64("artifact-max-file-mb")
+			artifactMaxTotalMB, _ := cmd.Flags().GetInt64("artifact-max-total-mb")
 			dispatchQueueTimeout, _ := cmd.Flags().GetDuration("dispatch-queue-timeout")
 			epsilonValue, _ := cmd.Flags().GetFloat64("epsilon")
 			alphaValue, _ := cmd.Flags().GetFloat64("alpha")
@@ -290,6 +295,21 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			statsCtx, statsCancel := context.WithCancel(ctx)
 			defer statsCancel()
 			go teleSvc.RunStatsLoop(statsCtx)
+			if artifactDir != "" {
+				store, err := artifacts.New(artifacts.Config{
+					Dir:           artifactDir,
+					MaxFileBytes:  artifactMaxFileMB << 20,
+					MaxTotalBytes: artifactMaxTotalMB << 20,
+				})
+				if err != nil {
+					log.Warn().Err(err).Str("dir", artifactDir).Msg("Artifact store disabled")
+				} else {
+					srv.SetArtifactStore(store)
+					teleSvc.SetArtifactStore(store)
+					log.Info().Str("dir", artifactDir).Int64("max_file_mb", artifactMaxFileMB).
+						Int64("max_total_mb", artifactMaxTotalMB).Msg("Artifact store enabled")
+				}
+			}
 			if buildHistoryPath != "" {
 				if err := teleStore.EnablePersistence(statsCtx, buildHistoryPath); err != nil {
 					log.Warn().Err(err).Str("path", buildHistoryPath).
@@ -324,11 +344,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			// service; the standalone dashboard binary consumes them
 			// over gRPC StreamEvents, so the coordinator no longer
 			// needs an in-process event fan-out.
-			teleStart, teleComplete := teleSvc.CreateEventNotifier()
-			notifier := coordserver.EventNotifier(&eventNotifierWrapper{
-				onStart:    teleStart,
-				onComplete: teleComplete,
-			})
+			notifier := coordserver.EventNotifier(&eventNotifierWrapper{tele: teleSvc})
 			if eventNotifier != nil {
 				notifier = &fanoutNotifier{primary: notifier, secondary: eventNotifier}
 			}
@@ -416,6 +432,9 @@ func registerServeFlags(cmd *cobra.Command) {
 	cmd.Flags().String("event-webhook-secret", "", "Shared secret HMAC-SHA256-signing every webhook delivery (X-Hybridgrid-Signature header)")
 	cmd.Flags().String("task-log", "", "Path to per-task JSON Lines log file (default: stdout)")
 	cmd.Flags().String("build-history", "", "Persist build history to this JSON file and reload it on start (default: off)")
+	cmd.Flags().String("artifact-dir", defaultArtifactDir(), "Keep build outputs here for download from the dashboard (empty disables)")
+	cmd.Flags().Int64("artifact-max-file-mb", 1024, "Largest single artifact accepted, in MiB")
+	cmd.Flags().Int64("artifact-max-total-mb", 10240, "Total artifact storage in MiB; the oldest builds' artifacts are evicted beyond it")
 	cmd.Flags().String("builder-cache-dir", "", "Cache per-builder (plugin builder) build results in this directory, keyed by builder version + source hash (default: off)")
 	cmd.Flags().Float64("epsilon", 0.1, "Exploration rate for epsilon-greedy scheduler (in [0, 1]; ignored otherwise)")
 	cmd.Flags().Float64("alpha", 1.0, "LinUCB exploration coefficient α (in [0, 10]; ignored for other schedulers)")
@@ -497,24 +516,40 @@ func validateSizeThreshold(schedulerType string, threshold int) error {
 	return nil
 }
 
-// eventNotifierWrapper adapts the telemetry service's positional-arg
-// callbacks to the coordinator's EventNotifier (struct) interface.
-// Fan-out to a browser lives out-of-process now, via gRPC
-// StreamEvents, so this wrapper carries a single consumer.
+// eventNotifierWrapper feeds coordinator task events into the
+// telemetry service. Fan-out to a browser lives out-of-process now,
+// via gRPC StreamEvents, so this wrapper carries a single consumer.
 type eventNotifierWrapper struct {
-	onStart    func(id, buildID, buildType, status, workerID string, startedAtMs int64)
-	onComplete func(id, buildID, buildType, status, workerID string, startedAtMs, completedAtMs, durationMs, queueMs, compileMs int64, exitCode int32, errorMsg string)
+	tele *telemetry.Service
 }
 
 func (w *eventNotifierWrapper) NotifyTaskStarted(event *coordserver.TaskEvent) {
-	if w.onStart != nil {
-		w.onStart(event.ID, event.BuildID, event.BuildType, event.Status, event.WorkerID, event.StartedAtMs)
-	}
+	w.tele.RecordAndNotify(taskInfoFromEvent(event))
 }
 
 func (w *eventNotifierWrapper) NotifyTaskCompleted(event *coordserver.TaskEvent) {
-	if w.onComplete != nil {
-		w.onComplete(event.ID, event.BuildID, event.BuildType, event.Status, event.WorkerID, event.StartedAtMs, event.CompletedAtMs, event.DurationMs, event.QueueTimeMs, event.CompileTimeMs, event.ExitCode, event.ErrorMessage)
+	w.tele.RecordAndNotify(taskInfoFromEvent(event))
+}
+
+// taskInfoFromEvent maps every TaskEvent field onto the telemetry row.
+// A start event leaves the completion fields zero, as before.
+func taskInfoFromEvent(e *coordserver.TaskEvent) *telemetry.TaskInfo {
+	return &telemetry.TaskInfo{
+		ID:            e.ID,
+		BuildType:     e.BuildType,
+		BuildID:       e.BuildID,
+		Status:        e.Status,
+		WorkerID:      e.WorkerID,
+		StartedAtMs:   e.StartedAtMs,
+		CompletedAtMs: e.CompletedAtMs,
+		DurationMs:    e.DurationMs,
+		QueueMs:       e.QueueTimeMs,
+		CompileMs:     e.CompileTimeMs,
+		ExitCode:      e.ExitCode,
+		FromCache:     e.FromCache,
+		ErrorMessage:  e.ErrorMessage,
+		SourceFile:    e.SourceFile,
+		Command:       e.Command,
 	}
 }
 
@@ -534,4 +569,14 @@ func (f *fanoutNotifier) NotifyTaskStarted(event *coordserver.TaskEvent) {
 func (f *fanoutNotifier) NotifyTaskCompleted(event *coordserver.TaskEvent) {
 	f.primary.NotifyTaskCompleted(event)
 	f.secondary.NotifyTaskCompleted(event)
+}
+
+// defaultArtifactDir is the per-user cache location for stored build
+// outputs (e.g. ~/Library/Caches/hybridgrid/artifacts on macOS).
+func defaultArtifactDir() string {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		base = os.TempDir()
+	}
+	return filepath.Join(base, "hybridgrid", "artifacts")
 }

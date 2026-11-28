@@ -1,5 +1,5 @@
 import { normalizeStatus } from './status'
-import type { TaskInfo, WorkerInfo } from './types'
+import type { TaskInfo } from './types'
 
 export interface TimelineRow {
   task: TaskInfo
@@ -102,91 +102,6 @@ export const TONE_COLOR: Record<ReturnType<typeof taskToneClass>, string> = {
   failed: 'var(--color-status-failed)',
   running: 'var(--color-status-running)',
   queued: 'var(--color-status-queued)',
-}
-
-export interface ClusterLane {
-  id: string
-  host: string
-  known: boolean
-  healthy: boolean
-  taskCount: number
-  /** One array per occupied executor sub-row. */
-  slotRows: TimelineRow[][]
-}
-
-export interface ClusterLayout {
-  lanes: ClusterLane[]
-  windowStart: number
-  windowEnd: number
-  peak: number
-  undispatched: number
-  ticks: number[]
-}
-
-const AXIS_TICKS = 5
-
-/**
- * Fleet-wide swimlanes: one lane per registered worker (idle ones
- * included, so a silent worker is visible), then any worker only known
- * from task history. Inside a lane, tasks are packed greedily into
- * sub-rows reserving from queue entry rather than compile start, so a
- * queued task never hides under the previous task's compile bar — the
- * dispatch wait is exactly what this view exists to show.
- */
-export function layoutCluster(tasks: TaskInfo[], workers: WorkerInfo[], now: number): ClusterLayout {
-  const dispatched = tasks.filter((task) => task.started_at_ms > 0 && task.worker_id)
-  const undispatched = tasks.filter((task) => !task.started_at_ms).length
-  const layout = layoutTimeline(dispatched, now)
-
-  const byWorker = new Map<string, TimelineRow[]>()
-  for (const row of layout.rows) {
-    byWorker.set(row.task.worker_id, [...(byWorker.get(row.task.worker_id) ?? []), row])
-  }
-
-  const registeredIds = new Set(workers.map((worker) => worker.id))
-  const historicalIds = [...byWorker.keys()].filter((id) => !registeredIds.has(id)).sort()
-  const workerById = new Map(workers.map((worker) => [worker.id, worker]))
-
-  const lanes = [...workers.map((worker) => worker.id), ...historicalIds].map((id): ClusterLane => {
-    const rows = byWorker.get(id) ?? []
-    const worker = workerById.get(id)
-    return {
-      id,
-      host: worker?.host || id,
-      known: Boolean(worker),
-      healthy: worker?.healthy ?? false,
-      taskCount: rows.length,
-      slotRows: packSlots(rows, now),
-    }
-  })
-
-  const span = layout.windowEnd - layout.windowStart
-  const ticks =
-    layout.rows.length === 0
-      ? []
-      : Array.from({ length: AXIS_TICKS }, (_, i) => layout.windowStart + (span * i) / (AXIS_TICKS - 1))
-
-  return {
-    lanes,
-    windowStart: layout.windowStart,
-    windowEnd: layout.windowEnd,
-    peak: peakConcurrentTasks(dispatched, now),
-    undispatched,
-    ticks,
-  }
-}
-
-function packSlots(rows: TimelineRow[], now: number): TimelineRow[][] {
-  const slotEnds: number[] = []
-  const slots: TimelineRow[][] = []
-  for (const row of rows) {
-    const queuedAt = taskQueueStart(row.task)
-    const index = slotEnds.findIndex((end) => end <= queuedAt)
-    const slot = index === -1 ? slotEnds.length : index
-    slotEnds[slot] = taskRunEnd(row.task, now)
-    slots[slot] = [...(slots[slot] ?? []), row]
-  }
-  return slots
 }
 
 export interface ActivityWindow {

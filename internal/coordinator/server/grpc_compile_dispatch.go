@@ -237,6 +237,8 @@ func (s *Server) bookAndAnnounce(ctx context.Context, span trace.Span, st *compi
 			Status:      "running",
 			WorkerID:    worker.ID,
 			StartedAtMs: st.taskStartTime.UnixMilli(),
+			SourceFile:  req.GetSourceFilename(),
+			Command:     compileCommand(req),
 		})
 	}
 }

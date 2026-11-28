@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -217,6 +218,7 @@ Environment:
 		// Build wrappers
 		newMakeCmd(),
 		newNinjaCmd(),
+		newArtifactCmd(),
 		newWrapCmd(),
 	)
 
@@ -1479,6 +1481,7 @@ Examples:
   hgbuild make
   hgbuild make -j8
   hgbuild make clean all
+  hgbuild make -j8 --artifact app        # upload ./app for download from the dashboard
   hgbuild --coordinator=host:9000 make -j8
 
 The coordinator may be given before the subcommand (--coordinator or -C) or as
@@ -1566,6 +1569,17 @@ func filterHgbuildWrapperFlags(args []string) []string {
 		}
 
 		switch {
+		case arg == "--artifact":
+			if i+1 >= len(args) {
+				artifactFlagErr = errors.New("--artifact requires a file path")
+				continue
+			}
+			i++
+			artifactPaths = append(artifactPaths, args[i])
+			continue
+		case strings.HasPrefix(arg, "--artifact="):
+			artifactPaths = append(artifactPaths, strings.TrimPrefix(arg, "--artifact="))
+			continue
 		case arg == "--no-fallback":
 			noFallback = true
 			continue
@@ -1608,7 +1622,12 @@ func wrapCommandArgs(args []string) (string, []string, error) {
 }
 
 // wrapBuildCommand wraps a build command with CC/CXX set to hgbuild.
+// When --artifact paths were given, they are uploaded under this build's
+// id after the wrapped command succeeds.
 func wrapBuildCommand(command string, args []string) error {
+	if artifactFlagErr != nil {
+		return artifactFlagErr
+	}
 	// Find our own executable
 	self, err := os.Executable()
 	if err != nil {
@@ -1673,7 +1692,13 @@ func wrapBuildCommand(command string, args []string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	if len(artifactPaths) > 0 {
+		return uploadArtifacts(envValue(env, taskid.BuildIDEnvVar), artifactPaths)
+	}
+	return nil
 }
 
 func injectWrappedCompilerMode() {
@@ -1792,6 +1817,7 @@ func fallbackEnabled() bool {
 func newClientConfig(address string, requestTimeout time.Duration) client.Config {
 	clientCfg := client.Config{
 		Address:       address,
+		AuthToken:     os.Getenv("HG_TOKEN"), // required by token-protected RPCs (artifact upload)
 		Insecure:      insecure,
 		Timeout:       requestTimeout,
 		EnableTracing: tracingEnable,

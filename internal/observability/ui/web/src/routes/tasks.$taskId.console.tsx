@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useRouter } from '@tanstack/react-router'
 import { ArrowLeft } from 'lucide-react'
+import { CommandLine } from '@/components/CommandLine'
 import { ConsoleTabs } from '@/components/ConsoleTabs'
 import { PageHeader } from '@/components/PageHeader'
 import { Panel } from '@/components/Panel'
@@ -29,13 +30,14 @@ function TaskConsolePage() {
   const { build: buildFromLink } = Route.useSearch()
   const { data, isLoading, isError } = useConsole(taskId)
   const { data: recent } = useTasks(TASK_LOOKUP_WINDOW)
-  const buildId = buildFromLink ?? recent?.tasks.find((task) => task.id === taskId)?.build_id
+  const task = recent?.tasks.find((candidate) => candidate.id === taskId)
+  const buildId = buildFromLink ?? task?.build_id
 
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
         eyebrow={<span className="font-mono normal-case tracking-normal">{taskId}</span>}
-        title={t('console.title')}
+        title={task?.source_file ? <span className="font-mono">{task.source_file}</span> : t('console.title')}
         actions={
           buildId ? (
             <Button variant="outline" size="sm" asChild>
@@ -62,6 +64,7 @@ function TaskConsolePage() {
 
       {data && (
         <Panel padded={false} className="overflow-hidden">
+          <CommandLine command={task?.command} />
           <ConsoleTabs output={data} heightClass="h-[64vh]" />
         </Panel>
       )}

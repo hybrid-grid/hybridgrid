@@ -1,7 +1,10 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { AlertTriangle, ExternalLink } from 'lucide-react'
 import { useMemo } from 'react'
+import { ArtifactsPanel } from '@/components/ArtifactsPanel'
+import { BuildDispatch } from '@/components/BuildDispatch'
 import { BuildTimeline } from '@/components/BuildTimeline'
+import { CommandLine } from '@/components/CommandLine'
 import { ConsoleTabs } from '@/components/ConsoleTabs'
 import { OutcomeDonut } from '@/components/OutcomeDonut'
 import { PageHeader } from '@/components/PageHeader'
@@ -9,12 +12,15 @@ import { Panel } from '@/components/Panel'
 import { StatusBadge } from '@/components/StatusBadge'
 import { TaskTable } from '@/components/TaskTable'
 import { Button } from '@/components/ui/button'
+import { useNow } from '@/hooks/useNow'
+import { dispatchView, liveBuild, mergeLiveTasks } from '@/lib/dispatch'
 import { useT } from '@/lib/i18n'
 import { buildDurationMs, buildTone } from '@/lib/metrics'
-import { useBuildDetail, useConsole } from '@/lib/queries'
+import { useBuildDetail, useConsole, useWorkers } from '@/lib/queries'
 import { normalizeStatus } from '@/lib/status'
 import type { BuildInfo, TaskInfo } from '@/lib/types'
-import { cn, formatClock, formatDuration } from '@/lib/utils'
+import { cn, formatClock, formatDuration, taskLabel } from '@/lib/utils'
+import { useRealtimeStore } from '@/store/useRealtimeStore'
 
 interface BuildSearch {
   task?: string
@@ -33,11 +39,23 @@ function BuildDetail() {
   const navigate = Route.useNavigate()
   const t = useT()
   const { data, isLoading } = useBuildDetail(buildId)
+  const { data: workersData } = useWorkers()
+  const events = useRealtimeStore((state) => state.events)
 
-  const tasks = useMemo(() => data?.tasks ?? [], [data])
+  // Polled tasks plus live WebSocket frames for this build, so a dispatch
+  // appears the moment it happens rather than on the next poll.
+  const tasks = useMemo(
+    () => mergeLiveTasks(data?.tasks ?? [], events.map((event) => event.message), buildId),
+    [data, events, buildId],
+  )
+  const dispatch = useMemo(() => dispatchView(tasks, workersData?.workers ?? []), [tasks, workersData])
+  const live = dispatch.running > 0
+  const now = useNow(live ? 250 : 5000)
   const failedFirst = useMemo(() => tasks.find((task) => isFailure(task)), [tasks])
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? failedFirst ?? tasks[0]
-  const build = data?.build
+  // Counters re-derived from the live-merged tasks so the header, stats
+  // and donut stay in step with the dispatch view.
+  const build = useMemo(() => (data?.build ? liveBuild(data.build, tasks) : undefined), [data, tasks])
 
   function selectTask(task: TaskInfo): void {
     navigate({ search: { task: task.id }, replace: true, resetScroll: false })
@@ -72,6 +90,8 @@ function BuildDetail() {
             </div>
           )}
 
+          {live && <DispatchPanel dispatch={dispatch} now={now} onSelectTask={selectTask} live />}
+
           <Panel eyebrow={t('buildDetail.metaTitle')} padded={false}>
             <div className="grid grid-cols-1 gap-6 p-4 lg:grid-cols-[minmax(0,1fr)_auto]">
               <BuildMeta build={build} tasks={tasks} />
@@ -83,6 +103,10 @@ function BuildDetail() {
               />
             </div>
           </Panel>
+
+          <ArtifactsPanel buildId={buildId} />
+
+          {!live && dispatch.total > 0 && <DispatchPanel dispatch={dispatch} now={now} onSelectTask={selectTask} live={false} />}
 
           <Panel eyebrow={t('buildDetail.timelineTitle')} padded={false}>
             <BuildTimeline tasks={tasks} selectedTaskId={selectedTask?.id} onSelectTask={selectTask} />
@@ -97,7 +121,7 @@ function BuildDetail() {
 
             <Panel
               eyebrow={t('buildDetail.consoleTitle')}
-              title={<span className="font-mono text-[12px]">{selectedTask ? selectedTask.id : t('buildDetail.consoleSelectTask')}</span>}
+              title={<span className="font-mono text-[12px]">{selectedTask ? taskLabel(selectedTask) : t('buildDetail.consoleSelectTask')}</span>}
               action={
                 selectedTask && (
                   <Button variant="ghost" size="sm" asChild>
@@ -162,7 +186,7 @@ function BuildMeta({ build, tasks }: { build: BuildInfo; tasks: TaskInfo[] }) {
       <MetaRow
         label={t('buildDetail.metaSlowest')}
         value={slowest?.duration_ms ? `${formatDuration(slowest.duration_ms)}` : '—'}
-        hint={slowest?.duration_ms ? slowest.id : undefined}
+        hint={slowest?.duration_ms ? taskLabel(slowest) : undefined}
       />
     </dl>
   )
@@ -208,5 +232,41 @@ function TaskConsole({ task }: { task: TaskInfo }) {
   if (isError || !data) {
     return <div className="p-6 text-center text-[12px] text-(--color-ink-muted)">{t('console.notAvailable')}</div>
   }
-  return <ConsoleTabs output={data} heightClass="h-[400px]" />
+  return (
+    <>
+      <CommandLine command={task.command} />
+      <ConsoleTabs output={data} heightClass="h-[400px]" />
+    </>
+  )
+}
+
+function DispatchPanel({
+  dispatch,
+  now,
+  onSelectTask,
+  live,
+}: {
+  dispatch: ReturnType<typeof dispatchView>
+  now: number
+  onSelectTask: (task: TaskInfo) => void
+  live: boolean
+}) {
+  const t = useT()
+  return (
+    <Panel
+      title={t('buildDetail.dispatchTitle')}
+      eyebrow={live ? t('buildDetail.dispatchLive') : t('buildDetail.dispatchDone')}
+      action={
+        live && (
+          <span className="flex items-center gap-1.5 rounded-full border border-[color-mix(in_oklch,var(--color-status-running)_35%,transparent)] px-2 py-0.5 text-[11px] font-medium text-(--color-status-running)">
+            <span className="h-1.5 w-1.5 rounded-full bg-(--color-status-running) animate-(--animate-heartbeat)" />
+            {t('status.running')}
+          </span>
+        )
+      }
+      padded={false}
+    >
+      <BuildDispatch view={dispatch} now={now} onSelectTask={onSelectTask} />
+    </Panel>
+  )
 }

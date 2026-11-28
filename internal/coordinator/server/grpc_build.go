@@ -17,6 +17,14 @@ func (s *Server) Build(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResp
 		return nil, status.Error(codes.InvalidArgument, "task_id required")
 	}
 
+	resp, err := s.dispatchBuild(ctx, req, buildID)
+	if err == nil {
+		s.retainBuildArtifacts(buildID, buildKind(req), resp)
+	}
+	return resp, err
+}
+
+func (s *Server) dispatchBuild(ctx context.Context, req *pb.BuildRequest, buildID string) (*pb.BuildResponse, error) {
 	if req.CustomBuilder != "" {
 		return s.handleCustomBuild(ctx, req, buildID)
 	}

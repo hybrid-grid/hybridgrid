@@ -249,8 +249,15 @@ type TelemetryWorker struct {
 	BuildTypes        []string               `protobuf:"bytes,25,rep,name=build_types,json=buildTypes,proto3" json:"build_types,omitempty"`
 	Healthy           bool                   `protobuf:"varint,26,opt,name=healthy,proto3" json:"healthy,omitempty"`
 	LastSeen          int64                  `protobuf:"varint,27,opt,name=last_seen,json=lastSeen,proto3" json:"last_seen,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Latest live resource reading (see WorkerUsageReport); usage_at_ms is 0
+	// when the worker has not reported any.
+	CpuPercent       float64 `protobuf:"fixed64,28,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`
+	MemoryUsedBytes  uint64  `protobuf:"varint,29,opt,name=memory_used_bytes,json=memoryUsedBytes,proto3" json:"memory_used_bytes,omitempty"`
+	MemoryTotalBytes uint64  `protobuf:"varint,30,opt,name=memory_total_bytes,json=memoryTotalBytes,proto3" json:"memory_total_bytes,omitempty"`
+	Load1            float64 `protobuf:"fixed64,31,opt,name=load1,proto3" json:"load1,omitempty"`
+	UsageAtMs        int64   `protobuf:"varint,32,opt,name=usage_at_ms,json=usageAtMs,proto3" json:"usage_at_ms,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *TelemetryWorker) Reset() {
@@ -472,6 +479,41 @@ func (x *TelemetryWorker) GetLastSeen() int64 {
 	return 0
 }
 
+func (x *TelemetryWorker) GetCpuPercent() float64 {
+	if x != nil {
+		return x.CpuPercent
+	}
+	return 0
+}
+
+func (x *TelemetryWorker) GetMemoryUsedBytes() uint64 {
+	if x != nil {
+		return x.MemoryUsedBytes
+	}
+	return 0
+}
+
+func (x *TelemetryWorker) GetMemoryTotalBytes() uint64 {
+	if x != nil {
+		return x.MemoryTotalBytes
+	}
+	return 0
+}
+
+func (x *TelemetryWorker) GetLoad1() float64 {
+	if x != nil {
+		return x.Load1
+	}
+	return 0
+}
+
+func (x *TelemetryWorker) GetUsageAtMs() int64 {
+	if x != nil {
+		return x.UsageAtMs
+	}
+	return 0
+}
+
 // A single compilation task. exit_code is omitted on success,
 // matching the JSON API's omitempty semantics (absent or zero = ok).
 type TelemetryTask struct {
@@ -489,6 +531,12 @@ type TelemetryTask struct {
 	ExitCode      int32                  `protobuf:"varint,11,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
 	FromCache     bool                   `protobuf:"varint,12,opt,name=from_cache,json=fromCache,proto3" json:"from_cache,omitempty"`
 	ErrorMessage  string                 `protobuf:"bytes,13,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	// Base name of the compiled source (e.g. "main.c"); empty for
+	// non-C/C++ tasks and for clients that did not send it.
+	SourceFile string `protobuf:"bytes,14,opt,name=source_file,json=sourceFile,proto3" json:"source_file,omitempty"`
+	// Compiler and arguments the coordinator forwarded to the worker
+	// (the remote invocation, not the client's original command line).
+	Command       string `protobuf:"bytes,15,opt,name=command,proto3" json:"command,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -610,6 +658,20 @@ func (x *TelemetryTask) GetFromCache() bool {
 func (x *TelemetryTask) GetErrorMessage() string {
 	if x != nil {
 		return x.ErrorMessage
+	}
+	return ""
+}
+
+func (x *TelemetryTask) GetSourceFile() string {
+	if x != nil {
+		return x.SourceFile
+	}
+	return ""
+}
+
+func (x *TelemetryTask) GetCommand() string {
+	if x != nil {
+		return x.Command
 	}
 	return ""
 }
@@ -1495,6 +1557,576 @@ func (x *StreamTelemetryEventsRequest) GetAuthToken() string {
 	return ""
 }
 
+type TelemetryArtifactFile struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	SizeBytes     int64                  `protobuf:"varint,2,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TelemetryArtifactFile) Reset() {
+	*x = TelemetryArtifactFile{}
+	mi := &file_hybridgrid_v1_telemetry_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TelemetryArtifactFile) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TelemetryArtifactFile) ProtoMessage() {}
+
+func (x *TelemetryArtifactFile) ProtoReflect() protoreflect.Message {
+	mi := &file_hybridgrid_v1_telemetry_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TelemetryArtifactFile.ProtoReflect.Descriptor instead.
+func (*TelemetryArtifactFile) Descriptor() ([]byte, []int) {
+	return file_hybridgrid_v1_telemetry_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *TelemetryArtifactFile) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *TelemetryArtifactFile) GetSizeBytes() int64 {
+	if x != nil {
+		return x.SizeBytes
+	}
+	return 0
+}
+
+type TelemetryArtifact struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	BuildId     string                 `protobuf:"bytes,1,opt,name=build_id,json=buildId,proto3" json:"build_id,omitempty"`
+	Name        string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	SizeBytes   int64                  `protobuf:"varint,3,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	Sha256      string                 `protobuf:"bytes,4,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	CreatedAtMs int64                  `protobuf:"varint,5,opt,name=created_at_ms,json=createdAtMs,proto3" json:"created_at_ms,omitempty"`
+	// "client" (uploaded by hgbuild) or "worker" (a remote builder's output).
+	Source string `protobuf:"bytes,6,opt,name=source,proto3" json:"source,omitempty"`
+	// Entries inside an archive artifact, for display.
+	Files         []*TelemetryArtifactFile `protobuf:"bytes,7,rep,name=files,proto3" json:"files,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TelemetryArtifact) Reset() {
+	*x = TelemetryArtifact{}
+	mi := &file_hybridgrid_v1_telemetry_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TelemetryArtifact) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TelemetryArtifact) ProtoMessage() {}
+
+func (x *TelemetryArtifact) ProtoReflect() protoreflect.Message {
+	mi := &file_hybridgrid_v1_telemetry_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TelemetryArtifact.ProtoReflect.Descriptor instead.
+func (*TelemetryArtifact) Descriptor() ([]byte, []int) {
+	return file_hybridgrid_v1_telemetry_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *TelemetryArtifact) GetBuildId() string {
+	if x != nil {
+		return x.BuildId
+	}
+	return ""
+}
+
+func (x *TelemetryArtifact) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *TelemetryArtifact) GetSizeBytes() int64 {
+	if x != nil {
+		return x.SizeBytes
+	}
+	return 0
+}
+
+func (x *TelemetryArtifact) GetSha256() string {
+	if x != nil {
+		return x.Sha256
+	}
+	return ""
+}
+
+func (x *TelemetryArtifact) GetCreatedAtMs() int64 {
+	if x != nil {
+		return x.CreatedAtMs
+	}
+	return 0
+}
+
+func (x *TelemetryArtifact) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *TelemetryArtifact) GetFiles() []*TelemetryArtifactFile {
+	if x != nil {
+		return x.Files
+	}
+	return nil
+}
+
+type ListTelemetryArtifactsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AuthToken     string                 `protobuf:"bytes,1,opt,name=auth_token,json=authToken,proto3" json:"auth_token,omitempty"`
+	BuildId       string                 `protobuf:"bytes,2,opt,name=build_id,json=buildId,proto3" json:"build_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTelemetryArtifactsRequest) Reset() {
+	*x = ListTelemetryArtifactsRequest{}
+	mi := &file_hybridgrid_v1_telemetry_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTelemetryArtifactsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTelemetryArtifactsRequest) ProtoMessage() {}
+
+func (x *ListTelemetryArtifactsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_hybridgrid_v1_telemetry_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTelemetryArtifactsRequest.ProtoReflect.Descriptor instead.
+func (*ListTelemetryArtifactsRequest) Descriptor() ([]byte, []int) {
+	return file_hybridgrid_v1_telemetry_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *ListTelemetryArtifactsRequest) GetAuthToken() string {
+	if x != nil {
+		return x.AuthToken
+	}
+	return ""
+}
+
+func (x *ListTelemetryArtifactsRequest) GetBuildId() string {
+	if x != nil {
+		return x.BuildId
+	}
+	return ""
+}
+
+type ListTelemetryArtifactsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Artifacts     []*TelemetryArtifact   `protobuf:"bytes,1,rep,name=artifacts,proto3" json:"artifacts,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTelemetryArtifactsResponse) Reset() {
+	*x = ListTelemetryArtifactsResponse{}
+	mi := &file_hybridgrid_v1_telemetry_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTelemetryArtifactsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTelemetryArtifactsResponse) ProtoMessage() {}
+
+func (x *ListTelemetryArtifactsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_hybridgrid_v1_telemetry_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTelemetryArtifactsResponse.ProtoReflect.Descriptor instead.
+func (*ListTelemetryArtifactsResponse) Descriptor() ([]byte, []int) {
+	return file_hybridgrid_v1_telemetry_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *ListTelemetryArtifactsResponse) GetArtifacts() []*TelemetryArtifact {
+	if x != nil {
+		return x.Artifacts
+	}
+	return nil
+}
+
+type DownloadTelemetryArtifactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AuthToken     string                 `protobuf:"bytes,1,opt,name=auth_token,json=authToken,proto3" json:"auth_token,omitempty"`
+	BuildId       string                 `protobuf:"bytes,2,opt,name=build_id,json=buildId,proto3" json:"build_id,omitempty"`
+	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DownloadTelemetryArtifactRequest) Reset() {
+	*x = DownloadTelemetryArtifactRequest{}
+	mi := &file_hybridgrid_v1_telemetry_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DownloadTelemetryArtifactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DownloadTelemetryArtifactRequest) ProtoMessage() {}
+
+func (x *DownloadTelemetryArtifactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_hybridgrid_v1_telemetry_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DownloadTelemetryArtifactRequest.ProtoReflect.Descriptor instead.
+func (*DownloadTelemetryArtifactRequest) Descriptor() ([]byte, []int) {
+	return file_hybridgrid_v1_telemetry_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *DownloadTelemetryArtifactRequest) GetAuthToken() string {
+	if x != nil {
+		return x.AuthToken
+	}
+	return ""
+}
+
+func (x *DownloadTelemetryArtifactRequest) GetBuildId() string {
+	if x != nil {
+		return x.BuildId
+	}
+	return ""
+}
+
+func (x *DownloadTelemetryArtifactRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type TelemetryArtifactChunk struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Artifact      *TelemetryArtifact     `protobuf:"bytes,1,opt,name=artifact,proto3" json:"artifact,omitempty"`
+	Data          []byte                 `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TelemetryArtifactChunk) Reset() {
+	*x = TelemetryArtifactChunk{}
+	mi := &file_hybridgrid_v1_telemetry_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TelemetryArtifactChunk) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TelemetryArtifactChunk) ProtoMessage() {}
+
+func (x *TelemetryArtifactChunk) ProtoReflect() protoreflect.Message {
+	mi := &file_hybridgrid_v1_telemetry_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TelemetryArtifactChunk.ProtoReflect.Descriptor instead.
+func (*TelemetryArtifactChunk) Descriptor() ([]byte, []int) {
+	return file_hybridgrid_v1_telemetry_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *TelemetryArtifactChunk) GetArtifact() *TelemetryArtifact {
+	if x != nil {
+		return x.Artifact
+	}
+	return nil
+}
+
+func (x *TelemetryArtifactChunk) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+type TelemetryUsageSample struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	AtMs             int64                  `protobuf:"varint,1,opt,name=at_ms,json=atMs,proto3" json:"at_ms,omitempty"`
+	CpuPercent       float64                `protobuf:"fixed64,2,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`
+	MemoryUsedBytes  uint64                 `protobuf:"varint,3,opt,name=memory_used_bytes,json=memoryUsedBytes,proto3" json:"memory_used_bytes,omitempty"`
+	MemoryTotalBytes uint64                 `protobuf:"varint,4,opt,name=memory_total_bytes,json=memoryTotalBytes,proto3" json:"memory_total_bytes,omitempty"`
+	Load1            float64                `protobuf:"fixed64,5,opt,name=load1,proto3" json:"load1,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *TelemetryUsageSample) Reset() {
+	*x = TelemetryUsageSample{}
+	mi := &file_hybridgrid_v1_telemetry_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TelemetryUsageSample) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TelemetryUsageSample) ProtoMessage() {}
+
+func (x *TelemetryUsageSample) ProtoReflect() protoreflect.Message {
+	mi := &file_hybridgrid_v1_telemetry_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TelemetryUsageSample.ProtoReflect.Descriptor instead.
+func (*TelemetryUsageSample) Descriptor() ([]byte, []int) {
+	return file_hybridgrid_v1_telemetry_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *TelemetryUsageSample) GetAtMs() int64 {
+	if x != nil {
+		return x.AtMs
+	}
+	return 0
+}
+
+func (x *TelemetryUsageSample) GetCpuPercent() float64 {
+	if x != nil {
+		return x.CpuPercent
+	}
+	return 0
+}
+
+func (x *TelemetryUsageSample) GetMemoryUsedBytes() uint64 {
+	if x != nil {
+		return x.MemoryUsedBytes
+	}
+	return 0
+}
+
+func (x *TelemetryUsageSample) GetMemoryTotalBytes() uint64 {
+	if x != nil {
+		return x.MemoryTotalBytes
+	}
+	return 0
+}
+
+func (x *TelemetryUsageSample) GetLoad1() float64 {
+	if x != nil {
+		return x.Load1
+	}
+	return 0
+}
+
+type TelemetryWorkerUsage struct {
+	state         protoimpl.MessageState  `protogen:"open.v1"`
+	WorkerId      string                  `protobuf:"bytes,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
+	Samples       []*TelemetryUsageSample `protobuf:"bytes,2,rep,name=samples,proto3" json:"samples,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TelemetryWorkerUsage) Reset() {
+	*x = TelemetryWorkerUsage{}
+	mi := &file_hybridgrid_v1_telemetry_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TelemetryWorkerUsage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TelemetryWorkerUsage) ProtoMessage() {}
+
+func (x *TelemetryWorkerUsage) ProtoReflect() protoreflect.Message {
+	mi := &file_hybridgrid_v1_telemetry_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TelemetryWorkerUsage.ProtoReflect.Descriptor instead.
+func (*TelemetryWorkerUsage) Descriptor() ([]byte, []int) {
+	return file_hybridgrid_v1_telemetry_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *TelemetryWorkerUsage) GetWorkerId() string {
+	if x != nil {
+		return x.WorkerId
+	}
+	return ""
+}
+
+func (x *TelemetryWorkerUsage) GetSamples() []*TelemetryUsageSample {
+	if x != nil {
+		return x.Samples
+	}
+	return nil
+}
+
+type ListTelemetryWorkerUsageRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AuthToken     string                 `protobuf:"bytes,1,opt,name=auth_token,json=authToken,proto3" json:"auth_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTelemetryWorkerUsageRequest) Reset() {
+	*x = ListTelemetryWorkerUsageRequest{}
+	mi := &file_hybridgrid_v1_telemetry_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTelemetryWorkerUsageRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTelemetryWorkerUsageRequest) ProtoMessage() {}
+
+func (x *ListTelemetryWorkerUsageRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_hybridgrid_v1_telemetry_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTelemetryWorkerUsageRequest.ProtoReflect.Descriptor instead.
+func (*ListTelemetryWorkerUsageRequest) Descriptor() ([]byte, []int) {
+	return file_hybridgrid_v1_telemetry_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *ListTelemetryWorkerUsageRequest) GetAuthToken() string {
+	if x != nil {
+		return x.AuthToken
+	}
+	return ""
+}
+
+type ListTelemetryWorkerUsageResponse struct {
+	state         protoimpl.MessageState  `protogen:"open.v1"`
+	Workers       []*TelemetryWorkerUsage `protobuf:"bytes,1,rep,name=workers,proto3" json:"workers,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTelemetryWorkerUsageResponse) Reset() {
+	*x = ListTelemetryWorkerUsageResponse{}
+	mi := &file_hybridgrid_v1_telemetry_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTelemetryWorkerUsageResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTelemetryWorkerUsageResponse) ProtoMessage() {}
+
+func (x *ListTelemetryWorkerUsageResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_hybridgrid_v1_telemetry_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTelemetryWorkerUsageResponse.ProtoReflect.Descriptor instead.
+func (*ListTelemetryWorkerUsageResponse) Descriptor() ([]byte, []int) {
+	return file_hybridgrid_v1_telemetry_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *ListTelemetryWorkerUsageResponse) GetWorkers() []*TelemetryWorkerUsage {
+	if x != nil {
+		return x.Workers
+	}
+	return nil
+}
+
 var File_hybridgrid_v1_telemetry_proto protoreflect.FileDescriptor
 
 const file_hybridgrid_v1_telemetry_proto_rawDesc = "" +
@@ -1523,7 +2155,7 @@ const file_hybridgrid_v1_telemetry_proto_rawDesc = "" +
 	"\rtotal_workers\x18\x11 \x01(\x05R\ftotalWorkers\x12'\n" +
 	"\x0fhealthy_workers\x18\x12 \x01(\x05R\x0ehealthyWorkers\x12%\n" +
 	"\x0euptime_seconds\x18\x13 \x01(\x03R\ruptimeSeconds\x12\x1c\n" +
-	"\ttimestamp\x18\x14 \x01(\x03R\ttimestamp\"\xac\a\n" +
+	"\ttimestamp\x18\x14 \x01(\x03R\ttimestamp\"\xdd\b\n" +
 	"\x0fTelemetryWorker\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04host\x18\x02 \x01(\tR\x04host\x12\x18\n" +
@@ -1554,7 +2186,13 @@ const file_hybridgrid_v1_telemetry_proto_rawDesc = "" +
 	"\vbuild_types\x18\x19 \x03(\tR\n" +
 	"buildTypes\x12\x18\n" +
 	"\ahealthy\x18\x1a \x01(\bR\ahealthy\x12\x1b\n" +
-	"\tlast_seen\x18\x1b \x01(\x03R\blastSeen\"\x96\x03\n" +
+	"\tlast_seen\x18\x1b \x01(\x03R\blastSeen\x12\x1f\n" +
+	"\vcpu_percent\x18\x1c \x01(\x01R\n" +
+	"cpuPercent\x12*\n" +
+	"\x11memory_used_bytes\x18\x1d \x01(\x04R\x0fmemoryUsedBytes\x12,\n" +
+	"\x12memory_total_bytes\x18\x1e \x01(\x04R\x10memoryTotalBytes\x12\x14\n" +
+	"\x05load1\x18\x1f \x01(\x01R\x05load1\x12\x1e\n" +
+	"\vusage_at_ms\x18  \x01(\x03R\tusageAtMs\"\xd1\x03\n" +
 	"\rTelemetryTask\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -1573,7 +2211,10 @@ const file_hybridgrid_v1_telemetry_proto_rawDesc = "" +
 	"\texit_code\x18\v \x01(\x05R\bexitCode\x12\x1d\n" +
 	"\n" +
 	"from_cache\x18\f \x01(\bR\tfromCache\x12#\n" +
-	"\rerror_message\x18\r \x01(\tR\ferrorMessage\"\xca\x03\n" +
+	"\rerror_message\x18\r \x01(\tR\ferrorMessage\x12\x1f\n" +
+	"\vsource_file\x18\x0e \x01(\tR\n" +
+	"sourceFile\x12\x18\n" +
+	"\acommand\x18\x0f \x01(\tR\acommand\"\xca\x03\n" +
 	"\x0eTelemetryBuild\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -1636,7 +2277,49 @@ const file_hybridgrid_v1_telemetry_proto_rawDesc = "" +
 	"\fpayload_json\x18\x03 \x01(\tR\vpayloadJson\"=\n" +
 	"\x1cStreamTelemetryEventsRequest\x12\x1d\n" +
 	"\n" +
-	"auth_token\x18\x01 \x01(\tR\tauthToken2\xc2\x05\n" +
+	"auth_token\x18\x01 \x01(\tR\tauthToken\"J\n" +
+	"\x15TelemetryArtifactFile\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1d\n" +
+	"\n" +
+	"size_bytes\x18\x02 \x01(\x03R\tsizeBytes\"\xf1\x01\n" +
+	"\x11TelemetryArtifact\x12\x19\n" +
+	"\bbuild_id\x18\x01 \x01(\tR\abuildId\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"size_bytes\x18\x03 \x01(\x03R\tsizeBytes\x12\x16\n" +
+	"\x06sha256\x18\x04 \x01(\tR\x06sha256\x12\"\n" +
+	"\rcreated_at_ms\x18\x05 \x01(\x03R\vcreatedAtMs\x12\x16\n" +
+	"\x06source\x18\x06 \x01(\tR\x06source\x12:\n" +
+	"\x05files\x18\a \x03(\v2$.hybridgrid.v1.TelemetryArtifactFileR\x05files\"Y\n" +
+	"\x1dListTelemetryArtifactsRequest\x12\x1d\n" +
+	"\n" +
+	"auth_token\x18\x01 \x01(\tR\tauthToken\x12\x19\n" +
+	"\bbuild_id\x18\x02 \x01(\tR\abuildId\"`\n" +
+	"\x1eListTelemetryArtifactsResponse\x12>\n" +
+	"\tartifacts\x18\x01 \x03(\v2 .hybridgrid.v1.TelemetryArtifactR\tartifacts\"p\n" +
+	" DownloadTelemetryArtifactRequest\x12\x1d\n" +
+	"\n" +
+	"auth_token\x18\x01 \x01(\tR\tauthToken\x12\x19\n" +
+	"\bbuild_id\x18\x02 \x01(\tR\abuildId\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\"j\n" +
+	"\x16TelemetryArtifactChunk\x12<\n" +
+	"\bartifact\x18\x01 \x01(\v2 .hybridgrid.v1.TelemetryArtifactR\bartifact\x12\x12\n" +
+	"\x04data\x18\x02 \x01(\fR\x04data\"\xbc\x01\n" +
+	"\x14TelemetryUsageSample\x12\x13\n" +
+	"\x05at_ms\x18\x01 \x01(\x03R\x04atMs\x12\x1f\n" +
+	"\vcpu_percent\x18\x02 \x01(\x01R\n" +
+	"cpuPercent\x12*\n" +
+	"\x11memory_used_bytes\x18\x03 \x01(\x04R\x0fmemoryUsedBytes\x12,\n" +
+	"\x12memory_total_bytes\x18\x04 \x01(\x04R\x10memoryTotalBytes\x12\x14\n" +
+	"\x05load1\x18\x05 \x01(\x01R\x05load1\"r\n" +
+	"\x14TelemetryWorkerUsage\x12\x1b\n" +
+	"\tworker_id\x18\x01 \x01(\tR\bworkerId\x12=\n" +
+	"\asamples\x18\x02 \x03(\v2#.hybridgrid.v1.TelemetryUsageSampleR\asamples\"@\n" +
+	"\x1fListTelemetryWorkerUsageRequest\x12\x1d\n" +
+	"\n" +
+	"auth_token\x18\x01 \x01(\tR\tauthToken\"a\n" +
+	" ListTelemetryWorkerUsageResponse\x12=\n" +
+	"\aworkers\x18\x01 \x03(\v2#.hybridgrid.v1.TelemetryWorkerUsageR\aworkers2\x92\b\n" +
 	"\x10TelemetryService\x12]\n" +
 	"\bGetStats\x12'.hybridgrid.v1.GetTelemetryStatsRequest\x1a(.hybridgrid.v1.GetTelemetryStatsResponse\x12f\n" +
 	"\vListWorkers\x12*.hybridgrid.v1.ListTelemetryWorkersRequest\x1a+.hybridgrid.v1.ListTelemetryWorkersResponse\x12`\n" +
@@ -1646,7 +2329,10 @@ const file_hybridgrid_v1_telemetry_proto_rawDesc = "" +
 	"\bGetBuild\x12'.hybridgrid.v1.GetTelemetryBuildRequest\x1a(.hybridgrid.v1.GetTelemetryBuildResponse\x12c\n" +
 	"\n" +
 	"GetConsole\x12).hybridgrid.v1.GetTelemetryConsoleRequest\x1a*.hybridgrid.v1.GetTelemetryConsoleResponse\x12\\\n" +
-	"\fStreamEvents\x12+.hybridgrid.v1.StreamTelemetryEventsRequest\x1a\x1d.hybridgrid.v1.TelemetryEvent0\x01BDZBgithub.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1;hybridgridv1b\x06proto3"
+	"\fStreamEvents\x12+.hybridgrid.v1.StreamTelemetryEventsRequest\x1a\x1d.hybridgrid.v1.TelemetryEvent0\x01\x12r\n" +
+	"\x0fListWorkerUsage\x12..hybridgrid.v1.ListTelemetryWorkerUsageRequest\x1a/.hybridgrid.v1.ListTelemetryWorkerUsageResponse\x12l\n" +
+	"\rListArtifacts\x12,.hybridgrid.v1.ListTelemetryArtifactsRequest\x1a-.hybridgrid.v1.ListTelemetryArtifactsResponse\x12l\n" +
+	"\x10DownloadArtifact\x12/.hybridgrid.v1.DownloadTelemetryArtifactRequest\x1a%.hybridgrid.v1.TelemetryArtifactChunk0\x01BDZBgithub.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1;hybridgridv1b\x06proto3"
 
 var (
 	file_hybridgrid_v1_telemetry_proto_rawDescOnce sync.Once
@@ -1660,27 +2346,37 @@ func file_hybridgrid_v1_telemetry_proto_rawDescGZIP() []byte {
 	return file_hybridgrid_v1_telemetry_proto_rawDescData
 }
 
-var file_hybridgrid_v1_telemetry_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_hybridgrid_v1_telemetry_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_hybridgrid_v1_telemetry_proto_goTypes = []any{
-	(*TelemetryStats)(nil),               // 0: hybridgrid.v1.TelemetryStats
-	(*TelemetryWorker)(nil),              // 1: hybridgrid.v1.TelemetryWorker
-	(*TelemetryTask)(nil),                // 2: hybridgrid.v1.TelemetryTask
-	(*TelemetryBuild)(nil),               // 3: hybridgrid.v1.TelemetryBuild
-	(*TelemetryConsole)(nil),             // 4: hybridgrid.v1.TelemetryConsole
-	(*GetTelemetryStatsRequest)(nil),     // 5: hybridgrid.v1.GetTelemetryStatsRequest
-	(*GetTelemetryStatsResponse)(nil),    // 6: hybridgrid.v1.GetTelemetryStatsResponse
-	(*ListTelemetryWorkersRequest)(nil),  // 7: hybridgrid.v1.ListTelemetryWorkersRequest
-	(*ListTelemetryWorkersResponse)(nil), // 8: hybridgrid.v1.ListTelemetryWorkersResponse
-	(*ListTelemetryTasksRequest)(nil),    // 9: hybridgrid.v1.ListTelemetryTasksRequest
-	(*ListTelemetryTasksResponse)(nil),   // 10: hybridgrid.v1.ListTelemetryTasksResponse
-	(*ListTelemetryBuildsRequest)(nil),   // 11: hybridgrid.v1.ListTelemetryBuildsRequest
-	(*ListTelemetryBuildsResponse)(nil),  // 12: hybridgrid.v1.ListTelemetryBuildsResponse
-	(*GetTelemetryBuildRequest)(nil),     // 13: hybridgrid.v1.GetTelemetryBuildRequest
-	(*GetTelemetryBuildResponse)(nil),    // 14: hybridgrid.v1.GetTelemetryBuildResponse
-	(*GetTelemetryConsoleRequest)(nil),   // 15: hybridgrid.v1.GetTelemetryConsoleRequest
-	(*GetTelemetryConsoleResponse)(nil),  // 16: hybridgrid.v1.GetTelemetryConsoleResponse
-	(*TelemetryEvent)(nil),               // 17: hybridgrid.v1.TelemetryEvent
-	(*StreamTelemetryEventsRequest)(nil), // 18: hybridgrid.v1.StreamTelemetryEventsRequest
+	(*TelemetryStats)(nil),                   // 0: hybridgrid.v1.TelemetryStats
+	(*TelemetryWorker)(nil),                  // 1: hybridgrid.v1.TelemetryWorker
+	(*TelemetryTask)(nil),                    // 2: hybridgrid.v1.TelemetryTask
+	(*TelemetryBuild)(nil),                   // 3: hybridgrid.v1.TelemetryBuild
+	(*TelemetryConsole)(nil),                 // 4: hybridgrid.v1.TelemetryConsole
+	(*GetTelemetryStatsRequest)(nil),         // 5: hybridgrid.v1.GetTelemetryStatsRequest
+	(*GetTelemetryStatsResponse)(nil),        // 6: hybridgrid.v1.GetTelemetryStatsResponse
+	(*ListTelemetryWorkersRequest)(nil),      // 7: hybridgrid.v1.ListTelemetryWorkersRequest
+	(*ListTelemetryWorkersResponse)(nil),     // 8: hybridgrid.v1.ListTelemetryWorkersResponse
+	(*ListTelemetryTasksRequest)(nil),        // 9: hybridgrid.v1.ListTelemetryTasksRequest
+	(*ListTelemetryTasksResponse)(nil),       // 10: hybridgrid.v1.ListTelemetryTasksResponse
+	(*ListTelemetryBuildsRequest)(nil),       // 11: hybridgrid.v1.ListTelemetryBuildsRequest
+	(*ListTelemetryBuildsResponse)(nil),      // 12: hybridgrid.v1.ListTelemetryBuildsResponse
+	(*GetTelemetryBuildRequest)(nil),         // 13: hybridgrid.v1.GetTelemetryBuildRequest
+	(*GetTelemetryBuildResponse)(nil),        // 14: hybridgrid.v1.GetTelemetryBuildResponse
+	(*GetTelemetryConsoleRequest)(nil),       // 15: hybridgrid.v1.GetTelemetryConsoleRequest
+	(*GetTelemetryConsoleResponse)(nil),      // 16: hybridgrid.v1.GetTelemetryConsoleResponse
+	(*TelemetryEvent)(nil),                   // 17: hybridgrid.v1.TelemetryEvent
+	(*StreamTelemetryEventsRequest)(nil),     // 18: hybridgrid.v1.StreamTelemetryEventsRequest
+	(*TelemetryArtifactFile)(nil),            // 19: hybridgrid.v1.TelemetryArtifactFile
+	(*TelemetryArtifact)(nil),                // 20: hybridgrid.v1.TelemetryArtifact
+	(*ListTelemetryArtifactsRequest)(nil),    // 21: hybridgrid.v1.ListTelemetryArtifactsRequest
+	(*ListTelemetryArtifactsResponse)(nil),   // 22: hybridgrid.v1.ListTelemetryArtifactsResponse
+	(*DownloadTelemetryArtifactRequest)(nil), // 23: hybridgrid.v1.DownloadTelemetryArtifactRequest
+	(*TelemetryArtifactChunk)(nil),           // 24: hybridgrid.v1.TelemetryArtifactChunk
+	(*TelemetryUsageSample)(nil),             // 25: hybridgrid.v1.TelemetryUsageSample
+	(*TelemetryWorkerUsage)(nil),             // 26: hybridgrid.v1.TelemetryWorkerUsage
+	(*ListTelemetryWorkerUsageRequest)(nil),  // 27: hybridgrid.v1.ListTelemetryWorkerUsageRequest
+	(*ListTelemetryWorkerUsageResponse)(nil), // 28: hybridgrid.v1.ListTelemetryWorkerUsageResponse
 }
 var file_hybridgrid_v1_telemetry_proto_depIdxs = []int32{
 	0,  // 0: hybridgrid.v1.GetTelemetryStatsResponse.stats:type_name -> hybridgrid.v1.TelemetryStats
@@ -1690,25 +2386,36 @@ var file_hybridgrid_v1_telemetry_proto_depIdxs = []int32{
 	3,  // 4: hybridgrid.v1.GetTelemetryBuildResponse.build:type_name -> hybridgrid.v1.TelemetryBuild
 	2,  // 5: hybridgrid.v1.GetTelemetryBuildResponse.tasks:type_name -> hybridgrid.v1.TelemetryTask
 	4,  // 6: hybridgrid.v1.GetTelemetryConsoleResponse.console:type_name -> hybridgrid.v1.TelemetryConsole
-	5,  // 7: hybridgrid.v1.TelemetryService.GetStats:input_type -> hybridgrid.v1.GetTelemetryStatsRequest
-	7,  // 8: hybridgrid.v1.TelemetryService.ListWorkers:input_type -> hybridgrid.v1.ListTelemetryWorkersRequest
-	9,  // 9: hybridgrid.v1.TelemetryService.ListTasks:input_type -> hybridgrid.v1.ListTelemetryTasksRequest
-	11, // 10: hybridgrid.v1.TelemetryService.ListBuilds:input_type -> hybridgrid.v1.ListTelemetryBuildsRequest
-	13, // 11: hybridgrid.v1.TelemetryService.GetBuild:input_type -> hybridgrid.v1.GetTelemetryBuildRequest
-	15, // 12: hybridgrid.v1.TelemetryService.GetConsole:input_type -> hybridgrid.v1.GetTelemetryConsoleRequest
-	18, // 13: hybridgrid.v1.TelemetryService.StreamEvents:input_type -> hybridgrid.v1.StreamTelemetryEventsRequest
-	6,  // 14: hybridgrid.v1.TelemetryService.GetStats:output_type -> hybridgrid.v1.GetTelemetryStatsResponse
-	8,  // 15: hybridgrid.v1.TelemetryService.ListWorkers:output_type -> hybridgrid.v1.ListTelemetryWorkersResponse
-	10, // 16: hybridgrid.v1.TelemetryService.ListTasks:output_type -> hybridgrid.v1.ListTelemetryTasksResponse
-	12, // 17: hybridgrid.v1.TelemetryService.ListBuilds:output_type -> hybridgrid.v1.ListTelemetryBuildsResponse
-	14, // 18: hybridgrid.v1.TelemetryService.GetBuild:output_type -> hybridgrid.v1.GetTelemetryBuildResponse
-	16, // 19: hybridgrid.v1.TelemetryService.GetConsole:output_type -> hybridgrid.v1.GetTelemetryConsoleResponse
-	17, // 20: hybridgrid.v1.TelemetryService.StreamEvents:output_type -> hybridgrid.v1.TelemetryEvent
-	14, // [14:21] is the sub-list for method output_type
-	7,  // [7:14] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	19, // 7: hybridgrid.v1.TelemetryArtifact.files:type_name -> hybridgrid.v1.TelemetryArtifactFile
+	20, // 8: hybridgrid.v1.ListTelemetryArtifactsResponse.artifacts:type_name -> hybridgrid.v1.TelemetryArtifact
+	20, // 9: hybridgrid.v1.TelemetryArtifactChunk.artifact:type_name -> hybridgrid.v1.TelemetryArtifact
+	25, // 10: hybridgrid.v1.TelemetryWorkerUsage.samples:type_name -> hybridgrid.v1.TelemetryUsageSample
+	26, // 11: hybridgrid.v1.ListTelemetryWorkerUsageResponse.workers:type_name -> hybridgrid.v1.TelemetryWorkerUsage
+	5,  // 12: hybridgrid.v1.TelemetryService.GetStats:input_type -> hybridgrid.v1.GetTelemetryStatsRequest
+	7,  // 13: hybridgrid.v1.TelemetryService.ListWorkers:input_type -> hybridgrid.v1.ListTelemetryWorkersRequest
+	9,  // 14: hybridgrid.v1.TelemetryService.ListTasks:input_type -> hybridgrid.v1.ListTelemetryTasksRequest
+	11, // 15: hybridgrid.v1.TelemetryService.ListBuilds:input_type -> hybridgrid.v1.ListTelemetryBuildsRequest
+	13, // 16: hybridgrid.v1.TelemetryService.GetBuild:input_type -> hybridgrid.v1.GetTelemetryBuildRequest
+	15, // 17: hybridgrid.v1.TelemetryService.GetConsole:input_type -> hybridgrid.v1.GetTelemetryConsoleRequest
+	18, // 18: hybridgrid.v1.TelemetryService.StreamEvents:input_type -> hybridgrid.v1.StreamTelemetryEventsRequest
+	27, // 19: hybridgrid.v1.TelemetryService.ListWorkerUsage:input_type -> hybridgrid.v1.ListTelemetryWorkerUsageRequest
+	21, // 20: hybridgrid.v1.TelemetryService.ListArtifacts:input_type -> hybridgrid.v1.ListTelemetryArtifactsRequest
+	23, // 21: hybridgrid.v1.TelemetryService.DownloadArtifact:input_type -> hybridgrid.v1.DownloadTelemetryArtifactRequest
+	6,  // 22: hybridgrid.v1.TelemetryService.GetStats:output_type -> hybridgrid.v1.GetTelemetryStatsResponse
+	8,  // 23: hybridgrid.v1.TelemetryService.ListWorkers:output_type -> hybridgrid.v1.ListTelemetryWorkersResponse
+	10, // 24: hybridgrid.v1.TelemetryService.ListTasks:output_type -> hybridgrid.v1.ListTelemetryTasksResponse
+	12, // 25: hybridgrid.v1.TelemetryService.ListBuilds:output_type -> hybridgrid.v1.ListTelemetryBuildsResponse
+	14, // 26: hybridgrid.v1.TelemetryService.GetBuild:output_type -> hybridgrid.v1.GetTelemetryBuildResponse
+	16, // 27: hybridgrid.v1.TelemetryService.GetConsole:output_type -> hybridgrid.v1.GetTelemetryConsoleResponse
+	17, // 28: hybridgrid.v1.TelemetryService.StreamEvents:output_type -> hybridgrid.v1.TelemetryEvent
+	28, // 29: hybridgrid.v1.TelemetryService.ListWorkerUsage:output_type -> hybridgrid.v1.ListTelemetryWorkerUsageResponse
+	22, // 30: hybridgrid.v1.TelemetryService.ListArtifacts:output_type -> hybridgrid.v1.ListTelemetryArtifactsResponse
+	24, // 31: hybridgrid.v1.TelemetryService.DownloadArtifact:output_type -> hybridgrid.v1.TelemetryArtifactChunk
+	22, // [22:32] is the sub-list for method output_type
+	12, // [12:22] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_hybridgrid_v1_telemetry_proto_init() }
@@ -1722,7 +2429,7 @@ func file_hybridgrid_v1_telemetry_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_hybridgrid_v1_telemetry_proto_rawDesc), len(file_hybridgrid_v1_telemetry_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

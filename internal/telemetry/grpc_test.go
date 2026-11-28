@@ -198,8 +198,7 @@ func TestService_StreamEventsReplaysThenPushes(t *testing.T) {
 	}
 
 	// Live push from the notifier path.
-	onStart, _ := svc.CreateEventNotifier()
-	onStart("live", "b1", "cpp", "running", "w1", 42)
+	svc.RecordAndNotify(&TaskInfo{ID: "live", BuildID: "b1", BuildType: "cpp", Status: "running", WorkerID: "w1", StartedAtMs: 42})
 	ev = <-stream.sent
 	if ev.Type != "task_started" {
 		t.Fatalf("live event type = %q, want task_started", ev.Type)

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { activityBursts, layoutCluster, layoutTimeline, peakConcurrentTasks, taskToneClass, tasksInWindow } from './timeline'
-import type { TaskInfo, WorkerInfo } from './types'
+import { activityBursts, layoutTimeline, peakConcurrentTasks, taskToneClass, tasksInWindow } from './timeline'
+import type { TaskInfo } from './types'
 
 function task(id: string, startedAtMs: number, completedAtMs?: number, durationMs?: number): TaskInfo {
   return {
@@ -77,43 +77,6 @@ describe('layoutTimeline', () => {
   it('orders rows by compile start', () => {
     const layout = layoutTimeline([task('late', 300, 400), task('early', 100, 200)])
     expect(layout.rows.map((row) => row.task.id)).toEqual(['early', 'late'])
-  })
-})
-
-describe('layoutCluster', () => {
-  const worker = (id: string, host = ''): WorkerInfo => ({ id, host, healthy: true }) as WorkerInfo
-
-  it('keeps idle registered workers as empty lanes and appends history-only workers', () => {
-    const tasks = [{ ...task('a', 100, 200), worker_id: 'ghost' }]
-    const layout = layoutCluster(tasks, [worker('w1', 'box-1')], 1_000)
-
-    expect(layout.lanes.map((lane) => [lane.id, lane.host, lane.known, lane.taskCount])).toEqual([
-      ['w1', 'box-1', true, 0],
-      ['ghost', 'ghost', false, 1],
-    ])
-  })
-
-  it('packs overlapping tasks into separate sub-rows and reuses freed rows', () => {
-    const tasks = [task('a', 100, 300), task('b', 150, 250), task('c', 300, 400)]
-    const lane = layoutCluster(tasks, [worker('worker-1')], 1_000).lanes[0]
-
-    expect(lane.slotRows.map((rows) => rows.map((row) => row.task.id))).toEqual([['a', 'c'], ['b']])
-  })
-
-  it('reserves a sub-row from queue entry so a queued task is not hidden', () => {
-    const queued = { ...task('b', 300, 400), queue_ms: 150 }
-    const lane = layoutCluster([task('a', 100, 300), queued], [worker('worker-1')], 1_000).lanes[0]
-
-    expect(lane.slotRows).toHaveLength(2)
-  })
-
-  it('counts undispatched tasks and emits five axis ticks', () => {
-    const layout = layoutCluster([task('a', 100, 200), task('pending', 0)], [], 1_000)
-
-    expect(layout.undispatched).toBe(1)
-    expect(layout.ticks).toHaveLength(5)
-    expect(layout.ticks[0]).toBe(layout.windowStart)
-    expect(layout.ticks.at(-1)).toBe(layout.windowEnd)
   })
 })
 

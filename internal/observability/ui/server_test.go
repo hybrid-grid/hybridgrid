@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
+	"github.com/h3nr1-d14z/hybridgrid/internal/artifacts"
 	"github.com/h3nr1-d14z/hybridgrid/internal/telemetry"
 )
 
@@ -569,4 +571,105 @@ func waitFor(t *testing.T, d time.Duration, cond func() bool) {
 // a runtime cast time bomb if the proto regen drifts.
 func TestGeneratedClientSatisfiesInterface(t *testing.T) {
 	var _ Client = pb.NewTelemetryServiceClient(nil)
+}
+
+// --- Artifacts ---
+
+func setupArtifactServer(t *testing.T) (*Server, *artifacts.Store, func()) {
+	t.Helper()
+	s, _, teleSvc, cleanup := setupServer(t, &fakeProvider{}, telemetry.NewStore())
+	store, err := artifacts.New(artifacts.Config{Dir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("artifacts.New: %v", err)
+	}
+	teleSvc.SetArtifactStore(store)
+	return s, store, cleanup
+}
+
+func TestServer_ArtifactsListAndDownload(t *testing.T) {
+	s, store, cleanup := setupArtifactServer(t)
+	defer cleanup()
+	// Larger than one stream chunk, so the download crosses chunk boundaries.
+	payload := strings.Repeat("0123456789", 60_000)
+	if _, err := store.Put("b1", "app bin", artifacts.SourceClient, strings.NewReader(payload), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := doGETRouted(s, "/api/v1/builds/b1/artifacts")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var list struct {
+		Artifacts []Artifact `json:"artifacts"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil || len(list.Artifacts) != 1 {
+		t.Fatalf("list body = %s (%v)", rec.Body.String(), err)
+	}
+	if a := list.Artifacts[0]; a.Name != "app bin" || a.SizeBytes != int64(len(payload)) || a.Source != "client" || len(a.SHA256) != 64 {
+		t.Fatalf("listed artifact = %+v", a)
+	}
+
+	rec = doGETRouted(s, "/api/v1/builds/b1/artifacts/app%20bin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("download status = %d", rec.Code)
+	}
+	if rec.Body.String() != payload {
+		t.Fatalf("download body length = %d, want %d", rec.Body.Len(), len(payload))
+	}
+	if cd := rec.Header().Get("Content-Disposition"); cd != `attachment; filename="app bin"` {
+		t.Fatalf("Content-Disposition = %q", cd)
+	}
+	if rec.Header().Get("Content-Length") != strconv.Itoa(len(payload)) || rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("download headers = %v", rec.Header())
+	}
+}
+
+func TestServer_ArtifactErrors(t *testing.T) {
+	s, _, cleanup := setupArtifactServer(t)
+	defer cleanup()
+	if rec := doGETRouted(s, "/api/v1/builds/b1/artifacts/missing"); rec.Code != http.StatusNotFound {
+		t.Fatalf("missing artifact status = %d, want 404", rec.Code)
+	}
+	if rec := doGETRouted(s, "/api/v1/builds/unknown/artifacts"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"artifacts":[]`) {
+		t.Fatalf("unknown build list = %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Without a store the coordinator reports the feature as unavailable.
+	bare, _, _, cleanupBare := setupServer(t, &fakeProvider{}, telemetry.NewStore())
+	defer cleanupBare()
+	if rec := doGETRouted(bare, "/api/v1/builds/b1/artifacts"); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("list without store = %d, want 503", rec.Code)
+	}
+}
+
+// --- Worker usage ---
+
+func TestServer_WorkerUsageHistory(t *testing.T) {
+	s, _, teleSvc, cleanup := setupServer(t, &fakeProvider{}, telemetry.NewStore())
+	defer cleanup()
+	teleSvc.RecordUsage("w1", telemetry.UsageSample{AtMs: 1, CPUPercent: 10, MemoryUsedBytes: 2, MemoryTotalBytes: 8, Load1: 0.5})
+	teleSvc.RecordUsage("w1", telemetry.UsageSample{AtMs: 2, CPUPercent: 20, MemoryUsedBytes: 3, MemoryTotalBytes: 8})
+
+	rec := doGETRouted(s, "/api/v1/workers/usage")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Workers []WorkerUsage `json:"workers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Workers) != 1 || body.Workers[0].WorkerID != "w1" || len(body.Workers[0].Samples) != 2 {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if first := body.Workers[0].Samples[0]; first.CPUPercent != 10 || first.MemoryTotalBytes != 8 || first.Load1 != 0.5 {
+		t.Fatalf("first sample = %+v", first)
+	}
+}
+
+func TestNewEventTypeForwardsWorkerUsage(t *testing.T) {
+	if got := newEventType("worker_usage"); got != MessageTypeWorkerUsage {
+		t.Fatalf("newEventType(worker_usage) = %q", got)
+	}
 }

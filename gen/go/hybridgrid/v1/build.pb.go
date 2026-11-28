@@ -2787,6 +2787,282 @@ func (x *WorkersForBuildResponse) GetAvailableCount() int32 {
 	return 0
 }
 
+type WorkerUsageReport struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	WorkerId         string                 `protobuf:"bytes,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
+	AuthToken        string                 `protobuf:"bytes,2,opt,name=auth_token,json=authToken,proto3" json:"auth_token,omitempty"`
+	CpuPercent       float64                `protobuf:"fixed64,3,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`                 // whole machine, 0..100
+	MemoryUsedBytes  uint64                 `protobuf:"varint,4,opt,name=memory_used_bytes,json=memoryUsedBytes,proto3" json:"memory_used_bytes,omitempty"` // total - available
+	MemoryTotalBytes uint64                 `protobuf:"varint,5,opt,name=memory_total_bytes,json=memoryTotalBytes,proto3" json:"memory_total_bytes,omitempty"`
+	Load1            float64                `protobuf:"fixed64,6,opt,name=load1,proto3" json:"load1,omitempty"` // 1-minute load average; 0 if unsupported
+	SampledAtMs      int64                  `protobuf:"varint,7,opt,name=sampled_at_ms,json=sampledAtMs,proto3" json:"sampled_at_ms,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *WorkerUsageReport) Reset() {
+	*x = WorkerUsageReport{}
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerUsageReport) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerUsageReport) ProtoMessage() {}
+
+func (x *WorkerUsageReport) ProtoReflect() protoreflect.Message {
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerUsageReport.ProtoReflect.Descriptor instead.
+func (*WorkerUsageReport) Descriptor() ([]byte, []int) {
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *WorkerUsageReport) GetWorkerId() string {
+	if x != nil {
+		return x.WorkerId
+	}
+	return ""
+}
+
+func (x *WorkerUsageReport) GetAuthToken() string {
+	if x != nil {
+		return x.AuthToken
+	}
+	return ""
+}
+
+func (x *WorkerUsageReport) GetCpuPercent() float64 {
+	if x != nil {
+		return x.CpuPercent
+	}
+	return 0
+}
+
+func (x *WorkerUsageReport) GetMemoryUsedBytes() uint64 {
+	if x != nil {
+		return x.MemoryUsedBytes
+	}
+	return 0
+}
+
+func (x *WorkerUsageReport) GetMemoryTotalBytes() uint64 {
+	if x != nil {
+		return x.MemoryTotalBytes
+	}
+	return 0
+}
+
+func (x *WorkerUsageReport) GetLoad1() float64 {
+	if x != nil {
+		return x.Load1
+	}
+	return 0
+}
+
+func (x *WorkerUsageReport) GetSampledAtMs() int64 {
+	if x != nil {
+		return x.SampledAtMs
+	}
+	return 0
+}
+
+type ReportUsageResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// False when the coordinator does not know this worker (it re-registers
+	// on its next heartbeat).
+	Accepted      bool `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportUsageResponse) Reset() {
+	*x = ReportUsageResponse{}
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportUsageResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportUsageResponse) ProtoMessage() {}
+
+func (x *ReportUsageResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportUsageResponse.ProtoReflect.Descriptor instead.
+func (*ReportUsageResponse) Descriptor() ([]byte, []int) {
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *ReportUsageResponse) GetAccepted() bool {
+	if x != nil {
+		return x.Accepted
+	}
+	return false
+}
+
+// One piece of an artifact upload. Header fields are read from the first
+// chunk only; every chunk may carry data.
+type ArtifactChunk struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BuildId       string                 `protobuf:"bytes,1,opt,name=build_id,json=buildId,proto3" json:"build_id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                             // file name; reduced to its base name
+	SizeBytes     int64                  `protobuf:"varint,3,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"` // declared total, informational
+	AuthToken     string                 `protobuf:"bytes,4,opt,name=auth_token,json=authToken,proto3" json:"auth_token,omitempty"`  // required when the coordinator has a token
+	Data          []byte                 `protobuf:"bytes,5,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArtifactChunk) Reset() {
+	*x = ArtifactChunk{}
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtifactChunk) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtifactChunk) ProtoMessage() {}
+
+func (x *ArtifactChunk) ProtoReflect() protoreflect.Message {
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtifactChunk.ProtoReflect.Descriptor instead.
+func (*ArtifactChunk) Descriptor() ([]byte, []int) {
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *ArtifactChunk) GetBuildId() string {
+	if x != nil {
+		return x.BuildId
+	}
+	return ""
+}
+
+func (x *ArtifactChunk) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ArtifactChunk) GetSizeBytes() int64 {
+	if x != nil {
+		return x.SizeBytes
+	}
+	return 0
+}
+
+func (x *ArtifactChunk) GetAuthToken() string {
+	if x != nil {
+		return x.AuthToken
+	}
+	return ""
+}
+
+func (x *ArtifactChunk) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+type UploadArtifactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"` // stored (sanitized) name
+	SizeBytes     int64                  `protobuf:"varint,2,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	Sha256        string                 `protobuf:"bytes,3,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UploadArtifactResponse) Reset() {
+	*x = UploadArtifactResponse{}
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UploadArtifactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UploadArtifactResponse) ProtoMessage() {}
+
+func (x *UploadArtifactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UploadArtifactResponse.ProtoReflect.Descriptor instead.
+func (*UploadArtifactResponse) Descriptor() ([]byte, []int) {
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *UploadArtifactResponse) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *UploadArtifactResponse) GetSizeBytes() int64 {
+	if x != nil {
+		return x.SizeBytes
+	}
+	return 0
+}
+
+func (x *UploadArtifactResponse) GetSha256() string {
+	if x != nil {
+		return x.Sha256
+	}
+	return ""
+}
+
 // Request to report client-side cache hit
 type ReportCacheHitRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -2797,7 +3073,7 @@ type ReportCacheHitRequest struct {
 
 func (x *ReportCacheHitRequest) Reset() {
 	*x = ReportCacheHitRequest{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[31]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2809,7 +3085,7 @@ func (x *ReportCacheHitRequest) String() string {
 func (*ReportCacheHitRequest) ProtoMessage() {}
 
 func (x *ReportCacheHitRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[31]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2822,7 +3098,7 @@ func (x *ReportCacheHitRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportCacheHitRequest.ProtoReflect.Descriptor instead.
 func (*ReportCacheHitRequest) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{31}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ReportCacheHitRequest) GetHits() int32 {
@@ -2842,7 +3118,7 @@ type ReportCacheHitResponse struct {
 
 func (x *ReportCacheHitResponse) Reset() {
 	*x = ReportCacheHitResponse{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[32]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2854,7 +3130,7 @@ func (x *ReportCacheHitResponse) String() string {
 func (*ReportCacheHitResponse) ProtoMessage() {}
 
 func (x *ReportCacheHitResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[32]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2867,7 +3143,7 @@ func (x *ReportCacheHitResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportCacheHitResponse.ProtoReflect.Descriptor instead.
 func (*ReportCacheHitResponse) Descriptor() ([]byte, []int) {
-	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{32}
+	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ReportCacheHitResponse) GetAcknowledged() bool {
@@ -2897,7 +3173,7 @@ type WorkerStatusResponse_WorkerInfo struct {
 
 func (x *WorkerStatusResponse_WorkerInfo) Reset() {
 	*x = WorkerStatusResponse_WorkerInfo{}
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[41]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2909,7 +3185,7 @@ func (x *WorkerStatusResponse_WorkerInfo) String() string {
 func (*WorkerStatusResponse_WorkerInfo) ProtoMessage() {}
 
 func (x *WorkerStatusResponse_WorkerInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_hybridgrid_v1_build_proto_msgTypes[41]
+	mi := &file_hybridgrid_v1_build_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3282,7 +3558,32 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\x17WorkersForBuildResponse\x12\x1d\n" +
 	"\n" +
 	"worker_ids\x18\x01 \x03(\tR\tworkerIds\x12'\n" +
-	"\x0favailable_count\x18\x02 \x01(\x05R\x0eavailableCount\"+\n" +
+	"\x0favailable_count\x18\x02 \x01(\x05R\x0eavailableCount\"\x84\x02\n" +
+	"\x11WorkerUsageReport\x12\x1b\n" +
+	"\tworker_id\x18\x01 \x01(\tR\bworkerId\x12\x1d\n" +
+	"\n" +
+	"auth_token\x18\x02 \x01(\tR\tauthToken\x12\x1f\n" +
+	"\vcpu_percent\x18\x03 \x01(\x01R\n" +
+	"cpuPercent\x12*\n" +
+	"\x11memory_used_bytes\x18\x04 \x01(\x04R\x0fmemoryUsedBytes\x12,\n" +
+	"\x12memory_total_bytes\x18\x05 \x01(\x04R\x10memoryTotalBytes\x12\x14\n" +
+	"\x05load1\x18\x06 \x01(\x01R\x05load1\x12\"\n" +
+	"\rsampled_at_ms\x18\a \x01(\x03R\vsampledAtMs\"1\n" +
+	"\x13ReportUsageResponse\x12\x1a\n" +
+	"\baccepted\x18\x01 \x01(\bR\baccepted\"\x90\x01\n" +
+	"\rArtifactChunk\x12\x19\n" +
+	"\bbuild_id\x18\x01 \x01(\tR\abuildId\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"size_bytes\x18\x03 \x01(\x03R\tsizeBytes\x12\x1d\n" +
+	"\n" +
+	"auth_token\x18\x04 \x01(\tR\tauthToken\x12\x12\n" +
+	"\x04data\x18\x05 \x01(\fR\x04data\"c\n" +
+	"\x16UploadArtifactResponse\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"size_bytes\x18\x02 \x01(\x03R\tsizeBytes\x12\x16\n" +
+	"\x06sha256\x18\x03 \x01(\tR\x06sha256\"+\n" +
 	"\x15ReportCacheHitRequest\x12\x12\n" +
 	"\x04hits\x18\x01 \x01(\x05R\x04hits\"<\n" +
 	"\x16ReportCacheHitResponse\x12\"\n" +
@@ -3319,7 +3620,7 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\x0eSTATUS_RUNNING\x10\x02\x12\x14\n" +
 	"\x10STATUS_COMPLETED\x10\x03\x12\x11\n" +
 	"\rSTATUS_FAILED\x10\x04\x12\x12\n" +
-	"\x0eSTATUS_TIMEOUT\x10\x052\xa2\x05\n" +
+	"\x0eSTATUS_TIMEOUT\x10\x052\xd0\x06\n" +
 	"\fBuildService\x12N\n" +
 	"\tHandshake\x12\x1f.hybridgrid.v1.HandshakeRequest\x1a .hybridgrid.v1.HandshakeResponse\x12B\n" +
 	"\x05Build\x12\x1b.hybridgrid.v1.BuildRequest\x1a\x1c.hybridgrid.v1.BuildResponse\x12H\n" +
@@ -3328,7 +3629,9 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\vHealthCheck\x12\x1c.hybridgrid.v1.HealthRequest\x1a\x1d.hybridgrid.v1.HealthResponse\x12Z\n" +
 	"\x0fGetWorkerStatus\x12\".hybridgrid.v1.WorkerStatusRequest\x1a#.hybridgrid.v1.WorkerStatusResponse\x12c\n" +
 	"\x12GetWorkersForBuild\x12%.hybridgrid.v1.WorkersForBuildRequest\x1a&.hybridgrid.v1.WorkersForBuildResponse\x12]\n" +
-	"\x0eReportCacheHit\x12$.hybridgrid.v1.ReportCacheHitRequest\x1a%.hybridgrid.v1.ReportCacheHitResponseBDZBgithub.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1;hybridgridv1b\x06proto3"
+	"\x0eReportCacheHit\x12$.hybridgrid.v1.ReportCacheHitRequest\x1a%.hybridgrid.v1.ReportCacheHitResponse\x12W\n" +
+	"\x0eUploadArtifact\x12\x1c.hybridgrid.v1.ArtifactChunk\x1a%.hybridgrid.v1.UploadArtifactResponse(\x01\x12S\n" +
+	"\vReportUsage\x12 .hybridgrid.v1.WorkerUsageReport\x1a\".hybridgrid.v1.ReportUsageResponseBDZBgithub.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1;hybridgridv1b\x06proto3"
 
 var (
 	file_hybridgrid_v1_build_proto_rawDescOnce sync.Once
@@ -3343,7 +3646,7 @@ func file_hybridgrid_v1_build_proto_rawDescGZIP() []byte {
 }
 
 var file_hybridgrid_v1_build_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_hybridgrid_v1_build_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
+var file_hybridgrid_v1_build_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
 var file_hybridgrid_v1_build_proto_goTypes = []any{
 	(Architecture)(0),                       // 0: hybridgrid.v1.Architecture
 	(BuildType)(0),                          // 1: hybridgrid.v1.BuildType
@@ -3380,26 +3683,30 @@ var file_hybridgrid_v1_build_proto_goTypes = []any{
 	(*WorkerStatusResponse)(nil),            // 32: hybridgrid.v1.WorkerStatusResponse
 	(*WorkersForBuildRequest)(nil),          // 33: hybridgrid.v1.WorkersForBuildRequest
 	(*WorkersForBuildResponse)(nil),         // 34: hybridgrid.v1.WorkersForBuildResponse
-	(*ReportCacheHitRequest)(nil),           // 35: hybridgrid.v1.ReportCacheHitRequest
-	(*ReportCacheHitResponse)(nil),          // 36: hybridgrid.v1.ReportCacheHitResponse
-	nil,                                     // 37: hybridgrid.v1.FlutterConfig.DartDefinesEntry
-	nil,                                     // 38: hybridgrid.v1.UnityConfig.ExtraArgsEntry
-	nil,                                     // 39: hybridgrid.v1.CocosConfig.PlatformOptionsEntry
-	nil,                                     // 40: hybridgrid.v1.GoConfig.LdflagsEntry
-	nil,                                     // 41: hybridgrid.v1.NodeConfig.EnvVarsEntry
-	nil,                                     // 42: hybridgrid.v1.CustomConfig.EnvEntry
-	nil,                                     // 43: hybridgrid.v1.WorkerCapabilities.CustomBuilderVersionsEntry
-	nil,                                     // 44: hybridgrid.v1.CompileRequest.IncludeFilesEntry
-	(*WorkerStatusResponse_WorkerInfo)(nil), // 45: hybridgrid.v1.WorkerStatusResponse.WorkerInfo
+	(*WorkerUsageReport)(nil),               // 35: hybridgrid.v1.WorkerUsageReport
+	(*ReportUsageResponse)(nil),             // 36: hybridgrid.v1.ReportUsageResponse
+	(*ArtifactChunk)(nil),                   // 37: hybridgrid.v1.ArtifactChunk
+	(*UploadArtifactResponse)(nil),          // 38: hybridgrid.v1.UploadArtifactResponse
+	(*ReportCacheHitRequest)(nil),           // 39: hybridgrid.v1.ReportCacheHitRequest
+	(*ReportCacheHitResponse)(nil),          // 40: hybridgrid.v1.ReportCacheHitResponse
+	nil,                                     // 41: hybridgrid.v1.FlutterConfig.DartDefinesEntry
+	nil,                                     // 42: hybridgrid.v1.UnityConfig.ExtraArgsEntry
+	nil,                                     // 43: hybridgrid.v1.CocosConfig.PlatformOptionsEntry
+	nil,                                     // 44: hybridgrid.v1.GoConfig.LdflagsEntry
+	nil,                                     // 45: hybridgrid.v1.NodeConfig.EnvVarsEntry
+	nil,                                     // 46: hybridgrid.v1.CustomConfig.EnvEntry
+	nil,                                     // 47: hybridgrid.v1.WorkerCapabilities.CustomBuilderVersionsEntry
+	nil,                                     // 48: hybridgrid.v1.CompileRequest.IncludeFilesEntry
+	(*WorkerStatusResponse_WorkerInfo)(nil), // 49: hybridgrid.v1.WorkerStatusResponse.WorkerInfo
 }
 var file_hybridgrid_v1_build_proto_depIdxs = []int32{
 	0,  // 0: hybridgrid.v1.CppConfig.target_arch:type_name -> hybridgrid.v1.Architecture
-	37, // 1: hybridgrid.v1.FlutterConfig.dart_defines:type_name -> hybridgrid.v1.FlutterConfig.DartDefinesEntry
-	38, // 2: hybridgrid.v1.UnityConfig.extra_args:type_name -> hybridgrid.v1.UnityConfig.ExtraArgsEntry
-	39, // 3: hybridgrid.v1.CocosConfig.platform_options:type_name -> hybridgrid.v1.CocosConfig.PlatformOptionsEntry
-	40, // 4: hybridgrid.v1.GoConfig.ldflags:type_name -> hybridgrid.v1.GoConfig.LdflagsEntry
-	41, // 5: hybridgrid.v1.NodeConfig.env_vars:type_name -> hybridgrid.v1.NodeConfig.EnvVarsEntry
-	42, // 6: hybridgrid.v1.CustomConfig.env:type_name -> hybridgrid.v1.CustomConfig.EnvEntry
+	41, // 1: hybridgrid.v1.FlutterConfig.dart_defines:type_name -> hybridgrid.v1.FlutterConfig.DartDefinesEntry
+	42, // 2: hybridgrid.v1.UnityConfig.extra_args:type_name -> hybridgrid.v1.UnityConfig.ExtraArgsEntry
+	43, // 3: hybridgrid.v1.CocosConfig.platform_options:type_name -> hybridgrid.v1.CocosConfig.PlatformOptionsEntry
+	44, // 4: hybridgrid.v1.GoConfig.ldflags:type_name -> hybridgrid.v1.GoConfig.LdflagsEntry
+	45, // 5: hybridgrid.v1.NodeConfig.env_vars:type_name -> hybridgrid.v1.NodeConfig.EnvVarsEntry
+	46, // 6: hybridgrid.v1.CustomConfig.env:type_name -> hybridgrid.v1.CustomConfig.EnvEntry
 	2,  // 7: hybridgrid.v1.FlutterCapability.platforms:type_name -> hybridgrid.v1.TargetPlatform
 	2,  // 8: hybridgrid.v1.UnityCapability.build_targets:type_name -> hybridgrid.v1.TargetPlatform
 	2,  // 9: hybridgrid.v1.CocosCapability.platforms:type_name -> hybridgrid.v1.TargetPlatform
@@ -3411,7 +3718,7 @@ var file_hybridgrid_v1_build_proto_depIdxs = []int32{
 	16, // 15: hybridgrid.v1.WorkerCapabilities.rust:type_name -> hybridgrid.v1.RustCapability
 	17, // 16: hybridgrid.v1.WorkerCapabilities.go:type_name -> hybridgrid.v1.GoCapability
 	18, // 17: hybridgrid.v1.WorkerCapabilities.nodejs:type_name -> hybridgrid.v1.NodeCapability
-	43, // 18: hybridgrid.v1.WorkerCapabilities.custom_builder_versions:type_name -> hybridgrid.v1.WorkerCapabilities.CustomBuilderVersionsEntry
+	47, // 18: hybridgrid.v1.WorkerCapabilities.custom_builder_versions:type_name -> hybridgrid.v1.WorkerCapabilities.CustomBuilderVersionsEntry
 	19, // 19: hybridgrid.v1.HandshakeRequest.capabilities:type_name -> hybridgrid.v1.WorkerCapabilities
 	1,  // 20: hybridgrid.v1.BuildRequest.build_type:type_name -> hybridgrid.v1.BuildType
 	2,  // 21: hybridgrid.v1.BuildRequest.target_platform:type_name -> hybridgrid.v1.TargetPlatform
@@ -3430,9 +3737,9 @@ var file_hybridgrid_v1_build_proto_depIdxs = []int32{
 	2,  // 34: hybridgrid.v1.BuildMetadata.target_platform:type_name -> hybridgrid.v1.TargetPlatform
 	0,  // 35: hybridgrid.v1.CompileRequest.target_arch:type_name -> hybridgrid.v1.Architecture
 	0,  // 36: hybridgrid.v1.CompileRequest.client_arch:type_name -> hybridgrid.v1.Architecture
-	44, // 37: hybridgrid.v1.CompileRequest.include_files:type_name -> hybridgrid.v1.CompileRequest.IncludeFilesEntry
+	48, // 37: hybridgrid.v1.CompileRequest.include_files:type_name -> hybridgrid.v1.CompileRequest.IncludeFilesEntry
 	3,  // 38: hybridgrid.v1.CompileResponse.status:type_name -> hybridgrid.v1.TaskStatus
-	45, // 39: hybridgrid.v1.WorkerStatusResponse.workers:type_name -> hybridgrid.v1.WorkerStatusResponse.WorkerInfo
+	49, // 39: hybridgrid.v1.WorkerStatusResponse.workers:type_name -> hybridgrid.v1.WorkerStatusResponse.WorkerInfo
 	1,  // 40: hybridgrid.v1.WorkersForBuildRequest.build_type:type_name -> hybridgrid.v1.BuildType
 	2,  // 41: hybridgrid.v1.WorkersForBuildRequest.target_platform:type_name -> hybridgrid.v1.TargetPlatform
 	0,  // 42: hybridgrid.v1.WorkerStatusResponse.WorkerInfo.native_arch:type_name -> hybridgrid.v1.Architecture
@@ -3443,17 +3750,21 @@ var file_hybridgrid_v1_build_proto_depIdxs = []int32{
 	29, // 47: hybridgrid.v1.BuildService.HealthCheck:input_type -> hybridgrid.v1.HealthRequest
 	31, // 48: hybridgrid.v1.BuildService.GetWorkerStatus:input_type -> hybridgrid.v1.WorkerStatusRequest
 	33, // 49: hybridgrid.v1.BuildService.GetWorkersForBuild:input_type -> hybridgrid.v1.WorkersForBuildRequest
-	35, // 50: hybridgrid.v1.BuildService.ReportCacheHit:input_type -> hybridgrid.v1.ReportCacheHitRequest
-	21, // 51: hybridgrid.v1.BuildService.Handshake:output_type -> hybridgrid.v1.HandshakeResponse
-	24, // 52: hybridgrid.v1.BuildService.Build:output_type -> hybridgrid.v1.BuildResponse
-	24, // 53: hybridgrid.v1.BuildService.StreamBuild:output_type -> hybridgrid.v1.BuildResponse
-	28, // 54: hybridgrid.v1.BuildService.Compile:output_type -> hybridgrid.v1.CompileResponse
-	30, // 55: hybridgrid.v1.BuildService.HealthCheck:output_type -> hybridgrid.v1.HealthResponse
-	32, // 56: hybridgrid.v1.BuildService.GetWorkerStatus:output_type -> hybridgrid.v1.WorkerStatusResponse
-	34, // 57: hybridgrid.v1.BuildService.GetWorkersForBuild:output_type -> hybridgrid.v1.WorkersForBuildResponse
-	36, // 58: hybridgrid.v1.BuildService.ReportCacheHit:output_type -> hybridgrid.v1.ReportCacheHitResponse
-	51, // [51:59] is the sub-list for method output_type
-	43, // [43:51] is the sub-list for method input_type
+	39, // 50: hybridgrid.v1.BuildService.ReportCacheHit:input_type -> hybridgrid.v1.ReportCacheHitRequest
+	37, // 51: hybridgrid.v1.BuildService.UploadArtifact:input_type -> hybridgrid.v1.ArtifactChunk
+	35, // 52: hybridgrid.v1.BuildService.ReportUsage:input_type -> hybridgrid.v1.WorkerUsageReport
+	21, // 53: hybridgrid.v1.BuildService.Handshake:output_type -> hybridgrid.v1.HandshakeResponse
+	24, // 54: hybridgrid.v1.BuildService.Build:output_type -> hybridgrid.v1.BuildResponse
+	24, // 55: hybridgrid.v1.BuildService.StreamBuild:output_type -> hybridgrid.v1.BuildResponse
+	28, // 56: hybridgrid.v1.BuildService.Compile:output_type -> hybridgrid.v1.CompileResponse
+	30, // 57: hybridgrid.v1.BuildService.HealthCheck:output_type -> hybridgrid.v1.HealthResponse
+	32, // 58: hybridgrid.v1.BuildService.GetWorkerStatus:output_type -> hybridgrid.v1.WorkerStatusResponse
+	34, // 59: hybridgrid.v1.BuildService.GetWorkersForBuild:output_type -> hybridgrid.v1.WorkersForBuildResponse
+	40, // 60: hybridgrid.v1.BuildService.ReportCacheHit:output_type -> hybridgrid.v1.ReportCacheHitResponse
+	38, // 61: hybridgrid.v1.BuildService.UploadArtifact:output_type -> hybridgrid.v1.UploadArtifactResponse
+	36, // 62: hybridgrid.v1.BuildService.ReportUsage:output_type -> hybridgrid.v1.ReportUsageResponse
+	53, // [53:63] is the sub-list for method output_type
+	43, // [43:53] is the sub-list for method input_type
 	43, // [43:43] is the sub-list for extension type_name
 	43, // [43:43] is the sub-list for extension extendee
 	0,  // [0:43] is the sub-list for field type_name
@@ -3484,7 +3795,7 @@ func file_hybridgrid_v1_build_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_hybridgrid_v1_build_proto_rawDesc), len(file_hybridgrid_v1_build_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   42,
+			NumMessages:   46,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

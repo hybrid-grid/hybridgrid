@@ -37,6 +37,15 @@ describe('applyTaskQuery', () => {
     expect(applyTaskQuery(tasks, { q: 'BOOM' }).map((t) => t.id)).toEqual(['b'])
   })
 
+  it('finds a task by its source file or compiler command', () => {
+    const withFiles = [
+      task('x', { source_file: 'math_utils.c', command: 'clang -O2 -c' }),
+      task('y', { source_file: 'main.cc', command: 'clang++ -std=c++17 -c' }),
+    ]
+    expect(applyTaskQuery(withFiles, { q: 'MATH_UTILS' }).map((t) => t.id)).toEqual(['x'])
+    expect(applyTaskQuery(withFiles, { q: 'c++17' }).map((t) => t.id)).toEqual(['y'])
+  })
+
   it('sorts by duration ascending with unfinished tasks first', () => {
     expect(applyTaskQuery(tasks, { sort: 'duration', dir: 'asc' }).map((t) => t.id)).toEqual(['c', 'a', 'b'])
   })

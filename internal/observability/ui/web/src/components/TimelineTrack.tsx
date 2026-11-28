@@ -2,7 +2,7 @@ import { useT } from '@/lib/i18n'
 import type { TimelineRow } from '@/lib/timeline'
 import { TONE_COLOR, taskToneClass } from '@/lib/timeline'
 import type { TaskInfo } from '@/lib/types'
-import { cn, formatDuration } from '@/lib/utils'
+import { cn, formatDuration, taskLabel } from '@/lib/utils'
 
 interface TimelineTrackProps {
   rows: TimelineRow[]
@@ -50,7 +50,7 @@ export function TimelineTrack({ rows, onSelect, size = 'md', placement = 'top' }
               <button
                 type="button"
                 onClick={() => onSelect?.(row.task)}
-                aria-label={`Task ${row.task.id} · ${tone}`}
+                aria-label={`Task ${taskLabel(row.task)} · ${tone}`}
                 className={cn(
                   'absolute inset-x-0 top-1/2 min-w-[3px] -translate-y-1/2 cursor-pointer rounded-full transition-[filter] hover:brightness-125 focus-visible:outline-offset-1',
                   size === 'md' ? 'h-2.5' : 'h-2',
@@ -85,13 +85,13 @@ function TaskHoverCard({ task, tone, className }: TaskHoverCardProps) {
     <span
       role="tooltip"
       className={cn(
-        'pointer-events-none invisible absolute w-60 translate-y-1 rounded-(--radius-md) border border-(--color-hairline-strong) bg-(--color-canvas-overlay) p-2.5 text-left opacity-0 shadow-[0_8px_24px_-8px_oklch(0_0_0/50%)] transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100',
+        'pointer-events-none invisible absolute w-60 translate-y-1 rounded-(--radius-md) border border-(--color-hairline-strong) bg-(--color-canvas-overlay) p-2.5 text-left opacity-0 shadow-(--shadow-popover) transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100',
         className,
       )}
     >
       <span className="flex items-center gap-1.5">
         <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: TONE_COLOR[tone] }} />
-        <span className="truncate font-mono text-[11px] font-medium text-(--color-ink)">{task.id}</span>
+        <span className="truncate font-mono text-[11px] font-medium text-(--color-ink)">{taskLabel(task)}</span>
       </span>
       <span className="mt-1 block truncate font-mono text-[10px] text-(--color-ink-faint)">
         {task.build_id || '—'} · {task.worker_id || t('overview.eventUnassigned')}

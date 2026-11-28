@@ -2,7 +2,7 @@ import { Link } from '@tanstack/react-router'
 import { useT } from '@/lib/i18n'
 import { normalizeStatus, STATUS_COLOR } from '@/lib/status'
 import type { TaskInfo } from '@/lib/types'
-import { formatDuration } from '@/lib/utils'
+import { formatDuration, taskLabel } from '@/lib/utils'
 import type { RealtimeEvent } from '@/store/useRealtimeStore'
 
 interface EventLogProps {
@@ -59,11 +59,14 @@ function EventRow({ event }: { event: RealtimeEvent }) {
               params={{ buildId: task.build_id }}
               search={{ task: task.id }}
               className="truncate font-mono text-(--color-ink-secondary) hover:text-(--color-signal)"
+              title={task.command || task.id}
             >
-              {task.id}
+              {taskLabel(task)}
             </Link>
           ) : (
-            <span className="truncate font-mono text-(--color-ink-secondary)">{task.id}</span>
+            <span className="truncate font-mono text-(--color-ink-secondary)" title={task.command || task.id}>
+              {taskLabel(task)}
+            </span>
           )}
           {task.from_cache && (
             <span className="shrink-0 text-[10px] uppercase tracking-[0.06em] text-(--color-signal)">

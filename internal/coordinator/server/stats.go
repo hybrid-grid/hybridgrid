@@ -136,6 +136,12 @@ func (p *statsProvider) GetWorkers() []*telemetry.WorkerInfo {
 			Healthy:           w.IsHealthy(p.server.config.HeartbeatTTL),
 			LastSeen:          w.LastHeartbeat.Unix(),
 		}
+		if p.server.telemetry != nil {
+			if u, ok := p.server.telemetry.LatestUsage(w.ID); ok {
+				info.CPUPercent, info.MemoryUsedBytes, info.MemoryTotalBytes = u.CPUPercent, u.MemoryUsedBytes, u.MemoryTotalBytes
+				info.Load1, info.UsageAtMs = u.Load1, u.AtMs
+			}
+		}
 		result = append(result, info)
 	}
 

@@ -4,6 +4,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { useLiveSocket } from '@/hooks/useLiveSocket'
+import { useUsageBackfill } from '@/hooks/useUsageBackfill'
 import './index.css'
 import { routeTree } from './routeTree.gen'
 
@@ -26,6 +27,7 @@ declare module '@tanstack/react-router' {
 
 function Root() {
   useLiveSocket()
+  useUsageBackfill()
   return <RouterProvider router={router} />
 }
 

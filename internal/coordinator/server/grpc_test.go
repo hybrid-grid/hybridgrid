@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1327,6 +1329,8 @@ func TestCompile_WorkerUnreachable(t *testing.T) {
 		TaskId:             "unreachable-task",
 		PreprocessedSource: []byte("int main() {}"),
 		Compiler:           "gcc",
+		CompilerArgs:       []string{"-O2", "-c"},
+		SourceFilename:     "main.c",
 		TargetArch:         pb.Architecture_ARCH_X86_64,
 	})
 	require.NoError(t, err)
@@ -1340,6 +1344,35 @@ func TestCompile_WorkerUnreachable(t *testing.T) {
 
 	assert.Len(t, notifier.completed, 1)
 	assert.Equal(t, "failed", notifier.completed[0].Status)
+
+	// Both events identify the compile for the dashboard; the store
+	// replaces the row on each event, so the completion must repeat them.
+	for _, ev := range []*TaskEvent{notifier.started[0], notifier.completed[0]} {
+		assert.Equal(t, "main.c", ev.SourceFile)
+		assert.Equal(t, "gcc -O2 -c", ev.Command)
+	}
+}
+
+func TestCompileCommand(t *testing.T) {
+	// "cc " + 2044 a's puts the 2-byte "é" across the byte-2048 cut.
+	long := strings.Repeat("a", maxEventCommandLen-4) + "é"
+	tests := []struct {
+		name string
+		req  *pb.CompileRequest
+		want string
+	}{
+		{"compiler and args", &pb.CompileRequest{Compiler: "clang", CompilerArgs: []string{"-O2", "-c"}}, "clang -O2 -c"},
+		{"no args", &pb.CompileRequest{Compiler: "gcc"}, "gcc"},
+		{"empty", &pb.CompileRequest{}, ""},
+		{"truncated on rune boundary", &pb.CompileRequest{Compiler: "cc", CompilerArgs: []string{long}}, "cc " + strings.Repeat("a", maxEventCommandLen-4) + "…"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := compileCommand(tt.req)
+			assert.Equal(t, tt.want, got)
+			assert.True(t, utf8.ValidString(got))
+		})
+	}
 }
 
 // TestBuild_Custom_BuilderCache verifies the per-builder result cache:

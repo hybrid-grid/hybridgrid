@@ -62,6 +62,25 @@ export interface WorkerInfo {
   build_types: string[] | null
   healthy: boolean
   last_seen: number
+  /** Latest live machine reading; usage_at_ms is 0 until the worker reports. */
+  cpu_percent: number
+  memory_used_bytes: number
+  memory_total_bytes: number
+  load1: number
+  usage_at_ms: number
+}
+
+/** One live CPU/memory reading of a worker machine (coordinator clock). */
+export interface UsageSample {
+  at_ms: number
+  cpu_percent: number
+  memory_used_bytes: number
+  memory_total_bytes: number
+  load1: number
+}
+
+export interface WorkerUsageResponse {
+  workers: { worker_id: string; samples: UsageSample[] }[]
 }
 
 export interface TaskInfo {
@@ -78,6 +97,10 @@ export interface TaskInfo {
   exit_code?: number
   from_cache: boolean
   error_message?: string
+  /** Base name of the compiled source, e.g. "main.c" (C/C++ tasks only). */
+  source_file?: string
+  /** Compiler invocation the coordinator forwarded to the worker. */
+  command?: string
 }
 
 export interface BuildInfo {
@@ -94,6 +117,28 @@ export interface BuildInfo {
   truncated: boolean
   scheduler?: string
   scheduler_params?: string
+}
+
+export interface ArtifactFile {
+  path: string
+  size_bytes: number
+}
+
+/** A stored build output (see internal/artifacts). */
+export interface Artifact {
+  build_id: string
+  name: string
+  size_bytes: number
+  sha256: string
+  created_at_ms: number
+  /** "client": uploaded by hgbuild; "worker": a remote builder's output archive. */
+  source: 'client' | 'worker' | string
+  files: ArtifactFile[]
+}
+
+export interface ArtifactsResponse {
+  build_id: string
+  artifacts: Artifact[]
 }
 
 export interface BuildDetail {
@@ -125,7 +170,7 @@ export interface BuildsResponse extends ListEnvelope {
   builds: BuildInfo[]
 }
 
-export type WsMessageType = 'stats' | 'task_started' | 'task_completed' | 'ping' | 'pong'
+export type WsMessageType = 'stats' | 'task_started' | 'task_completed' | 'worker_usage' | 'ping' | 'pong'
 
 export interface WsMessage<T = unknown> {
   type: WsMessageType

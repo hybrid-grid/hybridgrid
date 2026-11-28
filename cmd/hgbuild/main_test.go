@@ -308,6 +308,45 @@ func TestParseArchStrict_RejectsUnknown(t *testing.T) {
 	}
 }
 
+func TestFilterHgbuildWrapperFlags_CollectsArtifacts(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		wantArgs  []string
+		wantPaths []string
+		wantErr   bool
+	}{
+		{"separate value", []string{"-j8", "--artifact", "app", "all"}, []string{"-j8", "all"}, []string{"app"}, false},
+		{"equals form, repeated", []string{"--artifact=bin/a", "--artifact=b.tar"}, []string{}, []string{"bin/a", "b.tar"}, false},
+		{"missing value", []string{"-j8", "--artifact"}, []string{"-j8"}, nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			artifactPaths, artifactFlagErr = nil, nil
+			defer func() { artifactPaths, artifactFlagErr = nil, nil }()
+
+			got := filterHgbuildWrapperFlags(tt.args)
+			if strings.Join(got, " ") != strings.Join(tt.wantArgs, " ") {
+				t.Fatalf("args = %q, want %q", got, tt.wantArgs)
+			}
+			if strings.Join(artifactPaths, " ") != strings.Join(tt.wantPaths, " ") {
+				t.Fatalf("artifactPaths = %q, want %q", artifactPaths, tt.wantPaths)
+			}
+			if (artifactFlagErr != nil) != tt.wantErr {
+				t.Fatalf("artifactFlagErr = %v, wantErr %v", artifactFlagErr, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestHumanBytes(t *testing.T) {
+	for in, want := range map[int64]string{0: "0 B", 1023: "1023 B", 1536: "1.5 KiB", 5 << 20: "5.0 MiB"} {
+		if got := humanBytes(in); got != want {
+			t.Errorf("humanBytes(%d) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestFilterHgbuildFlags_Arch(t *testing.T) {
 	orig := wrapArch
 	defer func() { wrapArch = orig }()

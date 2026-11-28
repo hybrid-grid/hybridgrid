@@ -130,7 +130,7 @@ export function MenuSelect<T extends string>({ value, options, onChange, label }
         <DropdownMenu.Content
           align="start"
           sideOffset={4}
-          className="z-50 max-h-[320px] min-w-[180px] origin-(--radix-dropdown-menu-content-transform-origin) overflow-auto rounded-(--radius-md) border border-(--color-hairline-strong) bg-(--color-canvas-overlay) p-1 shadow-[0_8px_24px_-8px_oklch(0_0_0/50%)]"
+          className="z-50 max-h-[320px] min-w-[180px] origin-(--radix-dropdown-menu-content-transform-origin) overflow-auto rounded-(--radius-md) border border-(--color-hairline-strong) bg-(--color-canvas-overlay) p-1 shadow-(--shadow-popover)"
         >
           <DropdownMenu.RadioGroup value={value} onValueChange={(next) => onChange(next as T)}>
             {options.map((option) => (

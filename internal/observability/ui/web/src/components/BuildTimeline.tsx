@@ -3,7 +3,7 @@ import { useNow } from '@/hooks/useNow'
 import { useT } from '@/lib/i18n'
 import { layoutTimeline } from '@/lib/timeline'
 import type { TaskInfo } from '@/lib/types'
-import { cn, formatClock, formatDuration } from '@/lib/utils'
+import { cn, formatClock, formatDuration, taskLabel } from '@/lib/utils'
 import { TimelineTrack } from './TimelineTrack'
 
 const SCROLL_AFTER_ROWS = 16
@@ -51,9 +51,9 @@ export function BuildTimeline({ tasks, selectedTaskId, onSelectTask }: BuildTime
                   'truncate text-left font-mono text-[11px] transition-colors hover:text-(--color-signal)',
                   row.task.id === selectedTaskId ? 'text-(--color-signal)' : 'text-(--color-ink-muted)',
                 )}
-                title={row.task.id}
+                title={row.task.command || row.task.id}
               >
-                {row.task.id}
+                {taskLabel(row.task)}
               </button>
               <TimelineTrack
                 rows={[row]}

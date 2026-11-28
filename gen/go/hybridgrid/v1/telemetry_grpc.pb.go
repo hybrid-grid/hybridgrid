@@ -19,13 +19,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	TelemetryService_GetStats_FullMethodName     = "/hybridgrid.v1.TelemetryService/GetStats"
-	TelemetryService_ListWorkers_FullMethodName  = "/hybridgrid.v1.TelemetryService/ListWorkers"
-	TelemetryService_ListTasks_FullMethodName    = "/hybridgrid.v1.TelemetryService/ListTasks"
-	TelemetryService_ListBuilds_FullMethodName   = "/hybridgrid.v1.TelemetryService/ListBuilds"
-	TelemetryService_GetBuild_FullMethodName     = "/hybridgrid.v1.TelemetryService/GetBuild"
-	TelemetryService_GetConsole_FullMethodName   = "/hybridgrid.v1.TelemetryService/GetConsole"
-	TelemetryService_StreamEvents_FullMethodName = "/hybridgrid.v1.TelemetryService/StreamEvents"
+	TelemetryService_GetStats_FullMethodName         = "/hybridgrid.v1.TelemetryService/GetStats"
+	TelemetryService_ListWorkers_FullMethodName      = "/hybridgrid.v1.TelemetryService/ListWorkers"
+	TelemetryService_ListTasks_FullMethodName        = "/hybridgrid.v1.TelemetryService/ListTasks"
+	TelemetryService_ListBuilds_FullMethodName       = "/hybridgrid.v1.TelemetryService/ListBuilds"
+	TelemetryService_GetBuild_FullMethodName         = "/hybridgrid.v1.TelemetryService/GetBuild"
+	TelemetryService_GetConsole_FullMethodName       = "/hybridgrid.v1.TelemetryService/GetConsole"
+	TelemetryService_StreamEvents_FullMethodName     = "/hybridgrid.v1.TelemetryService/StreamEvents"
+	TelemetryService_ListWorkerUsage_FullMethodName  = "/hybridgrid.v1.TelemetryService/ListWorkerUsage"
+	TelemetryService_ListArtifacts_FullMethodName    = "/hybridgrid.v1.TelemetryService/ListArtifacts"
+	TelemetryService_DownloadArtifact_FullMethodName = "/hybridgrid.v1.TelemetryService/DownloadArtifact"
 )
 
 // TelemetryServiceClient is the client API for TelemetryService service.
@@ -47,6 +50,15 @@ type TelemetryServiceClient interface {
 	// Live event stream: replays recent events on connect, then
 	// pushes new ones until the client disconnects.
 	StreamEvents(ctx context.Context, in *StreamTelemetryEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TelemetryEvent], error)
+	// Recent CPU/memory history of every reporting worker, oldest sample
+	// first, so charts have a backlog before live events arrive.
+	ListWorkerUsage(ctx context.Context, in *ListTelemetryWorkerUsageRequest, opts ...grpc.CallOption) (*ListTelemetryWorkerUsageResponse, error)
+	// Stored outputs of one build, newest first (empty when none).
+	// UNAVAILABLE when the coordinator runs without an artifact store.
+	ListArtifacts(ctx context.Context, in *ListTelemetryArtifactsRequest, opts ...grpc.CallOption) (*ListTelemetryArtifactsResponse, error)
+	// One stored artifact, streamed: the first chunk carries `artifact`,
+	// every chunk may carry data. NOT_FOUND when unknown.
+	DownloadArtifact(ctx context.Context, in *DownloadTelemetryArtifactRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TelemetryArtifactChunk], error)
 }
 
 type telemetryServiceClient struct {
@@ -136,6 +148,45 @@ func (c *telemetryServiceClient) StreamEvents(ctx context.Context, in *StreamTel
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type TelemetryService_StreamEventsClient = grpc.ServerStreamingClient[TelemetryEvent]
 
+func (c *telemetryServiceClient) ListWorkerUsage(ctx context.Context, in *ListTelemetryWorkerUsageRequest, opts ...grpc.CallOption) (*ListTelemetryWorkerUsageResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTelemetryWorkerUsageResponse)
+	err := c.cc.Invoke(ctx, TelemetryService_ListWorkerUsage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *telemetryServiceClient) ListArtifacts(ctx context.Context, in *ListTelemetryArtifactsRequest, opts ...grpc.CallOption) (*ListTelemetryArtifactsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTelemetryArtifactsResponse)
+	err := c.cc.Invoke(ctx, TelemetryService_ListArtifacts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *telemetryServiceClient) DownloadArtifact(ctx context.Context, in *DownloadTelemetryArtifactRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TelemetryArtifactChunk], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &TelemetryService_ServiceDesc.Streams[1], TelemetryService_DownloadArtifact_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[DownloadTelemetryArtifactRequest, TelemetryArtifactChunk]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TelemetryService_DownloadArtifactClient = grpc.ServerStreamingClient[TelemetryArtifactChunk]
+
 // TelemetryServiceServer is the server API for TelemetryService service.
 // All implementations must embed UnimplementedTelemetryServiceServer
 // for forward compatibility.
@@ -155,6 +206,15 @@ type TelemetryServiceServer interface {
 	// Live event stream: replays recent events on connect, then
 	// pushes new ones until the client disconnects.
 	StreamEvents(*StreamTelemetryEventsRequest, grpc.ServerStreamingServer[TelemetryEvent]) error
+	// Recent CPU/memory history of every reporting worker, oldest sample
+	// first, so charts have a backlog before live events arrive.
+	ListWorkerUsage(context.Context, *ListTelemetryWorkerUsageRequest) (*ListTelemetryWorkerUsageResponse, error)
+	// Stored outputs of one build, newest first (empty when none).
+	// UNAVAILABLE when the coordinator runs without an artifact store.
+	ListArtifacts(context.Context, *ListTelemetryArtifactsRequest) (*ListTelemetryArtifactsResponse, error)
+	// One stored artifact, streamed: the first chunk carries `artifact`,
+	// every chunk may carry data. NOT_FOUND when unknown.
+	DownloadArtifact(*DownloadTelemetryArtifactRequest, grpc.ServerStreamingServer[TelemetryArtifactChunk]) error
 	mustEmbedUnimplementedTelemetryServiceServer()
 }
 
@@ -185,6 +245,15 @@ func (UnimplementedTelemetryServiceServer) GetConsole(context.Context, *GetTelem
 }
 func (UnimplementedTelemetryServiceServer) StreamEvents(*StreamTelemetryEventsRequest, grpc.ServerStreamingServer[TelemetryEvent]) error {
 	return status.Error(codes.Unimplemented, "method StreamEvents not implemented")
+}
+func (UnimplementedTelemetryServiceServer) ListWorkerUsage(context.Context, *ListTelemetryWorkerUsageRequest) (*ListTelemetryWorkerUsageResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListWorkerUsage not implemented")
+}
+func (UnimplementedTelemetryServiceServer) ListArtifacts(context.Context, *ListTelemetryArtifactsRequest) (*ListTelemetryArtifactsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListArtifacts not implemented")
+}
+func (UnimplementedTelemetryServiceServer) DownloadArtifact(*DownloadTelemetryArtifactRequest, grpc.ServerStreamingServer[TelemetryArtifactChunk]) error {
+	return status.Error(codes.Unimplemented, "method DownloadArtifact not implemented")
 }
 func (UnimplementedTelemetryServiceServer) mustEmbedUnimplementedTelemetryServiceServer() {}
 func (UnimplementedTelemetryServiceServer) testEmbeddedByValue()                          {}
@@ -326,6 +395,53 @@ func _TelemetryService_StreamEvents_Handler(srv interface{}, stream grpc.ServerS
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type TelemetryService_StreamEventsServer = grpc.ServerStreamingServer[TelemetryEvent]
 
+func _TelemetryService_ListWorkerUsage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTelemetryWorkerUsageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TelemetryServiceServer).ListWorkerUsage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TelemetryService_ListWorkerUsage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TelemetryServiceServer).ListWorkerUsage(ctx, req.(*ListTelemetryWorkerUsageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TelemetryService_ListArtifacts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTelemetryArtifactsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TelemetryServiceServer).ListArtifacts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TelemetryService_ListArtifacts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TelemetryServiceServer).ListArtifacts(ctx, req.(*ListTelemetryArtifactsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TelemetryService_DownloadArtifact_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(DownloadTelemetryArtifactRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(TelemetryServiceServer).DownloadArtifact(m, &grpc.GenericServerStream[DownloadTelemetryArtifactRequest, TelemetryArtifactChunk]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TelemetryService_DownloadArtifactServer = grpc.ServerStreamingServer[TelemetryArtifactChunk]
+
 // TelemetryService_ServiceDesc is the grpc.ServiceDesc for TelemetryService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -357,11 +473,24 @@ var TelemetryService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "GetConsole",
 			Handler:    _TelemetryService_GetConsole_Handler,
 		},
+		{
+			MethodName: "ListWorkerUsage",
+			Handler:    _TelemetryService_ListWorkerUsage_Handler,
+		},
+		{
+			MethodName: "ListArtifacts",
+			Handler:    _TelemetryService_ListArtifacts_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "StreamEvents",
 			Handler:       _TelemetryService_StreamEvents_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "DownloadArtifact",
+			Handler:       _TelemetryService_DownloadArtifact_Handler,
 			ServerStreams: true,
 		},
 	},
