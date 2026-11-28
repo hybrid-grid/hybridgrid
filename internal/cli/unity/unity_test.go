@@ -250,3 +250,35 @@ func TestRunBuild_UsesBuildClient(t *testing.T) {
 		t.Fatal("expected request to be passed to client")
 	}
 }
+
+func TestUnityCLI_DistributedIL2CPP(t *testing.T) {
+	for _, tc := range []struct {
+		target, backend string
+		valid           bool
+	}{
+		{"linux", "", true}, {"linux", "il2cpp", true}, {"linux", "mono", false}, {"android", "il2cpp", false},
+	} {
+		t.Run(tc.target+"-"+tc.backend, func(t *testing.T) {
+			client := &fakeClient{}
+			cmd := NewCommand(Dependencies{
+				CoordinatorAddr: func() string { return "coord:9000" },
+				NewClient:       func(string, time.Duration) (BuildClient, error) { return client, nil },
+			})
+			cmd.SetArgs([]string{"build", tc.target, "--project", t.TempDir(), "--build-method", "BuildScript.Build", "--distributed-il2cpp", "--scripting-backend", tc.backend})
+			err := cmd.Execute()
+			if !tc.valid {
+				if err == nil || client.lastRequest != nil {
+					t.Fatal("invalid combination was accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := client.lastRequest.GetUnityConfig()
+			if !cfg.GetDistributedIl2Cpp() || cfg.GetScriptingBackend() != "il2cpp" {
+				t.Fatalf("unexpected config %v", cfg)
+			}
+		})
+	}
+}

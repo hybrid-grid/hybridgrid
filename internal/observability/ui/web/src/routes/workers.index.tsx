@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/PageHeader'
 import { Panel } from '@/components/Panel'
 import { StatStrip, type StatCell } from '@/components/StatStrip'
 import { WorkerFlow } from '@/components/WorkerFlow'
+import { UnityCapabilityBadge } from '@/components/UnityCapabilityBadge'
 import { WorkerUsage } from '@/components/WorkerUsage'
 import { useNow } from '@/hooks/useNow'
 import { mergeLiveTasks, uniqueWorkerNames } from '@/lib/dispatch'
@@ -179,6 +180,7 @@ function WorkerCard({ worker, name }: WorkerCardProps) {
         </span>
       </div>
 
+      <UnityCapabilityBadge worker={worker} />
       <WorkerUsage worker={worker} variant="compact" />
 
       <div className="flex items-center justify-between gap-2 border-t border-(--color-hairline) pt-2 text-[11px] text-(--color-ink-muted)">

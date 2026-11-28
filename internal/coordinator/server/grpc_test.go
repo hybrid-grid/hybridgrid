@@ -1588,3 +1588,34 @@ func TestWorkerSupportsUnity(t *testing.T) {
 		})
 	}
 }
+
+func TestBuild_DistributedUnityRequiresCapableEditor(t *testing.T) {
+	s, client, cleanup := setupTestServer(t, Config{HeartbeatTTL: time.Minute, RequestTimeout: time.Second})
+	defer cleanup()
+	req := &pb.BuildRequest{TaskId: "unity-routing", BuildId: "session", BuildType: pb.BuildType_BUILD_TYPE_UNITY,
+		TargetPlatform: pb.TargetPlatform_PLATFORM_LINUX, SourceArchive: []byte("project"), SourceHash: "abc123",
+		Config: &pb.BuildRequest_UnityConfig{UnityConfig: &pb.UnityConfig{BuildMethod: "BuildScript.Build", ScriptingBackend: "il2cpp", DistributedIl2Cpp: true}},
+	}
+	if err := s.registry.Add(&registry.WorkerInfo{ID: "ordinary-editor", Address: "127.0.0.1:1", MaxParallel: 2,
+		Capabilities: &pb.WorkerCapabilities{Unity: &pb.UnityCapability{BuildTargets: []pb.TargetPlatform{req.TargetPlatform}}}}); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.Build(context.Background(), req)
+	if err != nil || resp.GetStatus() != pb.TaskStatus_STATUS_FAILED || !strings.Contains(resp.GetStderr(), "no worker") {
+		t.Fatalf("ordinary editor: %v, %v", resp, err)
+	}
+	addr, stop := setupTestWorker(t, func(ctx context.Context, forwarded *pb.BuildRequest) (*pb.BuildResponse, error) {
+		if !forwarded.GetUnityConfig().GetDistributedIl2Cpp() || forwarded.BuildId != req.BuildId {
+			return nil, status.Error(codes.InvalidArgument, "lost distributed build context")
+		}
+		return &pb.BuildResponse{Status: pb.TaskStatus_STATUS_COMPLETED}, nil
+	})
+	defer stop()
+	if err := s.registry.Add(&registry.WorkerInfo{ID: "pilot-editor", Address: addr, MaxParallel: 1, Capabilities: &pb.WorkerCapabilities{Unity: &pb.UnityCapability{DistributedIl2Cpp: true, BuildTargets: []pb.TargetPlatform{req.TargetPlatform}}}}); err != nil {
+		t.Fatal(err)
+	}
+	resp, err = client.Build(context.Background(), req)
+	if err != nil || resp.GetStatus() != pb.TaskStatus_STATUS_COMPLETED {
+		t.Fatalf("pilot editor: %v, %v", resp, err)
+	}
+}

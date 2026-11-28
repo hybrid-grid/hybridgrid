@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""Run Unity with its Linux Clang driver wrapped inside a private mount namespace."""
+import os
+from pathlib import Path
+import platform
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import tarfile
+
+
+def expand_response(args, active=()):
+    for arg in args:
+        if not arg.startswith("@"):
+            yield arg
+            continue
+        path = Path(arg[1:]).resolve()
+        if path in active or len(active) >= 16:
+            raise ValueError("recursive Clang response file")
+        yield from expand_response(shlex.split(path.read_text()), (*active, path))
+
+
+def compiler(args):
+    bindir = Path(os.environ["HG_UNITY_ORIGINAL_BIN"])
+    driver = bindir / Path(sys.argv[0]).name
+    # Unity sometimes calls the versioned driver directly.
+    if not driver.is_file():
+        raise ValueError(f"missing original Clang driver {driver}")
+    expanded = list(expand_response(args))
+    generated = any(arg.endswith(".cpp") and "il2cppoutput" in
+                    str(Path(arg).absolute()).lower() for arg in expanded)
+    if generated and "-c" in expanded and "-cc1" not in expanded:
+        os.environ["HG_UNITY_OBJECT_MARKER"] = os.environ["HG_UNITY_BUILD_MARKER"]
+        os.environ["PATH"] = str(bindir) + os.pathsep + os.environ["PATH"]
+        os.execv(os.environ["HG_UNITY_HGBUILD"],
+                 ["hgbuild", "c++", "--arch=x86_64", *expanded])
+    os.execv(driver, [str(driver), *args])
+
+
+def run(args):
+    root = Path(os.environ["HG_UNITY_LLVM_ROOT"]).resolve(strict=True)
+    driver = (root / "bin/clang++").resolve(strict=True)
+    if platform.system() != "Linux" or platform.machine() != "x86_64":
+        raise ValueError("requires Linux x86_64")
+    if root not in driver.parents or not os.access(driver, os.X_OK):
+        raise ValueError("expected an executable clang++ inside HG_UNITY_LLVM_ROOT")
+    hgbuild = shutil.which("hgbuild")
+    bwrap = shutil.which("bwrap")
+    if not hgbuild or not bwrap:
+        raise ValueError("requires hgbuild and bubblewrap on PATH")
+    if args == ["--probe"]:
+        return subprocess.call([bwrap, "--bind", "/", "/", "--", "true"])
+    with tempfile.TemporaryDirectory(prefix="hg-unity-llvm-") as tmp:
+        mirror = Path(tmp) / "llvm"
+        mirror.mkdir()
+        marker = Path(tmp) / "compiled"
+        env = dict(os.environ, HG_UNITY_ORIGINAL_BIN=str(mirror / "bin"),
+                   HG_UNITY_HGBUILD=hgbuild, HG_CXX="clang++",
+                   HG_UNITY_BUILD_MARKER=str(marker))
+        command = [bwrap, "--die-with-parent", "--bind", "/", "/",
+                   "--ro-bind", str(root), str(mirror),
+                   "--ro-bind", str(Path(__file__).resolve()), str(driver), "--", *args]
+        result = subprocess.run(command, env=env)
+        if result.returncode == 0 and not marker.exists():
+            raise ValueError("no generated IL2CPP object passed through HybridGrid; check the Editor toolchain and scripting backend")
+        if result.returncode == 0:
+            output = Path("Build")
+            if not any(output.rglob("*.x86_64")):
+                raise ValueError("build method must write the Linux Player under Build/")
+            # Keep the executable, GameAssembly and the entire data directory together.
+            with tarfile.open(Path(tmp) / "player.tar.gz", "w:gz", compresslevel=1) as archive:
+                archive.add(output, arcname="Build")
+            shutil.move(str(Path(tmp) / "player.tar.gz"), output / "hybridgrid-player.tar.gz")
+        return result.returncode
+
+
+if __name__ == "__main__":
+    try:
+        if os.environ.get("HG_UNITY_ORIGINAL_BIN") and Path(sys.argv[0]).name != "hg-unity-il2cpp":
+            compiler(sys.argv[1:])
+        sys.exit(run(sys.argv[1:]))
+    except (OSError, ValueError, KeyError) as err:
+        sys.exit(f"hg-unity-il2cpp: {err}")

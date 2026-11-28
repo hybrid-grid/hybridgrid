@@ -69,6 +69,7 @@ message UnityConfig {
   string build_method = 2;          // e.g., "BuildScript.Build"
   string scripting_backend = 3;     // mono, il2cpp
   map<string, string> extra_args = 4;
+  bool distributed_il2cpp = 5;
 }
 
 message CocosConfig {
@@ -128,6 +129,7 @@ message FlutterCapability {
 }
 
 message UnityCapability {
+  bool distributed_il2cpp = 4;
   repeated string versions = 1;
   string license_type = 2;          // pro, personal
   repeated TargetPlatform build_targets = 3;

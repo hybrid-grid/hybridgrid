@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cache"
@@ -20,9 +22,13 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 
 	unityConfig := req.GetUnityConfig()
 	unityVersion := unityConfig.GetUnityVersion()
+	distributed := unityConfig.GetDistributedIl2Cpp()
+	if distributed && (req.TargetPlatform != pb.TargetPlatform_PLATFORM_LINUX || unityConfig.ScriptingBackend != "il2cpp") {
+		return nil, status.Error(codes.InvalidArgument, "distributed Unity builds require Linux IL2CPP")
+	}
 	cacheKey := cache.UnityCacheKey(unityConfig, req.SourceHash, unityVersion, req.TargetPlatform)
 
-	if cached := s.getUnityCache(cacheKey); cached != nil {
+	if cached := s.getUnityCache(cacheKey); cached != nil && !distributed {
 		s.recordCacheServed(meta, start, cached.buildTimeMs, &s.unityCacheHits, &s.unityBuilds)
 		return cached.response(), nil
 	}
@@ -34,7 +40,9 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 	defer atomic.AddInt64(&s.queuedTasks, -1)
 
 	worker, queueWait, err := s.selectBuildWorker(ctx,
-		func(w *registry.WorkerInfo) bool { return workerSupportsUnity(w, req.TargetPlatform, unityVersion) }, "unity")
+		func(w *registry.WorkerInfo) bool {
+			return workerSupportsUnity(w, req.TargetPlatform, unityVersion) && (!distributed || w.Capabilities.Unity.DistributedIl2Cpp)
+		}, "unity")
 	if err != nil {
 		s.countNoWorker()
 		log.Error().Err(err).Str("task_id", req.TaskId).
@@ -64,7 +72,7 @@ func (s *Server) handleUnityBuild(ctx context.Context, req *pb.BuildRequest, bui
 		return workerErrorResponse(err), nil
 	}
 
-	if buildResp != nil && len(buildResp.Artifacts) > 0 {
+	if !distributed && buildResp != nil && len(buildResp.Artifacts) > 0 {
 		s.setUnityCache(cacheKey, buildResp)
 	}
 

@@ -170,6 +170,7 @@ It executes build tasks received from the coordinator.`,
 
 			// Create and start worker gRPC server
 			cfg := workerserver.DefaultConfig()
+			cfg.CoordinatorAddr = coordinator
 			cfg.Port = port
 			cfg.MaxConcurrent = maxParallel
 			cfg.EnableRequestID = true
