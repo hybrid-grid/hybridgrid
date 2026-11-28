@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/netip"
 	"os"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -170,6 +170,7 @@ It executes build tasks received from the coordinator.`,
 
 			// Create and start worker gRPC server
 			cfg := workerserver.DefaultConfig()
+			cfg.CoordinatorAddr = coordinator
 			cfg.Port = port
 			cfg.MaxConcurrent = maxParallel
 			cfg.EnableRequestID = true
@@ -281,7 +282,7 @@ It executes build tasks received from the coordinator.`,
 			if workerAddr == "" {
 				// Auto-detect outbound IP by checking which interface routes to coordinator
 				if ip := getOutboundIP(coordinator); ip != "" {
-					workerAddr = fmt.Sprintf("%s:%d", ip, port)
+					workerAddr = net.JoinHostPort(ip, strconv.Itoa(port))
 					log.Info().Str("detected_ip", ip).Msg("Auto-detected outbound IP for advertisement")
 				} else {
 					workerAddr = fmt.Sprintf("%s:%d", hostname, port)
@@ -426,18 +427,7 @@ It executes build tasks received from the coordinator.`,
 // getOutboundIP returns the preferred outbound IP for reaching the target address.
 // This finds which local IP would be used to connect to the coordinator.
 func getOutboundIP(target string) string {
-	host := target
-	if parsedHost, _, err := net.SplitHostPort(target); err == nil {
-		host = parsedHost
-	}
-
-	ip, err := netip.ParseAddr(host)
-	if err != nil {
-		return ""
-	}
-
-	remote := net.UDPAddrFromAddrPort(netip.AddrPortFrom(ip, 80))
-	conn, err := net.DialUDP("udp", nil, remote)
+	conn, err := net.DialTimeout("udp", target, 2*time.Second)
 	if err != nil {
 		return ""
 	}

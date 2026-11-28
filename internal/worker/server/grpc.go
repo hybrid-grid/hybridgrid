@@ -26,6 +26,7 @@ import (
 
 // Config holds the worker gRPC server configuration.
 type Config struct {
+	CoordinatorAddr string
 	Port            int
 	MaxConcurrent   int
 	DefaultTimeout  time.Duration
@@ -327,14 +328,16 @@ func (s *Server) Build(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResp
 
 	start := time.Now()
 	result, err := s.executor.Execute(execCtx, &executor.Request{
-		TaskID:         req.TaskId,
-		BuildType:      req.BuildType,
-		TargetPlatform: req.TargetPlatform,
-		FlutterConfig:  flutterConfig,
-		UnityConfig:    unityConfig,
-		SourceArchive:  req.SourceArchive,
-		TimeoutSeconds: req.TimeoutSeconds,
-		Timeout:        timeout,
+		TaskID:          req.TaskId,
+		BuildID:         req.BuildId,
+		CoordinatorAddr: s.config.CoordinatorAddr,
+		BuildType:       req.BuildType,
+		TargetPlatform:  req.TargetPlatform,
+		FlutterConfig:   flutterConfig,
+		UnityConfig:     unityConfig,
+		SourceArchive:   req.SourceArchive,
+		TimeoutSeconds:  req.TimeoutSeconds,
+		Timeout:         timeout,
 	})
 	if err != nil {
 		atomic.AddInt64(&s.failedTasks, 1)

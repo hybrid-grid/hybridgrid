@@ -30,6 +30,8 @@ type Result struct {
 
 // Request represents a compilation request to an executor.
 type Request struct {
+	BuildID            string
+	CoordinatorAddr    string
 	TaskID             string
 	Compiler           string
 	Args               []string

@@ -1,13 +1,16 @@
 package capability
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
+	"time"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
 )
@@ -419,6 +422,13 @@ func detectUnity() *pb.UnityCapability {
 		cap.BuildTargets = detectUnityBuildTargets(editorPath)
 	}
 
+	if runtime.GOOS == "linux" && runtime.GOARCH == "amd64" && slices.Contains(cap.BuildTargets, pb.TargetPlatform_PLATFORM_LINUX) {
+		if launcher, err := exec.LookPath("hg-unity-il2cpp"); err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			cap.DistributedIl2Cpp = exec.CommandContext(ctx, launcher, "--probe").Run() == nil
+		}
+	}
 	return cap
 }
 
@@ -568,7 +578,11 @@ func detectUnityBuildTargets(editorPath string) []pb.TargetPlatform {
 		editorDir = filepath.Join(editorPath, "Contents", "PlaybackEngines")
 	} else {
 		// For Linux/Windows, PlaybackEngines is alongside Editor
-		editorDir = filepath.Join(editorDir, "PlaybackEngines")
+		if info, err := os.Stat(filepath.Join(editorDir, "Data", "PlaybackEngines")); err == nil && info.IsDir() {
+			editorDir = filepath.Join(editorDir, "Data", "PlaybackEngines")
+		} else {
+			editorDir = filepath.Join(editorDir, "PlaybackEngines")
+		}
 	}
 
 	// Check for Android

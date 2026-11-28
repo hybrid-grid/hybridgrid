@@ -89,6 +89,37 @@ func (e *UnityExecutor) Execute(ctx context.Context, req *Request) (*Result, err
 	}
 
 	cmd := exec.CommandContext(execCtx, e.command, args...)
+	if unityConfig.DistributedIl2Cpp {
+		if req.TargetPlatform != pb.TargetPlatform_PLATFORM_LINUX || unityConfig.ScriptingBackend != "il2cpp" || req.CoordinatorAddr == "" {
+			return nil, fmt.Errorf("distributed build requires a coordinator and Linux IL2CPP")
+		}
+		launcher, err := exec.LookPath("hg-unity-il2cpp")
+		if err != nil {
+			return nil, fmt.Errorf("failed to find Unity IL2CPP launcher: %w", err)
+		}
+		editor := e.command
+		if version := unityConfig.UnityVersion; version != "" {
+			// Select only an installed Hub editor from the local discovery list.
+			editor = ""
+			for _, pattern := range unityEditorPathPatterns() {
+				matches, _ := filepath.Glob(pattern)
+				for _, path := range matches {
+					if filepath.Base(filepath.Dir(filepath.Dir(path))) == version {
+						editor = path
+						break
+					}
+				}
+				if editor != "" {
+					break
+				}
+			}
+			if editor == "" {
+				return nil, fmt.Errorf("Unity Editor %q is not installed", version)
+			}
+		}
+		cmd = exec.CommandContext(execCtx, launcher, append([]string{editor}, args...)...)
+		cmd.Env = append(os.Environ(), "HG_COORDINATOR="+req.CoordinatorAddr, "HG_BUILD_ID="+req.BuildID, "HG_NO_FALLBACK=1")
+	}
 	cmd.Dir = workDir
 
 	stdout := newLimitedBuffer(maxUnityLogBytes)
@@ -134,7 +165,22 @@ func (e *UnityExecutor) Execute(ctx context.Context, req *Request) (*Result, err
 
 	result.ExitCode = 0
 
-	artifacts, archive, err := collectUnityArtifacts(workDir, req.TargetPlatform)
+	var artifacts []*pb.ArtifactInfo
+	var archive []byte
+	if unityConfig.DistributedIl2Cpp {
+		const rel = "Build/hybridgrid-player.tar.gz"
+		path := filepath.Join(workDir, rel)
+		var size int64
+		var hash string
+		hash, size, err = checksumFile(path)
+		if err == nil {
+			info := &pb.ArtifactInfo{Name: filepath.Base(path), Path: rel, SizeBytes: size, Checksum: hash}
+			artifacts = []*pb.ArtifactInfo{info}
+			archive, err = archiveArtifacts(workDir, []flutterArtifact{{info: info, absPath: path}})
+		}
+	} else {
+		artifacts, archive, err = collectUnityArtifacts(workDir, req.TargetPlatform)
+	}
 	if err != nil {
 		result.Success = false
 		result.ExitCode = 1

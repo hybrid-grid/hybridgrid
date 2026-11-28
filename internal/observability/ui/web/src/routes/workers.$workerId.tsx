@@ -8,6 +8,7 @@ import { StatStrip, type StatCell } from '@/components/StatStrip'
 import { CircuitBadge } from '@/components/StatusBadge'
 import { TaskTable } from '@/components/TaskTable'
 import { WorkerMachine } from '@/components/WorkerMachine'
+import { UnityCapabilityBadge } from '@/components/UnityCapabilityBadge'
 import { WorkerUsage } from '@/components/WorkerUsage'
 import { WorkerThroughputChart } from '@/components/WorkerThroughputChart'
 import { Button } from '@/components/ui/button'
@@ -127,7 +128,7 @@ function MachinePanel({ worker }: { worker: WorkerInfo }) {
     [t('workers.latencyLabel'), `${Math.round(worker.avg_latency_ms)}ms`],
     [t('workers.tasksLabel'), String(worker.total_tasks)],
   ]
-  const capabilities = [...(worker.compilers ?? []), ...(worker.docker_available ? ['docker'] : []), ...(worker.flutter_available ? ['flutter'] : []), ...(worker.unity_available ? ['unity'] : [])]
+  const capabilities = [...(worker.compilers ?? []), ...(worker.docker_available ? ['docker'] : []), ...(worker.flutter_available ? ['flutter'] : [])]
 
   return (
     <div className="flex flex-col">
@@ -148,8 +149,9 @@ function MachinePanel({ worker }: { worker: WorkerInfo }) {
           </div>
         ))}
       </dl>
-      {capabilities.length > 0 && (
+      {(capabilities.length > 0 || worker.unity_available) && (
         <div className="flex flex-wrap gap-1 border-t border-(--color-hairline) px-4 py-2.5">
+          <UnityCapabilityBadge worker={worker} />
           {capabilities.map((cap) => (
             <span key={cap} className="rounded-(--radius-xs) bg-(--color-surface-inset) px-1.5 py-0.5 font-mono text-[10px] text-(--color-ink-muted)">
               {cap}

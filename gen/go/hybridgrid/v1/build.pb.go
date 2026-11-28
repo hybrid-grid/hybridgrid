@@ -396,13 +396,14 @@ func (x *FlutterConfig) GetDartDefines() map[string]string {
 }
 
 type UnityConfig struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	UnityVersion     string                 `protobuf:"bytes,1,opt,name=unity_version,json=unityVersion,proto3" json:"unity_version,omitempty"`
-	BuildMethod      string                 `protobuf:"bytes,2,opt,name=build_method,json=buildMethod,proto3" json:"build_method,omitempty"`                // e.g., "BuildScript.Build"
-	ScriptingBackend string                 `protobuf:"bytes,3,opt,name=scripting_backend,json=scriptingBackend,proto3" json:"scripting_backend,omitempty"` // mono, il2cpp
-	ExtraArgs        map[string]string      `protobuf:"bytes,4,rep,name=extra_args,json=extraArgs,proto3" json:"extra_args,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	UnityVersion      string                 `protobuf:"bytes,1,opt,name=unity_version,json=unityVersion,proto3" json:"unity_version,omitempty"`
+	BuildMethod       string                 `protobuf:"bytes,2,opt,name=build_method,json=buildMethod,proto3" json:"build_method,omitempty"`                // e.g., "BuildScript.Build"
+	ScriptingBackend  string                 `protobuf:"bytes,3,opt,name=scripting_backend,json=scriptingBackend,proto3" json:"scripting_backend,omitempty"` // mono, il2cpp
+	ExtraArgs         map[string]string      `protobuf:"bytes,4,rep,name=extra_args,json=extraArgs,proto3" json:"extra_args,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	DistributedIl2Cpp bool                   `protobuf:"varint,5,opt,name=distributed_il2cpp,json=distributedIl2cpp,proto3" json:"distributed_il2cpp,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *UnityConfig) Reset() {
@@ -461,6 +462,13 @@ func (x *UnityConfig) GetExtraArgs() map[string]string {
 		return x.ExtraArgs
 	}
 	return nil
+}
+
+func (x *UnityConfig) GetDistributedIl2Cpp() bool {
+	if x != nil {
+		return x.DistributedIl2Cpp
+	}
+	return false
 }
 
 type CocosConfig struct {
@@ -943,12 +951,13 @@ func (x *FlutterCapability) GetXcodeAvailable() bool {
 }
 
 type UnityCapability struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Versions      []string               `protobuf:"bytes,1,rep,name=versions,proto3" json:"versions,omitempty"`
-	LicenseType   string                 `protobuf:"bytes,2,opt,name=license_type,json=licenseType,proto3" json:"license_type,omitempty"` // pro, personal
-	BuildTargets  []TargetPlatform       `protobuf:"varint,3,rep,packed,name=build_targets,json=buildTargets,proto3,enum=hybridgrid.v1.TargetPlatform" json:"build_targets,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	DistributedIl2Cpp bool                   `protobuf:"varint,4,opt,name=distributed_il2cpp,json=distributedIl2cpp,proto3" json:"distributed_il2cpp,omitempty"`
+	Versions          []string               `protobuf:"bytes,1,rep,name=versions,proto3" json:"versions,omitempty"`
+	LicenseType       string                 `protobuf:"bytes,2,opt,name=license_type,json=licenseType,proto3" json:"license_type,omitempty"` // pro, personal
+	BuildTargets      []TargetPlatform       `protobuf:"varint,3,rep,packed,name=build_targets,json=buildTargets,proto3,enum=hybridgrid.v1.TargetPlatform" json:"build_targets,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *UnityCapability) Reset() {
@@ -979,6 +988,13 @@ func (x *UnityCapability) ProtoReflect() protoreflect.Message {
 // Deprecated: Use UnityCapability.ProtoReflect.Descriptor instead.
 func (*UnityCapability) Descriptor() ([]byte, []int) {
 	return file_hybridgrid_v1_build_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *UnityCapability) GetDistributedIl2Cpp() bool {
+	if x != nil {
+		return x.DistributedIl2Cpp
+	}
+	return false
 }
 
 func (x *UnityCapability) GetVersions() []string {
@@ -3304,13 +3320,14 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\fdart_defines\x18\x04 \x03(\v2-.hybridgrid.v1.FlutterConfig.DartDefinesEntryR\vdartDefines\x1a>\n" +
 	"\x10DartDefinesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x8a\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb9\x02\n" +
 	"\vUnityConfig\x12#\n" +
 	"\runity_version\x18\x01 \x01(\tR\funityVersion\x12!\n" +
 	"\fbuild_method\x18\x02 \x01(\tR\vbuildMethod\x12+\n" +
 	"\x11scripting_backend\x18\x03 \x01(\tR\x10scriptingBackend\x12H\n" +
 	"\n" +
-	"extra_args\x18\x04 \x03(\v2).hybridgrid.v1.UnityConfig.ExtraArgsEntryR\textraArgs\x1a<\n" +
+	"extra_args\x18\x04 \x03(\v2).hybridgrid.v1.UnityConfig.ExtraArgsEntryR\textraArgs\x12-\n" +
+	"\x12distributed_il2cpp\x18\x05 \x01(\bR\x11distributedIl2cpp\x1a<\n" +
 	"\x0eExtraArgsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf1\x01\n" +
@@ -3367,8 +3384,9 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\tplatforms\x18\x02 \x03(\x0e2\x1d.hybridgrid.v1.TargetPlatformR\tplatforms\x12\x1f\n" +
 	"\vandroid_sdk\x18\x03 \x01(\bR\n" +
 	"androidSdk\x12'\n" +
-	"\x0fxcode_available\x18\x04 \x01(\bR\x0excodeAvailable\"\x94\x01\n" +
-	"\x0fUnityCapability\x12\x1a\n" +
+	"\x0fxcode_available\x18\x04 \x01(\bR\x0excodeAvailable\"\xc3\x01\n" +
+	"\x0fUnityCapability\x12-\n" +
+	"\x12distributed_il2cpp\x18\x04 \x01(\bR\x11distributedIl2cpp\x12\x1a\n" +
 	"\bversions\x18\x01 \x03(\tR\bversions\x12!\n" +
 	"\flicense_type\x18\x02 \x01(\tR\vlicenseType\x12B\n" +
 	"\rbuild_targets\x18\x03 \x03(\x0e2\x1d.hybridgrid.v1.TargetPlatformR\fbuildTargets\"j\n" +

@@ -73,7 +73,7 @@ services:
         BUILD_TIME: ${BUILD_TIME:-unknown}
     container_name: hg-dashboard
     entrypoint: ["/usr/local/bin/hg-dashboard"]
-    command: ["serve", "--port=8081", "--coordinator=coordinator:9000", "--insecure"]
+    command: ["serve", "--port=8081", "--coordinator=coordinator:9000", "--worker-connect-address=${HG_WORKER_CONNECT_ADDRESS:-:9000}", "--insecure"]
     ports:
       - "8081:8081"   # Dashboard SPA + REST API + WebSocket
     environment:

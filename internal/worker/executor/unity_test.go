@@ -268,3 +268,35 @@ func setupFakeUnity(t *testing.T) (string, string) {
 	t.Setenv("HG_UNITY_ARGS_FILE", argsFile)
 	return scriptPath, argsFile
 }
+
+func TestUnityExecutor_DistributedBuild(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX launcher fixture")
+	}
+	dir := t.TempDir()
+	launcher := filepath.Join(dir, "hg-unity-il2cpp")
+	const script = `#!/bin/sh
+set -eu
+test "$HG_BUILD_ID" = session-1
+test "$HG_COORDINATOR" = coord:9000
+test "$HG_NO_FALLBACK" = 1
+test "$1" = /opt/editor
+mkdir -p Build
+echo fixture > Build/hybridgrid-player.tar.gz
+`
+	if err := os.WriteFile(launcher, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	result, err := NewUnityExecutorWithCommand("/opt/editor").Execute(context.Background(), &Request{
+		BuildID: "session-1", CoordinatorAddr: "coord:9000", BuildType: pb.BuildType_BUILD_TYPE_UNITY,
+		TargetPlatform: pb.TargetPlatform_PLATFORM_LINUX,
+		UnityConfig:    &pb.UnityConfig{BuildMethod: "BuildScript.Build", ScriptingBackend: "il2cpp", DistributedIl2Cpp: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Success || len(result.Artifacts) != 1 || result.Artifacts[0].Name != "hybridgrid-player.tar.gz" {
+		t.Fatalf("unexpected result %+v", result)
+	}
+}

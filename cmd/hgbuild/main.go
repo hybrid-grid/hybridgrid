@@ -1207,6 +1207,9 @@ func runCompiler(defaultCompiler, envVar string, args []string) error {
 
 	// Create build service with defaults
 	cfg := build.DefaultConfig()
+	// IL2CPP generated headers may change independently of the .cpp file.
+	unityMarker := os.Getenv("HG_UNITY_OBJECT_MARKER")
+	cfg.DisableCache = unityMarker != ""
 	cfg.CoordinatorAddr = coordAddr
 	cfg.Insecure = insecure
 	cfg.Timeout = 5 * time.Minute
@@ -1286,6 +1289,14 @@ func runCompiler(defaultCompiler, envVar string, args []string) error {
 	// Write output file
 	if err := writeOutputFile(outputFile, result.ObjectFile); err != nil {
 		return fmt.Errorf("failed to write output: %w", err)
+	}
+
+	// The experimental Unity launcher checks that a generated object actually
+	// went through the compile service before reporting a distributed build.
+	if unityMarker != "" && !result.Fallback && !result.CacheHit {
+		if err := os.Mkdir(unityMarker, 0700); err != nil && !errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("failed to mark Unity object completion: %w", err)
+		}
 	}
 
 	// Print status

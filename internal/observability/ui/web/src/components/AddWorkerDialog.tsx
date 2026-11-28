@@ -1,5 +1,7 @@
 import { Plus, Terminal } from 'lucide-react'
-import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { api } from '@/lib/api'
 import { CodeBlock } from '@/components/CodeBlock'
 import { Button } from '@/components/ui/button'
 import {
@@ -22,16 +24,17 @@ import { useT } from '@/lib/i18n'
 export function AddWorkerDialog() {
   const t = useT()
 
-  const coordinatorAddress = useMemo(() => `${window.location.hostname}:9000`, [])
-
-  const runCommand = `hg-worker serve \\
-  --coordinator=${coordinatorAddress} \\
-  --advertise-address=<this-machine-ip>:50052`
+  const [open, setOpen] = useState(false)
+  const [selected, setSelected] = useState('')
+  const join = useQuery({ queryKey: ['worker-join'], queryFn: api.workerJoin, enabled: open })
+  const addresses = join.data?.addresses ?? []
+  const address = addresses.includes(selected) ? selected : addresses[0]
+  const runCommand = address ? `hg-worker serve --coordinator='${address.replaceAll("'", "'\\''")}'` : 'hg-worker serve'
 
   const composeCommand = 'docker compose up -d --scale worker=3'
 
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="primary" size="sm" className="gap-1.5">
           <Plus className="h-3.5 w-3.5" />
@@ -51,7 +54,21 @@ export function AddWorkerDialog() {
           <Step title={t('workers.step1Title')} body={t('workers.step1Body')} />
 
           <Step title={t('workers.step2Title')} body={t('workers.step2Body')}>
-            <CodeBlock code={runCommand} />
+            {addresses.length > 1 && (
+              <label className="mb-2 flex flex-wrap items-center gap-2 text-[12px]">
+                {t('workers.coordinatorAddress')}
+                <select value={address} onChange={(event) => setSelected(event.target.value)}
+                  className="rounded border border-(--color-hairline) bg-(--color-surface) px-2 py-1 font-mono">
+                  {addresses.map((value) => <option key={value}>{value}</option>)}
+                </select>
+              </label>
+            )}
+            {join.isPending ? <p>{t('common.loading')}</p> : (
+              <>
+                {!address && <p className="text-[12px]">{t('workers.joinDiscovery')}</p>}
+                <CodeBlock code={runCommand} />
+              </>
+            )}
           </Step>
 
           <Step title={t('workers.step3Title')} body={t('workers.step3Body')}>

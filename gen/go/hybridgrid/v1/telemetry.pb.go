@@ -251,13 +251,14 @@ type TelemetryWorker struct {
 	LastSeen          int64                  `protobuf:"varint,27,opt,name=last_seen,json=lastSeen,proto3" json:"last_seen,omitempty"`
 	// Latest live resource reading (see WorkerUsageReport); usage_at_ms is 0
 	// when the worker has not reported any.
-	CpuPercent       float64 `protobuf:"fixed64,28,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`
-	MemoryUsedBytes  uint64  `protobuf:"varint,29,opt,name=memory_used_bytes,json=memoryUsedBytes,proto3" json:"memory_used_bytes,omitempty"`
-	MemoryTotalBytes uint64  `protobuf:"varint,30,opt,name=memory_total_bytes,json=memoryTotalBytes,proto3" json:"memory_total_bytes,omitempty"`
-	Load1            float64 `protobuf:"fixed64,31,opt,name=load1,proto3" json:"load1,omitempty"`
-	UsageAtMs        int64   `protobuf:"varint,32,opt,name=usage_at_ms,json=usageAtMs,proto3" json:"usage_at_ms,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	CpuPercent             float64 `protobuf:"fixed64,28,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`
+	MemoryUsedBytes        uint64  `protobuf:"varint,29,opt,name=memory_used_bytes,json=memoryUsedBytes,proto3" json:"memory_used_bytes,omitempty"`
+	MemoryTotalBytes       uint64  `protobuf:"varint,30,opt,name=memory_total_bytes,json=memoryTotalBytes,proto3" json:"memory_total_bytes,omitempty"`
+	Load1                  float64 `protobuf:"fixed64,31,opt,name=load1,proto3" json:"load1,omitempty"`
+	UsageAtMs              int64   `protobuf:"varint,32,opt,name=usage_at_ms,json=usageAtMs,proto3" json:"usage_at_ms,omitempty"`
+	UnityDistributedIl2Cpp bool    `protobuf:"varint,33,opt,name=unity_distributed_il2cpp,json=unityDistributedIl2cpp,proto3" json:"unity_distributed_il2cpp,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *TelemetryWorker) Reset() {
@@ -512,6 +513,13 @@ func (x *TelemetryWorker) GetUsageAtMs() int64 {
 		return x.UsageAtMs
 	}
 	return 0
+}
+
+func (x *TelemetryWorker) GetUnityDistributedIl2Cpp() bool {
+	if x != nil {
+		return x.UnityDistributedIl2Cpp
+	}
+	return false
 }
 
 // A single compilation task. exit_code is omitted on success,
@@ -2155,7 +2163,7 @@ const file_hybridgrid_v1_telemetry_proto_rawDesc = "" +
 	"\rtotal_workers\x18\x11 \x01(\x05R\ftotalWorkers\x12'\n" +
 	"\x0fhealthy_workers\x18\x12 \x01(\x05R\x0ehealthyWorkers\x12%\n" +
 	"\x0euptime_seconds\x18\x13 \x01(\x03R\ruptimeSeconds\x12\x1c\n" +
-	"\ttimestamp\x18\x14 \x01(\x03R\ttimestamp\"\xdd\b\n" +
+	"\ttimestamp\x18\x14 \x01(\x03R\ttimestamp\"\x97\t\n" +
 	"\x0fTelemetryWorker\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04host\x18\x02 \x01(\tR\x04host\x12\x18\n" +
@@ -2192,7 +2200,8 @@ const file_hybridgrid_v1_telemetry_proto_rawDesc = "" +
 	"\x11memory_used_bytes\x18\x1d \x01(\x04R\x0fmemoryUsedBytes\x12,\n" +
 	"\x12memory_total_bytes\x18\x1e \x01(\x04R\x10memoryTotalBytes\x12\x14\n" +
 	"\x05load1\x18\x1f \x01(\x01R\x05load1\x12\x1e\n" +
-	"\vusage_at_ms\x18  \x01(\x03R\tusageAtMs\"\xd1\x03\n" +
+	"\vusage_at_ms\x18  \x01(\x03R\tusageAtMs\x128\n" +
+	"\x18unity_distributed_il2cpp\x18! \x01(\bR\x16unityDistributedIl2cpp\"\xd1\x03\n" +
 	"\rTelemetryTask\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +

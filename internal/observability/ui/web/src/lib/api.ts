@@ -30,6 +30,7 @@ async function getJSON<T>(path: string): Promise<T> {
 
 export const api = {
   stats: (): Promise<Stats> => getJSON<Stats>('/api/v1/stats'),
+  workerJoin: () => getJSON<{ addresses: string[] }>('/api/v1/worker-join'),
   workers: (): Promise<WorkersResponse> => getJSON<WorkersResponse>('/api/v1/workers'),
   workerUsage: (): Promise<WorkerUsageResponse> => getJSON<WorkerUsageResponse>('/api/v1/workers/usage'),
   tasks: (limit?: number): Promise<TasksResponse> =>

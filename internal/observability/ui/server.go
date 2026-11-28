@@ -66,11 +66,13 @@ type Client interface {
 
 // Config holds the standalone dashboard server's configuration.
 type Config struct {
-	Port            int
-	AuthToken       string
-	ReadTimeout     time.Duration
-	WriteTimeout    time.Duration
-	ShutdownTimeout time.Duration
+	CoordinatorAddress   string
+	WorkerConnectAddress string
+	Port                 int
+	AuthToken            string
+	ReadTimeout          time.Duration
+	WriteTimeout         time.Duration
+	ShutdownTimeout      time.Duration
 
 	// AllowedOrigins lists extra browser origins (for example
 	// "http://localhost:5173") that may open the /ws WebSocket in
@@ -83,10 +85,11 @@ type Config struct {
 // dashboard's long-standing values.
 func DefaultConfig() Config {
 	return Config{
-		Port:            8080,
-		ReadTimeout:     15 * time.Second,
-		WriteTimeout:    15 * time.Second,
-		ShutdownTimeout: 10 * time.Second,
+		Port:               8080,
+		CoordinatorAddress: "localhost:9000",
+		ReadTimeout:        15 * time.Second,
+		WriteTimeout:       15 * time.Second,
+		ShutdownTimeout:    10 * time.Second,
 	}
 }
 
@@ -147,6 +150,7 @@ func (s *Server) routes() http.Handler {
 	})
 
 	mux.HandleFunc("/api/v1/stats", s.handleStats)
+	mux.HandleFunc("GET /api/v1/worker-join", s.handleWorkerJoin)
 	mux.HandleFunc("/api/v1/workers", s.handleWorkers)
 	mux.HandleFunc("GET /api/v1/workers/usage", s.handleWorkerUsage)
 	mux.HandleFunc("/api/v1/events", s.handleEvents)

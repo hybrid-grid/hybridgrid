@@ -35,6 +35,7 @@ type Service struct {
 
 // Config holds build service configuration.
 type Config struct {
+	DisableCache    bool
 	CacheDir        string
 	CacheMaxSize    int64
 	CacheTTLHours   int
@@ -67,10 +68,14 @@ func DefaultConfig() Config {
 // New creates a new build service.
 func New(cfg Config) (*Service, error) {
 	// Initialize cache
-	cacheStore, err := cache.NewStore(cfg.CacheDir, cfg.CacheMaxSize, cfg.CacheTTLHours)
-	if err != nil {
-		log.Warn().Err(err).Msg("Failed to initialize cache, continuing without cache")
-		cacheStore = nil
+	var cacheStore *cache.Store
+	if !cfg.DisableCache {
+		var err error
+		cacheStore, err = cache.NewStore(cfg.CacheDir, cfg.CacheMaxSize, cfg.CacheTTLHours)
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to initialize cache, continuing without cache")
+			cacheStore = nil
+		}
 	}
 
 	// Initialize preprocessor

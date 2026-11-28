@@ -55,6 +55,7 @@ export interface WorkerInfo {
   flutter_available: boolean
   flutter_sdk_version: string
   flutter_platforms: string[] | null
+  unity_distributed_il2cpp?: boolean
   unity_available: boolean
   unity_versions: string[] | null
   unity_platforms: string[] | null

@@ -80,6 +80,7 @@ message TelemetryWorker {
   uint64 memory_total_bytes = 30;
   double load1 = 31;
   int64 usage_at_ms = 32;
+  bool unity_distributed_il2cpp = 33;
 }
 
 // A single compilation task. exit_code is omitted on success,

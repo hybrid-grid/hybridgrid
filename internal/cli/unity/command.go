@@ -76,11 +76,20 @@ func NewCommand(deps Dependencies) *cobra.Command {
 				return err
 			}
 
+			distributed, _ := cmd.Flags().GetBool("distributed-il2cpp")
+			if distributed {
+				if platform != pb.TargetPlatform_PLATFORM_LINUX || backend == "mono" {
+					return fmt.Errorf("--distributed-il2cpp requires a Linux IL2CPP build")
+				}
+				backend = "il2cpp"
+			}
+
 			req, err := buildRequest(projectPath, platform, strings.TrimSpace(unityVersion), buildMethod, backend, deps.BuildTimeout)
 			if err != nil {
 				return err
 			}
 
+			req.GetUnityConfig().DistributedIl2Cpp = distributed
 			resp, err := runBuild(cmd.Context(), deps, req)
 			if err != nil {
 				return err
@@ -90,6 +99,7 @@ func NewCommand(deps Dependencies) *cobra.Command {
 		},
 	}
 
+	buildCmd.Flags().Bool("distributed-il2cpp", false, "Distribute generated C++ compilation for Linux x86_64 IL2CPP builds (experimental)")
 	buildCmd.Flags().String("project", "", "path to Unity project")
 	buildCmd.Flags().String("build-method", "", "Unity build method (for example: BuildScript.Build)")
 	buildCmd.Flags().String("unity-version", "", "Unity editor version")
