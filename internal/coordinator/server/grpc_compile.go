@@ -71,6 +71,7 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 	}()
 
 	if failure := s.dispatchAndForward(ctx, span, st); failure != nil {
+		s.notifyDispatchFailed(st, failure, time.Now())
 		return failure, nil
 	}
 	span.SetAttributes(tracing.AttrQueueTimeMs.Int64(st.queueTime.Milliseconds()))

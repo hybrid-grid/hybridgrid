@@ -203,6 +203,32 @@ func completedEvent(st *compileRun, success bool, completedAt time.Time) *TaskEv
 	return event
 }
 
+// notifyDispatchFailed closes the dashboard task opened by bookAndAnnounce
+// when the dispatch loop ends the request with a terminal failure (queue
+// timeout, client cancellation, no worker left after a rejected attempt).
+// Those paths return before the normal completion bookkeeping, so without
+// this the started event would leave the task "running" forever. A request
+// that never reached a worker (st.worker == nil) announced nothing and gets
+// no completion.
+func (s *Server) notifyDispatchFailed(st *compileRun, failure *pb.CompileResponse, completedAt time.Time) {
+	if s.eventNotifier == nil || st.worker == nil {
+		return
+	}
+	s.eventNotifier.NotifyTaskCompleted(&TaskEvent{
+		ID:            st.req.TaskId,
+		BuildType:     "cpp",
+		BuildID:       st.buildID,
+		Status:        "failed",
+		WorkerID:      st.worker.ID,
+		StartedAtMs:   st.taskStartTime.UnixMilli(),
+		CompletedAtMs: completedAt.UnixMilli(),
+		DurationMs:    completedAt.Sub(st.taskStartTime).Milliseconds(),
+		QueueTimeMs:   st.queueTime.Milliseconds(),
+		ExitCode:      1,
+		ErrorMessage:  failure.Stderr,
+	})
+}
+
 // finishResponse builds Compile's return value from the forwarded result: a
 // worker error becomes a FAILED response, otherwise the worker response is
 // returned with the coordinator queue time and the completion metrics
