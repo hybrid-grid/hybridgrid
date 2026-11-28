@@ -120,7 +120,11 @@ type Request struct {
 	OutputFile string
 	Args       *compiler.ParsedArgs
 	TargetArch pb.Architecture
-	Timeout    time.Duration
+	// RawCrossArch sends raw source + project includes instead of a
+	// locally preprocessed .i: local preprocessing bakes this machine's
+	// headers into the translation unit, silently wrong for another arch.
+	RawCrossArch bool
+	Timeout      time.Duration
 }
 
 // Result represents a build result.
@@ -199,14 +203,18 @@ func (s *Service) Build(ctx context.Context, req *Request) (*Result, error) {
 	// This produces a self-contained .i file that any worker can compile,
 	// even workers on different OS (via Docker).
 	if s.client != nil {
-		prepResult, prepErr := s.preprocessor.Preprocess(ctx, req.Args, req.SourceFile)
 		var compileResult *remoteResult
-		if prepErr == nil {
-			compileResult, err = s.compileRemotePreprocessed(ctx, req, prepResult.PreprocessedSource)
-		} else {
-			// Preprocessing failed, try raw source mode as fallback
-			log.Warn().Err(prepErr).Msg("Preprocessing failed, trying raw source mode")
+		if req.RawCrossArch {
 			compileResult, err = s.compileRemoteRaw(ctx, req, rawSource, includeFiles)
+		} else {
+			prepResult, prepErr := s.preprocessor.Preprocess(ctx, req.Args, req.SourceFile)
+			if prepErr == nil {
+				compileResult, err = s.compileRemotePreprocessed(ctx, req, prepResult.PreprocessedSource)
+			} else {
+				// Preprocessing failed, try raw source mode as fallback
+				log.Warn().Err(prepErr).Msg("Preprocessing failed, trying raw source mode")
+				compileResult, err = s.compileRemoteRaw(ctx, req, rawSource, includeFiles)
+			}
 		}
 		if err == nil && compileResult.ExitCode == 0 {
 			result.ObjectFile = compileResult.ObjectFile
@@ -252,7 +260,12 @@ func (s *Service) Build(ctx context.Context, req *Request) (*Result, error) {
 		result.FallbackReason = "no coordinator connection"
 	}
 
-	// Step 4: Local fallback (needs preprocessing for local compilation)
+	// Step 4: Local fallback (needs preprocessing for local compilation).
+	// A cross-arch request cannot fall back: the local toolchain builds
+	// for the local architecture, which is exactly what was opted out of.
+	if req.RawCrossArch {
+		return nil, fmt.Errorf("cross-arch compile failed and local fallback would target the wrong architecture: %s", result.FallbackReason)
+	}
 	if !s.fallback.IsEnabled() {
 		return nil, fmt.Errorf("remote compilation failed and local fallback is disabled")
 	}
