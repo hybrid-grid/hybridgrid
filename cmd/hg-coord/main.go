@@ -14,13 +14,13 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/h3nr1-d14z/hybridgrid/internal/artifacts"
+	"github.com/h3nr1-d14z/hybridgrid/internal/blobcache"
 	"github.com/h3nr1-d14z/hybridgrid/internal/config"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/opshttp"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/scheduler"
 	coordserver "github.com/h3nr1-d14z/hybridgrid/internal/coordinator/server"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/webhook"
 	"github.com/h3nr1-d14z/hybridgrid/internal/discovery/mdns"
-	"github.com/h3nr1-d14z/hybridgrid/internal/gradlecache"
 	"github.com/h3nr1-d14z/hybridgrid/internal/logging"
 	observabilitymetrics "github.com/h3nr1-d14z/hybridgrid/internal/observability/metrics"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
@@ -87,6 +87,8 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			gradleCacheDir, _ := cmd.Flags().GetString("gradle-cache-dir")
 			gradleCacheMaxEntryMB, _ := cmd.Flags().GetInt64("gradle-cache-max-entry-mb")
 			gradleCacheMaxTotalMB, _ := cmd.Flags().GetInt64("gradle-cache-max-total-mb")
+			depsCacheDir, _ := cmd.Flags().GetString("deps-cache-dir")
+			depsCacheMaxMB, _ := cmd.Flags().GetInt64("deps-cache-max-mb")
 			dispatchQueueTimeout, _ := cmd.Flags().GetDuration("dispatch-queue-timeout")
 			epsilonValue, _ := cmd.Flags().GetFloat64("epsilon")
 			alphaValue, _ := cmd.Flags().GetFloat64("alpha")
@@ -314,6 +316,14 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 						Int64("max_total_mb", artifactMaxTotalMB).Msg("Artifact store enabled")
 				}
 			}
+			if depsCacheDir != "" {
+				store, err := blobcache.New(blobcache.Config{Dir: depsCacheDir, MaxTotalBytes: depsCacheMaxMB << 20})
+				if err != nil {
+					log.Warn().Err(err).Str("dir", depsCacheDir).Msg("Dependency layer store disabled; clients resend node_modules with every task")
+				} else {
+					srv.SetDepsStore(store)
+				}
+			}
 			if buildHistoryPath != "" {
 				if err := teleStore.EnablePersistence(statsCtx, buildHistoryPath); err != nil {
 					log.Warn().Err(err).Str("path", buildHistoryPath).
@@ -364,7 +374,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 			// Start ops HTTP server (health, metrics, log-level).
 			opsSrv := &opshttp.Server{Port: httpPort, AuthToken: token, EventSink: srv, DispatchCounter: srv}
 			if gradleCacheDir != "" {
-				gc, err := gradlecache.New(gradlecache.Config{
+				gc, err := blobcache.New(blobcache.Config{
 					Dir:           gradleCacheDir,
 					MaxEntryBytes: gradleCacheMaxEntryMB << 20,
 					MaxTotalBytes: gradleCacheMaxTotalMB << 20,
@@ -375,7 +385,7 @@ It manages worker registration, task scheduling, and provides the dashboard.`,
 				} else {
 					opsSrv.GradleCache = gc
 					log.Info().Str("dir", gradleCacheDir).Int("http_port", httpPort).
-						Str("path", gradlecache.Prefix).Int64("max_total_mb", gradleCacheMaxTotalMB).
+						Str("path", blobcache.GradlePrefix).Int64("max_total_mb", gradleCacheMaxTotalMB).
 						Msg("Gradle remote build cache enabled")
 				}
 			}
@@ -458,6 +468,8 @@ func registerServeFlags(cmd *cobra.Command) {
 	cmd.Flags().String("gradle-cache-dir", defaultCacheSubdir("gradle-cache"), "Serve a Gradle remote build cache from this directory at /cache/gradle/ on the HTTP port, shared by Flutter workers (empty disables)")
 	cmd.Flags().Int64("gradle-cache-max-entry-mb", 256, "Largest single Gradle cache entry accepted, in MiB")
 	cmd.Flags().Int64("gradle-cache-max-total-mb", 5120, "Total Gradle cache size in MiB; least recently used entries are evicted beyond it")
+	cmd.Flags().String("deps-cache-dir", defaultCacheSubdir("coord-deps"), "Keep dependency layers (node_modules) clients send for TypeScript builds, so each is uploaded once (empty disables)")
+	cmd.Flags().Int64("deps-cache-max-mb", 10240, "Dependency layer store size in MiB; least recently used layers are evicted beyond it")
 	cmd.Flags().String("builder-cache-dir", "", "Cache per-builder (plugin builder) build results in this directory, keyed by builder version + source hash (default: off)")
 	cmd.Flags().Float64("epsilon", 0.1, "Exploration rate for epsilon-greedy scheduler (in [0, 1]; ignored otherwise)")
 	cmd.Flags().Float64("alpha", 1.0, "LinUCB exploration coefficient α (in [0, 10]; ignored for other schedulers)")

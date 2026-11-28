@@ -1,4 +1,4 @@
-package gradlecache
+package blobcache
 
 import (
 	"bytes"
@@ -26,7 +26,7 @@ func newTestCache(t *testing.T, cfg Config) *Cache {
 
 func do(t *testing.T, h http.Handler, method, key, body string, setup func(*http.Request)) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(method, Prefix+key, strings.NewReader(body))
+	req := httptest.NewRequest(method, GradlePrefix+key, strings.NewReader(body))
 	if setup != nil {
 		setup(req)
 	}
@@ -80,7 +80,7 @@ func TestCache_EntrySizeLimit(t *testing.T) {
 		t.Fatalf("oversized PUT = %d, want 413", rec.Code)
 	}
 	// Chunked upload without Content-Length is caught while copying.
-	req := httptest.NewRequest(http.MethodPut, Prefix+"big", io.MultiReader(strings.NewReader("123"), strings.NewReader("45")))
+	req := httptest.NewRequest(http.MethodPut, GradlePrefix+"big", io.MultiReader(strings.NewReader("123"), strings.NewReader("45")))
 	req.ContentLength = -1
 	rec := httptest.NewRecorder()
 	c.ServeHTTP(rec, req)
@@ -136,6 +136,9 @@ func TestCache_ReplaceKeepsAccounting(t *testing.T) {
 	_ = c.Put("k", strings.NewReader("12"))
 	if st := c.Stats(); st.Entries != 1 || st.TotalBytes != 2 {
 		t.Fatalf("stats = %+v", st)
+	}
+	if !c.Has("k") || c.Has("missing") || c.Has("../k") {
+		t.Fatal("Has disagrees with the store")
 	}
 	reopened := newTestCache(t, Config{Dir: c.cfg.Dir})
 	if st := reopened.Stats(); st.Entries != 1 || st.TotalBytes != 2 {

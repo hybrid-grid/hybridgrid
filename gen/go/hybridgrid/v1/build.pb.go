@@ -692,8 +692,12 @@ type NodeConfig struct {
 	PackageManager string                 `protobuf:"bytes,2,opt,name=package_manager,json=packageManager,proto3" json:"package_manager,omitempty"` // npm, yarn, pnpm
 	BuildScript    string                 `protobuf:"bytes,3,opt,name=build_script,json=buildScript,proto3" json:"build_script,omitempty"`          // e.g., "build", "build:prod"
 	EnvVars        map[string]string      `protobuf:"bytes,4,rep,name=env_vars,json=envVars,proto3" json:"env_vars,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// TypeScript project to type-check and emit with `tsc -p`: the path of
+	// its tsconfig.json (or its directory) relative to the source archive
+	// root. Used by `hgbuild tsc -b`, which sends one task per project.
+	TscProject    string `protobuf:"bytes,5,opt,name=tsc_project,json=tscProject,proto3" json:"tsc_project,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *NodeConfig) Reset() {
@@ -752,6 +756,13 @@ func (x *NodeConfig) GetEnvVars() map[string]string {
 		return x.EnvVars
 	}
 	return nil
+}
+
+func (x *NodeConfig) GetTscProject() string {
+	if x != nil {
+		return x.TscProject
+	}
+	return ""
 }
 
 // CustomConfig configures a plugin-builder build: everything the
@@ -1611,8 +1622,15 @@ type BuildRequest struct {
 	DockerImage    string `protobuf:"bytes,20,opt,name=docker_image,json=dockerImage,proto3" json:"docker_image,omitempty"`           // Override default image
 	TimeoutSeconds int32  `protobuf:"varint,21,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"` // Override default timeout
 	Priority       int32  `protobuf:"varint,22,opt,name=priority,proto3" json:"priority,omitempty"`                                   // Task priority (0-100)
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Dependency layer (see internal/depslayer): installed dependencies
+	// such as node_modules, gzip-compressed tar, shipped separately from
+	// the source so each machine receives it once. deps_hash names it;
+	// deps_archive carries it only when the receiver reported it missing
+	// (gRPC FailedPrecondition) or is known not to have it.
+	DepsHash      string `protobuf:"bytes,23,opt,name=deps_hash,json=depsHash,proto3" json:"deps_hash,omitempty"`
+	DepsArchive   []byte `protobuf:"bytes,24,opt,name=deps_archive,json=depsArchive,proto3" json:"deps_archive,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *BuildRequest) Reset() {
@@ -1792,6 +1810,20 @@ func (x *BuildRequest) GetPriority() int32 {
 		return x.Priority
 	}
 	return 0
+}
+
+func (x *BuildRequest) GetDepsHash() string {
+	if x != nil {
+		return x.DepsHash
+	}
+	return ""
+}
+
+func (x *BuildRequest) GetDepsArchive() []byte {
+	if x != nil {
+		return x.DepsArchive
+	}
+	return nil
 }
 
 type isBuildRequest_Config interface {
@@ -3370,13 +3402,15 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\aldflags\x18\x05 \x03(\v2$.hybridgrid.v1.GoConfig.LdflagsEntryR\aldflags\x1a:\n" +
 	"\fLdflagsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xfa\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9b\x02\n" +
 	"\n" +
 	"NodeConfig\x12!\n" +
 	"\fnode_version\x18\x01 \x01(\tR\vnodeVersion\x12'\n" +
 	"\x0fpackage_manager\x18\x02 \x01(\tR\x0epackageManager\x12!\n" +
 	"\fbuild_script\x18\x03 \x01(\tR\vbuildScript\x12A\n" +
-	"\benv_vars\x18\x04 \x03(\v2&.hybridgrid.v1.NodeConfig.EnvVarsEntryR\aenvVars\x1a:\n" +
+	"\benv_vars\x18\x04 \x03(\v2&.hybridgrid.v1.NodeConfig.EnvVarsEntryR\aenvVars\x12\x1f\n" +
+	"\vtsc_project\x18\x05 \x01(\tR\n" +
+	"tscProject\x1a:\n" +
 	"\fEnvVarsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x92\x01\n" +
@@ -3455,7 +3489,7 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\baccepted\x18\x01 \x01(\bR\baccepted\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12,\n" +
 	"\x12assigned_worker_id\x18\x03 \x01(\tR\x10assignedWorkerId\x12<\n" +
-	"\x1aheartbeat_interval_seconds\x18\x04 \x01(\x05R\x18heartbeatIntervalSeconds\"\xa0\a\n" +
+	"\x1aheartbeat_interval_seconds\x18\x04 \x01(\x05R\x18heartbeatIntervalSeconds\"\xe0\a\n" +
 	"\fBuildRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1f\n" +
 	"\vsource_hash\x18\x02 \x01(\tR\n" +
@@ -3480,7 +3514,9 @@ const file_hybridgrid_v1_build_proto_rawDesc = "" +
 	"\bbuild_id\x18\x11 \x01(\tR\abuildId\x12!\n" +
 	"\fdocker_image\x18\x14 \x01(\tR\vdockerImage\x12'\n" +
 	"\x0ftimeout_seconds\x18\x15 \x01(\x05R\x0etimeoutSeconds\x12\x1a\n" +
-	"\bpriority\x18\x16 \x01(\x05R\bpriorityB\b\n" +
+	"\bpriority\x18\x16 \x01(\x05R\bpriority\x12\x1b\n" +
+	"\tdeps_hash\x18\x17 \x01(\tR\bdepsHash\x12!\n" +
+	"\fdeps_archive\x18\x18 \x01(\fR\vdepsArchiveB\b\n" +
 	"\x06config\"q\n" +
 	"\fArtifactInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +

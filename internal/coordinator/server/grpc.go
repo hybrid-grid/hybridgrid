@@ -28,6 +28,17 @@ import (
 
 const maxGRPCMessageSize = 512 * 1024 * 1024
 
+// messageSizeOptions lets the server accept and send messages up to
+// maxGRPCMessageSize, matching what clients and the worker connections
+// are configured for. Without them gRPC's 4 MiB default rejects any
+// Flutter, Unity or plugin build whose source archive exceeds 4 MiB.
+func messageSizeOptions() []grpc.ServerOption {
+	return []grpc.ServerOption{
+		grpc.MaxRecvMsgSize(maxGRPCMessageSize),
+		grpc.MaxSendMsgSize(maxGRPCMessageSize),
+	}
+}
+
 // Config holds the coordinator gRPC server configuration.
 type Config struct {
 	Port            int
@@ -297,6 +308,7 @@ type Server struct {
 	eventNotifier   EventNotifier
 	telemetry       *telemetry.Service
 	artifacts       *artifacts.Store
+	deps            depsRouting
 	workerConns     *connPool
 	taskLogger      *TaskLogger
 	console         *consoleStore
@@ -443,7 +455,7 @@ func (s *Server) Start() error {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
 
-	var opts []grpc.ServerOption
+	opts := messageSizeOptions()
 
 	// Add TLS credentials if configured
 	if s.config.TLS.Enabled {

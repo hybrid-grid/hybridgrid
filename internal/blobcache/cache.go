@@ -1,13 +1,12 @@
-// Package gradlecache is a Gradle remote build cache served by the
-// coordinator, so a Gradle task output produced on one worker (Kotlin/Java
-// compile, dexing, R8, resource merging, …) is reused by every other
-// worker instead of being rebuilt.
+// Package blobcache is a size-bounded, least-recently-used store of
+// opaque blobs on disk, named by key.
 //
-// It speaks Gradle's HTTP build cache protocol: GET <prefix>/<key>
-// returns the entry (200) or 404, PUT <prefix>/<key> stores it. Entries
-// are opaque files on disk named by key; a total size cap evicts the
-// least recently used entries.
-package gradlecache
+// The coordinator uses it twice: as the Gradle remote build cache, which
+// it serves over Gradle's HTTP build cache protocol (GET <prefix><key>
+// returns the entry or 404, PUT <prefix><key> stores it), so a Gradle task
+// output produced on one worker is reused by every other; and as the
+// store of dependency layers (node_modules) that it hands to workers.
+package blobcache
 
 import (
 	"encoding/json"
@@ -28,9 +27,10 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/security/auth"
 )
 
-// Prefix is where the cache is mounted on the coordinator's HTTP server.
-// A worker's Gradle points at http://<coordinator>:<http-port>/cache/gradle/.
-const Prefix = "/cache/gradle/"
+// GradlePrefix is where the Gradle cache is mounted on the coordinator's
+// HTTP server; a worker's Gradle points at
+// http://<coordinator>:<http-port>/cache/gradle/.
+const GradlePrefix = "/cache/gradle/"
 
 const maxKeyLen = 128
 
@@ -51,6 +51,9 @@ type Config struct {
 	// Token, when set, is required as the HTTP basic-auth password (any
 	// user name) or as a bearer token.
 	Token string
+	// Prefix is the URL path ServeHTTP is mounted under (default
+	// GradlePrefix).
+	Prefix string
 }
 
 // Stats counts cache traffic since start.
@@ -82,6 +85,9 @@ func New(cfg Config) (*Cache, error) {
 	}
 	if err := os.MkdirAll(cfg.Dir, 0o750); err != nil {
 		return nil, fmt.Errorf("failed to create gradle cache dir: %w", err)
+	}
+	if cfg.Prefix == "" {
+		cfg.Prefix = GradlePrefix
 	}
 	c := &Cache{cfg: cfg, now: time.Now}
 	files, err := c.list()
@@ -256,15 +262,25 @@ func (c *Cache) Stats() Stats {
 // HTTP server defaults to short timeouts meant for ops endpoints.
 const transferWindow = 5 * time.Minute
 
-// ServeHTTP implements Gradle's HTTP build cache protocol under Prefix.
-// GET on Prefix itself returns Stats as JSON.
+// Has reports whether an entry exists for key.
+func (c *Cache) Has(key string) bool {
+	p, err := c.path(key)
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(p)
+	return err == nil
+}
+
+// ServeHTTP implements Gradle's HTTP build cache protocol under
+// Config.Prefix. GET on the prefix itself returns Stats as JSON.
 func (c *Cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !c.authorized(r) {
-		w.Header().Set("WWW-Authenticate", `Basic realm="hybridgrid gradle cache"`)
+		w.Header().Set("WWW-Authenticate", `Basic realm="hybridgrid cache"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	key := strings.TrimPrefix(r.URL.Path, Prefix)
+	key := strings.TrimPrefix(r.URL.Path, c.cfg.Prefix)
 	if key == "" && r.Method == http.MethodGet {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(c.Stats())

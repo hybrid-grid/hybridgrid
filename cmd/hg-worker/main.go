@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"syscall"
@@ -231,6 +232,9 @@ It executes build tasks received from the coordinator.`,
 			if len(dockerCCs) > 0 {
 				cfg.DockerToolchains = dockerCCs
 			}
+			cfg.DepsCacheDir, _ = cmd.Flags().GetString("deps-cache-dir")
+			depsMaxMB, _ := cmd.Flags().GetInt64("deps-cache-max-mb")
+			cfg.DepsCacheMaxBytes = depsMaxMB << 20
 			gradleCacheURL, _ := cmd.Flags().GetString("gradle-cache-url")
 			if gradleCacheURL == "" {
 				gradleCacheURL = os.Getenv("HG_GRADLE_CACHE_URL")
@@ -412,6 +416,8 @@ It executes build tasks received from the coordinator.`,
 	serveCmd.Flags().String("tls-cert", "", "Path to TLS certificate file (PEM format)")
 	serveCmd.Flags().String("tls-key", "", "Path to TLS private key file (PEM format)")
 	serveCmd.Flags().String("tls-ca", "", "Path to CA certificate for client verification (mTLS)")
+	serveCmd.Flags().String("deps-cache-dir", defaultDepsCacheDir(), "Keep dependency layers (node_modules) received for TypeScript builds here, so each is transferred once")
+	serveCmd.Flags().Int64("deps-cache-max-mb", 10240, "Dependency layer cache size in MiB; least recently used layers are evicted beyond it")
 	serveCmd.Flags().String("gradle-cache-url", "", "Gradle remote build cache for Flutter builds, e.g. http://<coordinator>:8080/cache/gradle/ (env HG_GRADLE_CACHE_URL; empty disables)")
 	serveCmd.Flags().String("builder-dir", "", "Directory containing plugin builder executables (hg-exec-<id>)")
 	serveCmd.Flags().String("docker-image-x86", "", "Override compile image for x86_64 targets (default: dockcross/linux-x64)")
@@ -457,4 +463,13 @@ func getOutboundIP(target string) string {
 
 	localAddr := conn.LocalAddr().(*net.UDPAddr)
 	return localAddr.IP.String()
+}
+
+// defaultDepsCacheDir is <user cache dir>/hybridgrid/deps.
+func defaultDepsCacheDir() string {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		base = os.TempDir()
+	}
+	return filepath.Join(base, "hybridgrid", "deps")
 }

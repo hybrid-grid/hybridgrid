@@ -25,6 +25,7 @@ import (
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/output"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/sourcearchive"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/taskid"
+	"github.com/h3nr1-d14z/hybridgrid/internal/cli/tscbuild"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cli/unity"
 	"github.com/h3nr1-d14z/hybridgrid/internal/compiler"
 	"github.com/h3nr1-d14z/hybridgrid/internal/config"
@@ -208,6 +209,7 @@ Environment:
 		newBuildCmd(),
 		newFlutterCmd(),
 		newUnityCmd(),
+		newTscCmd(),
 		newConfigCmd(),
 		newCacheCmd(),
 		newGraphCmd(),
@@ -557,6 +559,17 @@ func newFlutterCmd() *cobra.Command {
 	}
 
 	return flutter.NewCommand(deps)
+}
+
+func newTscCmd() *cobra.Command {
+	return tscbuild.NewCommand(tscbuild.Dependencies{
+		CoordinatorAddr: getCoordinatorAddress,
+		NewClient: func(address string, requestTimeout time.Duration) (tscbuild.Client, error) {
+			return client.New(newClientConfig(address, requestTimeout))
+		},
+		RequestTimeout: 30 * time.Minute,
+		NoFallback:     func() bool { return !fallbackEnabled() },
+	})
 }
 
 func newUnityCmd() *cobra.Command {

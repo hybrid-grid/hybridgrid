@@ -1,10 +1,13 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -16,7 +19,9 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
+	"github.com/h3nr1-d14z/hybridgrid/internal/blobcache"
 	"github.com/h3nr1-d14z/hybridgrid/internal/capability"
+	"github.com/h3nr1-d14z/hybridgrid/internal/depslayer"
 	"github.com/h3nr1-d14z/hybridgrid/internal/grpc/interceptors"
 	"github.com/h3nr1-d14z/hybridgrid/internal/observability/tracing"
 	hgtls "github.com/h3nr1-d14z/hybridgrid/internal/security/tls"
@@ -52,6 +57,26 @@ type Config struct {
 	// GradleCache points Flutter builds at the coordinator's shared
 	// Gradle remote build cache (zero value: off).
 	GradleCache executor.GradleCache
+
+	// DepsCacheDir keeps dependency layers (node_modules) received from
+	// the coordinator, so each is transferred to this machine once.
+	// Empty uses a directory under the system temp dir.
+	DepsCacheDir string
+	// DepsCacheMaxBytes bounds DepsCacheDir; the least recently used
+	// layers are evicted beyond it (<= 0: unlimited).
+	DepsCacheMaxBytes int64
+}
+
+// maxGRPCMessageSize matches the coordinator's limit: build requests
+// carry the whole source archive and responses the whole artifact
+// archive, both far beyond gRPC's 4 MiB default.
+const maxGRPCMessageSize = 512 * 1024 * 1024
+
+func messageSizeOptions() []grpc.ServerOption {
+	return []grpc.ServerOption{
+		grpc.MaxRecvMsgSize(maxGRPCMessageSize),
+		grpc.MaxSendMsgSize(maxGRPCMessageSize),
+	}
 }
 
 // DefaultConfig returns sensible defaults.
@@ -73,6 +98,7 @@ type Server struct {
 	executor     *executor.Manager
 	capabilities *pb.WorkerCapabilities
 	builders     *builders.Registry
+	deps         *blobcache.Cache
 
 	activeTasks  int64
 	totalTasks   int64
@@ -94,7 +120,46 @@ func New(cfg Config) *Server {
 		capabilities: caps,
 		executor:     mgr,
 		builders:     cfg.Builders,
+		deps:         newDepsCache(cfg),
 	}
+}
+
+func newDepsCache(cfg Config) *blobcache.Cache {
+	dir := cfg.DepsCacheDir
+	if dir == "" {
+		dir = filepath.Join(os.TempDir(), "hybridgrid-deps")
+	}
+	c, err := blobcache.New(blobcache.Config{Dir: dir, MaxTotalBytes: cfg.DepsCacheMaxBytes})
+	if err != nil {
+		log.Warn().Err(err).Str("dir", dir).Msg("Dependency layer cache disabled; builds needing node_modules will fail")
+		return nil
+	}
+	return c
+}
+
+// resolveDeps stores the request's dependency layer when it carries
+// one and returns an opener for it. A layer named only by hash that is
+// not cached here yields FailedPrecondition, which the coordinator
+// answers by resending the request with the layer attached.
+func (s *Server) resolveDeps(req *pb.BuildRequest) (func() (io.ReadCloser, error), error) {
+	hash := req.GetDepsHash()
+	if hash == "" {
+		return nil, nil
+	}
+	if s.deps == nil {
+		return nil, status.Error(codes.Unavailable, "dependency layer cache unavailable on this worker")
+	}
+	if len(req.GetDepsArchive()) > 0 {
+		if err := s.deps.Put(hash, bytes.NewReader(req.GetDepsArchive())); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to store dependency layer: %v", err)
+		}
+	} else if !s.deps.Has(hash) {
+		return nil, status.Error(codes.FailedPrecondition, depslayer.MissingMessage)
+	}
+	return func() (io.ReadCloser, error) {
+		f, _, err := s.deps.Open(hash)
+		return f, err
+	}, nil
 }
 
 // Capabilities returns the worker's capabilities.
@@ -118,7 +183,7 @@ func (s *Server) Start() error {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
 
-	var opts []grpc.ServerOption
+	opts := messageSizeOptions()
 
 	// Add TLS credentials if configured
 	if s.config.TLS.Enabled {
@@ -299,6 +364,7 @@ func (s *Server) Build(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResp
 
 	var flutterConfig *pb.FlutterConfig
 	var unityConfig *pb.UnityConfig
+	var nodeConfig *pb.NodeConfig
 	switch req.BuildType {
 	case pb.BuildType_BUILD_TYPE_FLUTTER:
 		flutterConfig = req.GetFlutterConfig()
@@ -310,8 +376,18 @@ func (s *Server) Build(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResp
 		if unityConfig == nil {
 			return nil, status.Error(codes.InvalidArgument, "unity_config required")
 		}
+	case pb.BuildType_BUILD_TYPE_NODEJS:
+		nodeConfig = req.GetNodeConfig()
+		if nodeConfig == nil || nodeConfig.GetTscProject() == "" {
+			return nil, status.Error(codes.InvalidArgument, "node_config.tsc_project required")
+		}
 	default:
 		return nil, status.Error(codes.Unimplemented, "use Compile for compilation tasks")
+	}
+
+	openDeps, err := s.resolveDeps(req)
+	if err != nil {
+		return nil, err
 	}
 
 	active := atomic.AddInt64(&s.activeTasks, 1)
@@ -338,6 +414,8 @@ func (s *Server) Build(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResp
 		TargetPlatform: req.TargetPlatform,
 		FlutterConfig:  flutterConfig,
 		UnityConfig:    unityConfig,
+		NodeConfig:     nodeConfig,
+		OpenDeps:       openDeps,
 		SourceArchive:  req.SourceArchive,
 		TimeoutSeconds: req.TimeoutSeconds,
 		Timeout:        timeout,

@@ -37,6 +37,10 @@ func (s *Server) dispatchBuild(ctx context.Context, req *pb.BuildRequest, buildI
 		return s.handleUnityBuild(ctx, req, buildID)
 	}
 
+	if req.GetNodeConfig() != nil {
+		return s.handleTscBuild(ctx, req, buildID)
+	}
+
 	return &pb.BuildResponse{
 		Status:   pb.TaskStatus_STATUS_FAILED,
 		ExitCode: 1,

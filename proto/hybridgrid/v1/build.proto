@@ -102,6 +102,10 @@ message NodeConfig {
   string package_manager = 2;       // npm, yarn, pnpm
   string build_script = 3;          // e.g., "build", "build:prod"
   map<string, string> env_vars = 4;
+  // TypeScript project to type-check and emit with `tsc -p`: the path of
+  // its tsconfig.json (or its directory) relative to the source archive
+  // root. Used by `hgbuild tsc -b`, which sends one task per project.
+  string tsc_project = 5;
 }
 
 // CustomConfig configures a plugin-builder build: everything the
@@ -261,6 +265,14 @@ message BuildRequest {
   string docker_image = 20;         // Override default image
   int32 timeout_seconds = 21;       // Override default timeout
   int32 priority = 22;              // Task priority (0-100)
+
+  // Dependency layer (see internal/depslayer): installed dependencies
+  // such as node_modules, gzip-compressed tar, shipped separately from
+  // the source so each machine receives it once. deps_hash names it;
+  // deps_archive carries it only when the receiver reported it missing
+  // (gRPC FailedPrecondition) or is known not to have it.
+  string deps_hash = 23;
+  bytes deps_archive = 24;
 }
 
 message ArtifactInfo {

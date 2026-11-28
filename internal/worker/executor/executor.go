@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"io"
 	"runtime"
 	"strings"
 	"time"
@@ -53,6 +54,12 @@ type Request struct {
 	TargetPlatform pb.TargetPlatform // Target platform (e.g., PLATFORM_ANDROID)
 	BuildType      pb.BuildType      // Build type (e.g., BUILD_TYPE_FLUTTER)
 	TimeoutSeconds int32             // Timeout in seconds for Flutter builds
+
+	// TypeScript project builds (TscExecutor).
+	NodeConfig *pb.NodeConfig
+	// OpenDeps opens the request's dependency layer (node_modules), or
+	// is nil when the request has none.
+	OpenDeps func() (io.ReadCloser, error)
 }
 
 // Executor defines the interface for compilation executors.
@@ -74,6 +81,7 @@ type Manager struct {
 	msvc       Executor
 	flutter    Executor
 	unity      Executor
+	tsc        Executor
 	nativeArch pb.Architecture
 }
 
@@ -108,6 +116,7 @@ func NewManager(nativeArch pb.Architecture, dockerAvailable bool, dockerImages m
 	// Initialize Flutter executor
 	m.flutter = NewFlutterExecutor()
 	m.unity = NewUnityExecutor()
+	m.tsc = NewTscExecutor()
 
 	return m
 }
@@ -156,6 +165,10 @@ func (m *Manager) SelectForRequest(req *Request) Executor {
 
 	if req.BuildType == pb.BuildType_BUILD_TYPE_UNITY {
 		return m.unity
+	}
+
+	if req.BuildType == pb.BuildType_BUILD_TYPE_NODEJS {
+		return m.tsc
 	}
 
 	// If client OS is set and differs from this worker's OS,
