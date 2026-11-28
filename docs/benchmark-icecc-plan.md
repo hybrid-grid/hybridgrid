@@ -66,7 +66,7 @@ scripts/analyze_rigorous.py                    BASELINES → suy ra từ dữ li
 | CPU | **≥ 6 lõi rảnh** — cụm chiếm 5.25 (workers 4.0 + builder 1.0 + coordinator 0.25) |
 | RAM | ≥ 8 GB cấp cho Docker |
 | Đĩa | ≥ 20 GB (source CPython + layer Docker + cache) |
-| Go | 1.25.x |
+| Go | 1.26+ (CI uses 1.27.x) |
 | Python | có `pandas`, `numpy`, `scipy`, `matplotlib` |
 
 **Máy phải rảnh.** Nhiễu run-to-run là mối đe dọa nội tại số một của thí nghiệm này

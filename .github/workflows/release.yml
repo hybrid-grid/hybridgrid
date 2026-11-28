@@ -14,7 +14,7 @@ permissions:
   id-token: write
 
 env:
-  # Must satisfy go.mod (>=1.25.0); mirrors ci.yml's GO_VERSION.
+  # Must satisfy go.mod (>=1.26.0); tracks ci.yml's GO_VERSION.
   GO_VERSION: "1.27.2"
 
 jobs:
