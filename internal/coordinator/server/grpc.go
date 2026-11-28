@@ -11,6 +11,7 @@ import (
 	"net"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
+	"github.com/h3nr1-d14z/hybridgrid/internal/artifacts"
 	"github.com/h3nr1-d14z/hybridgrid/internal/cache"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/registry"
 	"github.com/h3nr1-d14z/hybridgrid/internal/coordinator/resilience"
@@ -707,6 +709,25 @@ type TaskEvent struct {
 	ExitCode      int32
 	FromCache     bool
 	ErrorMessage  string
+	// SourceFile and Command identify a C/C++ compile for humans: the
+	// client-sent base file name and the invocation forwarded to the
+	// worker. Both are empty for Flutter/Unity tasks.
+	SourceFile string
+	Command    string
+}
+
+// maxEventCommandLen bounds TaskEvent.Command so a pathological
+// argument list cannot bloat telemetry retention or webhook payloads.
+const maxEventCommandLen = 2048
+
+// compileCommand renders the forwarded compiler invocation for display.
+func compileCommand(req *pb.CompileRequest) string {
+	cmd := strings.TrimSpace(req.GetCompiler() + " " + strings.Join(req.GetCompilerArgs(), " "))
+	if len(cmd) > maxEventCommandLen {
+		// Drop a rune split by the byte cut so the result stays valid UTF-8.
+		cmd = strings.ToValidUTF8(cmd[:maxEventCommandLen], "") + "…"
+	}
+	return cmd
 }
 
 // EventNotifier is called when task events occur.
@@ -727,6 +748,7 @@ type Server struct {
 	circuitManager  *resilience.CircuitManager
 	eventNotifier   EventNotifier
 	telemetry       *telemetry.Service
+	artifacts       *artifacts.Store
 	workerConns     *connPool
 	taskLogger      *TaskLogger
 	console         *consoleStore
@@ -1295,6 +1317,8 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 				Status:      "running",
 				WorkerID:    worker.ID,
 				StartedAtMs: taskStartTime.UnixMilli(),
+				SourceFile:  req.GetSourceFilename(),
+				Command:     compileCommand(req),
 			})
 		}
 
@@ -1506,6 +1530,8 @@ func (s *Server) Compile(ctx context.Context, req *pb.CompileRequest) (*pb.Compi
 			// queues).
 			QueueTimeMs:   queueTime.Milliseconds(),
 			CompileTimeMs: resp.GetCompilationTimeMs(),
+			SourceFile:    req.GetSourceFilename(),
+			Command:       compileCommand(req),
 		}
 		if success {
 			event.Status = "completed"
@@ -1579,6 +1605,17 @@ func (s *Server) Build(ctx context.Context, req *pb.BuildRequest) (*pb.BuildResp
 	if req.TaskId == "" {
 		return nil, status.Error(codes.InvalidArgument, "task_id required")
 	}
+	resp, err := s.dispatchBuild(ctx, req, buildID)
+	if err == nil {
+		// Successful remote builds (fresh or served from the builder cache)
+		// keep their outputs for download from the dashboard.
+		s.retainBuildArtifacts(buildID, buildKind(req), resp)
+	}
+	return resp, err
+}
+
+// dispatchBuild routes a build request to its build-type handler.
+func (s *Server) dispatchBuild(ctx context.Context, req *pb.BuildRequest, buildID string) (*pb.BuildResponse, error) {
 
 	if req.CustomBuilder != "" {
 		return s.handleCustomBuild(ctx, req, buildID)

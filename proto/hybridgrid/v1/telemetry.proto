@@ -91,6 +91,12 @@ message TelemetryTask {
   int32 exit_code = 11;
   bool from_cache = 12;
   string error_message = 13;
+  // Base name of the compiled source (e.g. "main.c"); empty for
+  // non-C/C++ tasks and for clients that did not send it.
+  string source_file = 14;
+  // Compiler and arguments the coordinator forwarded to the worker
+  // (the remote invocation, not the client's original command line).
+  string command = 15;
 }
 
 // Aggregate view of one logical build over its RETAINED task set.
@@ -217,4 +223,49 @@ service TelemetryService {
   // Live event stream: replays recent events on connect, then
   // pushes new ones until the client disconnects.
   rpc StreamEvents(StreamTelemetryEventsRequest) returns (stream TelemetryEvent);
+
+  // Stored outputs of one build, newest first (empty when none).
+  // UNAVAILABLE when the coordinator runs without an artifact store.
+  rpc ListArtifacts(ListTelemetryArtifactsRequest) returns (ListTelemetryArtifactsResponse);
+
+  // One stored artifact, streamed: the first chunk carries `artifact`,
+  // every chunk may carry data. NOT_FOUND when unknown.
+  rpc DownloadArtifact(DownloadTelemetryArtifactRequest) returns (stream TelemetryArtifactChunk);
+}
+
+message TelemetryArtifactFile {
+  string path = 1;
+  int64 size_bytes = 2;
+}
+
+message TelemetryArtifact {
+  string build_id = 1;
+  string name = 2;
+  int64 size_bytes = 3;
+  string sha256 = 4;
+  int64 created_at_ms = 5;
+  // "client" (uploaded by hgbuild) or "worker" (a remote builder's output).
+  string source = 6;
+  // Entries inside an archive artifact, for display.
+  repeated TelemetryArtifactFile files = 7;
+}
+
+message ListTelemetryArtifactsRequest {
+  string auth_token = 1;
+  string build_id = 2;
+}
+
+message ListTelemetryArtifactsResponse {
+  repeated TelemetryArtifact artifacts = 1;
+}
+
+message DownloadTelemetryArtifactRequest {
+  string auth_token = 1;
+  string build_id = 2;
+  string name = 3;
+}
+
+message TelemetryArtifactChunk {
+  TelemetryArtifact artifact = 1;
+  bytes data = 2;
 }

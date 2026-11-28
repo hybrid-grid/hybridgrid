@@ -82,6 +82,8 @@ type TaskInfo struct {
 	ExitCode      int32  `json:"exit_code,omitempty"`
 	FromCache     bool   `json:"from_cache"`
 	ErrorMessage  string `json:"error_message,omitempty"`
+	SourceFile    string `json:"source_file,omitempty"`
+	Command       string `json:"command,omitempty"`
 }
 
 // BuildInfo represents an aggregate logical build. All counts

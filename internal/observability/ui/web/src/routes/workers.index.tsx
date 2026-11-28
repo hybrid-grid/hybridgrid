@@ -8,13 +8,18 @@ import { Panel } from '@/components/Panel'
 import { StatStrip, type StatCell } from '@/components/StatStrip'
 import { CircuitBadge } from '@/components/StatusBadge'
 import { WorkerHeartbeat } from '@/components/WorkerHeartbeat'
+import { WorkerFlow } from '@/components/WorkerFlow'
+import { WorkerMachine } from '@/components/WorkerMachine'
 import { useNow } from '@/hooks/useNow'
+import { mergeLiveTasks } from '@/lib/dispatch'
 import { useT, useRelativeTime } from '@/lib/i18n'
 import { fleetCapacity } from '@/lib/metrics'
-import { useTasks, useWorkers } from '@/lib/queries'
+import { useStats, useTasks, useWorkers } from '@/lib/queries'
 import { normalizeStatus } from '@/lib/status'
 import type { TaskInfo, WorkerInfo } from '@/lib/types'
+import { buildTopology, withLiveActivity } from '@/lib/topology'
 import { cn, formatBytes, formatPercent } from '@/lib/utils'
+import { useRealtimeStore } from '@/store/useRealtimeStore'
 
 export const Route = createFileRoute('/workers/')({
   component: Workers,
@@ -24,25 +29,56 @@ const TASK_WINDOW = 200
 
 function Workers() {
   const t = useT()
-  const now = useNow(1000)
   const { data, isLoading } = useWorkers()
   const { data: tasksData } = useTasks(TASK_WINDOW)
-  const workers = useMemo(() => data?.workers ?? [], [data])
+  const { data: stats } = useStats()
+  const events = useRealtimeStore((state) => state.events)
+  const registry = useMemo(() => data?.workers ?? [], [data])
+
+  // Polled recent tasks plus live WebSocket frames, so a dispatch shows up
+  // on the map the moment it happens.
+  const liveTasks = useMemo(
+    () => mergeLiveTasks(tasksData?.tasks ?? [], events.map((event) => event.message)),
+    [tasksData, events],
+  )
+  // One source for "busy": the strip, the cards and the map all count live tasks.
+  const workers = useMemo(() => withLiveActivity(registry, liveTasks), [registry, liveTasks])
+  const topology = useMemo(() => buildTopology(workers, liveTasks), [workers, liveTasks])
+  const now = useNow(topology.running > 0 ? 250 : 1000)
 
   const runningByWorker = useMemo(() => {
     const map = new Map<string, TaskInfo[]>()
-    for (const task of tasksData?.tasks ?? []) {
+    for (const task of liveTasks) {
       if (!task.worker_id || normalizeStatus(task.status) !== 'running') continue
       map.set(task.worker_id, [...(map.get(task.worker_id) ?? []), task])
     }
     return map
-  }, [tasksData])
+  }, [liveTasks])
 
   return (
     <div className="flex flex-col gap-4">
       <PageHeader eyebrow={t('workers.eyebrow')} title={t('workers.title')} actions={<AddWorkerDialog />} />
 
       {workers.length > 0 && <StatStrip cells={fleetCells(t, workers)} />}
+
+      {workers.length > 0 && (
+        <Panel
+          title={t('workers.flowTitle')}
+          eyebrow={topology.running > 0 ? t('workers.flowLive') : t('workers.flowIdle')}
+          action={
+            topology.running > 0 && (
+              <span className="flex items-center gap-1.5 rounded-full border border-[color-mix(in_oklch,var(--color-status-running)_35%,transparent)] px-2 py-0.5 text-[11px] font-medium text-(--color-status-running)">
+                <span className="h-1.5 w-1.5 rounded-full bg-(--color-status-running) animate-(--animate-heartbeat)" />
+                {t('workers.flowRunning', { n: topology.running })}
+              </span>
+            )
+          }
+          padded={false}
+          className="overflow-hidden"
+        >
+          <WorkerFlow topology={topology} queued={stats?.queued_tasks ?? 0} now={now} />
+        </Panel>
+      )}
 
       {isLoading && <div className="text-[12px] text-(--color-ink-muted)">{t('workers.loading')}</div>}
 
@@ -72,7 +108,7 @@ function fleetCells(t: ReturnType<typeof useT>, workers: WorkerInfo[]): StatCell
     {
       label: t('workers.summaryHealthy'),
       value: `${healthy}/${workers.length}`,
-      color: healthy < workers.length ? 'var(--color-status-failed)' : 'var(--color-signal)',
+      color: healthy < workers.length ? 'var(--color-status-failed)' : 'var(--color-status-success)',
     },
     {
       label: t('workers.summaryCapacity'),
@@ -97,13 +133,24 @@ function WorkerCard({ worker, running, now }: WorkerCardProps) {
   const capabilities = workerCapabilities(worker)
 
   return (
-    <Panel padded={false} className={cn('flex flex-col', !worker.healthy && 'border-[color-mix(in_oklch,var(--color-status-failed)_35%,transparent)]')}>
+    <Panel
+      padded={false}
+      className={cn('flex flex-col overflow-hidden', !worker.healthy && 'border-[color-mix(in_oklch,var(--color-status-failed)_35%,transparent)]')}
+    >
+      <Link
+        to="/workers/$workerId"
+        params={{ workerId: worker.id }}
+        aria-label={worker.host || worker.id}
+        className="block border-b border-(--color-hairline) transition-[filter] hover:brightness-[0.98]"
+      >
+        <WorkerMachine worker={worker} />
+      </Link>
       <div className="flex items-start justify-between gap-3 px-4 pb-2 pt-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span
               className="h-2 w-2 shrink-0 rounded-full"
-              style={{ backgroundColor: worker.healthy ? 'var(--color-signal)' : 'var(--color-status-failed)' }}
+              style={{ backgroundColor: worker.healthy ? 'var(--color-status-success)' : 'var(--color-status-failed)' }}
               title={worker.healthy ? t('workers.healthy') : t('workers.unhealthy')}
             />
             <Link
@@ -117,9 +164,6 @@ function WorkerCard({ worker, running, now }: WorkerCardProps) {
           {worker.host && worker.host !== worker.id && (
             <div className="truncate pl-4 font-mono text-[10px] text-(--color-ink-faint)">{worker.id}</div>
           )}
-          <div className="pl-4 text-[11px] text-(--color-ink-muted)">
-            {worker.os} · {worker.architecture}
-          </div>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           <CircuitBadge state={worker.circuit_state} className="px-0" />

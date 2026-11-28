@@ -78,6 +78,10 @@ export interface TaskInfo {
   exit_code?: number
   from_cache: boolean
   error_message?: string
+  /** Base name of the compiled source, e.g. "main.c" (C/C++ tasks only). */
+  source_file?: string
+  /** Compiler invocation the coordinator forwarded to the worker. */
+  command?: string
 }
 
 export interface BuildInfo {
@@ -94,6 +98,28 @@ export interface BuildInfo {
   truncated: boolean
   scheduler?: string
   scheduler_params?: string
+}
+
+export interface ArtifactFile {
+  path: string
+  size_bytes: number
+}
+
+/** A stored build output (see internal/artifacts). */
+export interface Artifact {
+  build_id: string
+  name: string
+  size_bytes: number
+  sha256: string
+  created_at_ms: number
+  /** "client": uploaded by hgbuild; "worker": a remote builder's output archive. */
+  source: 'client' | 'worker' | string
+  files: ArtifactFile[]
+}
+
+export interface ArtifactsResponse {
+  build_id: string
+  artifacts: Artifact[]
 }
 
 export interface BuildDetail {

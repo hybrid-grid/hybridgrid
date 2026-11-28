@@ -92,6 +92,8 @@ func taskFromProto(t *pb.TelemetryTask) *TaskInfo {
 		ExitCode:      t.GetExitCode(),
 		FromCache:     t.GetFromCache(),
 		ErrorMessage:  t.GetErrorMessage(),
+		SourceFile:    t.GetSourceFile(),
+		Command:       t.GetCommand(),
 	}
 }
 

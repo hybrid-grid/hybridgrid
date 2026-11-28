@@ -26,7 +26,7 @@ function matchesStatus(task: TaskInfo, status: TaskStatusFilter): boolean {
 function matchesQuery(task: TaskInfo, q: string): boolean {
   const needle = q.trim().toLowerCase()
   if (!needle) return true
-  return [task.id, task.build_id, task.worker_id, task.error_message ?? ''].some((field) =>
+  return [task.source_file ?? '', task.id, task.build_id, task.worker_id, task.error_message ?? '', task.command ?? ''].some((field) =>
     field.toLowerCase().includes(needle),
   )
 }

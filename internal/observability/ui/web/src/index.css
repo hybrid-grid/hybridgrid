@@ -1,65 +1,83 @@
 @import "tailwindcss";
-@import "@fontsource/jetbrains-mono/400.css";
-@import "@fontsource/jetbrains-mono/500.css";
-@import "@fontsource/jetbrains-mono/600.css";
+@import "@fontsource-variable/inter";
 
 /*
- * Hybrid-Grid control-room theme.
+ * Hybrid-Grid dashboard theme, following the Paperclip design language:
+ * a neutral (zero-chroma) shadcn palette, Inter for UI text, Paper Mono
+ * for machine values, one near-black primary for every interactive
+ * accent, and color reserved for status. Light is the default; dark is
+ * the same system re-lit, selected via html[data-theme='dark'].
  *
- * Domain: a compile-farm operations console, not a SaaS product. The
- * palette borrows from rack telemetry (LED status colors), oscilloscope
- * traces (the phosphor-green signal color), and the codebase's own
- * vocabulary (circuit breaker CLOSED/HALF_OPEN/OPEN). Dark-only: this
- * surface is read by an engineer debugging a stuck build at 2am, not
- * browsed in daylight.
+ * Token NAMES are the dashboard's own (canvas / surface / ink / signal /
+ * status-*) so components stay untouched; only values follow Paperclip.
+ * "signal" is the interactive accent (nav, links, primary button,
+ * selection) — it is deliberately neutral. "Healthy / good" states use
+ * --color-status-success, never --color-signal.
  */
+
+/* Paper Mono v1.000, unmodified, SIL OFL 1.1 (see assets/fonts/PaperMono-OFL.txt). */
+@font-face {
+  font-family: "Paper Mono";
+  src: url("./assets/fonts/PaperMono-Variable.woff2") format("woff2");
+  font-display: swap;
+  font-style: normal;
+  font-weight: 100 800;
+}
+
 @theme {
   --font-sans:
-    ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Paper Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
-  /* Canvas: near-black with a cool blue cast, like a rack monitor. */
-  --color-canvas: oklch(0.16 0.012 255);
-  --color-canvas-raised: oklch(0.19 0.013 255);
-  --color-canvas-overlay: oklch(0.23 0.014 255);
-  --color-surface: oklch(0.205 0.013 255);
-  --color-surface-inset: oklch(0.13 0.011 255);
+  /* Light (default). Values mirror Paperclip's :root semantic tokens. */
+  --color-canvas: oklch(1 0 0);
+  --color-canvas-raised: oklch(0.97 0 0);
+  --color-canvas-overlay: oklch(1 0 0);
+  --color-surface: oklch(1 0 0);
+  --color-surface-inset: oklch(0.97 0 0);
 
-  --color-hairline: oklch(1 0 0 / 8%);
-  --color-hairline-strong: oklch(1 0 0 / 14%);
-  --color-focus-ring: oklch(0.82 0.16 165);
+  --color-sidebar: oklch(0.985 0 0);
+  --color-sidebar-accent: oklch(0.93 0 0);
 
-  /* Ink: cool off-white, never pure white (reads as clinical). */
-  --color-ink: oklch(0.94 0.006 255);
-  --color-ink-secondary: oklch(0.78 0.012 255);
-  --color-ink-muted: oklch(0.6 0.012 255);
-  --color-ink-faint: oklch(0.44 0.012 255);
+  --color-hairline: oklch(0.922 0 0);
+  --color-hairline-strong: oklch(0.87 0 0);
+  --color-focus-ring: oklch(0.708 0 0);
+
+  --color-ink: oklch(0.145 0 0);
+  --color-ink-secondary: oklch(0.3 0 0);
+  --color-ink-muted: oklch(0.556 0 0);
+  --color-ink-faint: oklch(0.62 0 0);
+
+  /* Interactive accent = Paperclip --primary (near-black in light). */
+  --color-signal: oklch(0.205 0 0);
+  --color-signal-strong: oklch(0.145 0 0);
+  --color-signal-dim: oklch(0.205 0 0 / 7%);
+  --color-on-signal: oklch(0.985 0 0);
 
   /*
-   * Signal: phosphor green, the oscilloscope/heartbeat-trace color and
-   * the interface's one interactive accent (nav, links, primary
-   * actions, focus). Everything else is structure.
+   * Status: Paperclip's brand status hues (gray inert, blue liveness,
+   * amber queued/warning, green done, red blocked), one step darker
+   * where light-mode text contrast needs it.
    */
-  --color-signal: oklch(0.82 0.16 165);
-  --color-signal-strong: oklch(0.88 0.18 165);
-  --color-signal-dim: oklch(0.82 0.16 165 / 14%);
+  --color-status-success: #16a34a;
+  --color-status-running: #2563eb;
+  --color-status-queued: #8b9196;
+  --color-status-failed: #dc2626;
+  --color-status-timeout: #d97706;
 
-  /* Circuit-breaker semantics: the codebase's own three states. */
-  --color-circuit-closed: oklch(0.82 0.16 165);
-  --color-circuit-half-open: oklch(0.8 0.16 85);
-  --color-circuit-open: oklch(0.7 0.19 25);
+  /* Circuit-breaker states reuse the status vocabulary. */
+  --color-circuit-closed: var(--color-status-success);
+  --color-circuit-half-open: var(--color-status-timeout);
+  --color-circuit-open: var(--color-status-failed);
 
-  /* Task/build status. */
-  --color-status-success: oklch(0.82 0.16 165);
-  --color-status-running: oklch(0.75 0.13 230);
-  --color-status-queued: oklch(0.7 0.02 255);
-  --color-status-failed: oklch(0.7 0.19 25);
-  --color-status-timeout: oklch(0.8 0.16 85);
-
+  /* Paperclip radius ladder anchored on --radius = 8px. */
   --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  --radius-sm: 5px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  --shadow-popover: 0 4px 12px -2px oklch(0 0 0 / 10%), 0 2px 4px -2px oklch(0 0 0 / 6%);
+  --shadow-dialog: 0 20px 48px -12px oklch(0 0 0 / 22%);
 
   --spacing-panel: 16px;
   --spacing-panel-sm: 12px;
@@ -90,65 +108,84 @@
 }
 
 /*
- * Series: worker identity in multi-worker charts. Same lightness as
- * the status colors so no worker reads as "louder"; red is withheld
- * because it already means failure everywhere else. Declared outside
- * @theme because only inline styles read them, and Tailwind v4 drops
- * theme variables no utility class references.
+ * Series: worker identity in multi-worker charts. Paperclip-family hues
+ * at matched weight so no worker reads as "louder"; red is withheld
+ * because it already means failure. Declared outside @theme because
+ * only inline styles read them, and Tailwind v4 drops theme variables
+ * no utility class references.
  */
 :root {
-  --color-series-1: oklch(0.82 0.16 165);
-  --color-series-2: oklch(0.75 0.13 230);
-  --color-series-3: oklch(0.8 0.15 85);
-  --color-series-4: oklch(0.74 0.14 300);
-  --color-series-5: oklch(0.8 0.12 195);
-  --color-series-6: oklch(0.76 0.14 50);
-}
+  --color-series-1: #2563eb;
+  --color-series-2: #16a34a;
+  --color-series-3: #d97706;
+  --color-series-4: #7c3aed;
+  --color-series-5: #0891b2;
+  --color-series-6: #db2777;
 
-/*
- * Light mode: the same control-room system, re-lit for daytime use
- * (reviewing a build over someone's shoulder, a shared office
- * monitor). Same hues throughout — only lightness/chroma shift — so
- * the "one signal color" language still reads as the same product.
- */
-:root[data-theme='light'] {
-  --color-canvas: oklch(0.98 0.004 255);
-  --color-canvas-raised: oklch(0.955 0.006 255);
-  --color-canvas-overlay: oklch(1 0 0);
-  --color-surface: oklch(1 0 0);
-  --color-surface-inset: oklch(0.94 0.007 255);
-
-  --color-hairline: oklch(0 0 0 / 8%);
-  --color-hairline-strong: oklch(0 0 0 / 15%);
-  --color-focus-ring: oklch(0.5 0.14 165);
-
-  --color-ink: oklch(0.2 0.012 255);
-  --color-ink-secondary: oklch(0.34 0.014 255);
-  --color-ink-muted: oklch(0.5 0.012 255);
-  --color-ink-faint: oklch(0.62 0.012 255);
-
-  --color-signal: oklch(0.5 0.14 165);
-  --color-signal-strong: oklch(0.42 0.15 165);
-  --color-signal-dim: oklch(0.5 0.14 165 / 12%);
-
-  --color-circuit-closed: oklch(0.5 0.14 165);
-  --color-circuit-half-open: oklch(0.62 0.15 85);
-  --color-circuit-open: oklch(0.55 0.19 25);
-
-  --color-status-success: oklch(0.5 0.14 165);
-  --color-status-running: oklch(0.5 0.13 230);
-  --color-status-queued: oklch(0.55 0.02 255);
-  --color-status-failed: oklch(0.55 0.19 25);
-  --color-status-timeout: oklch(0.62 0.15 85);
-
-  --color-series-1: oklch(0.5 0.14 165);
-  --color-series-2: oklch(0.5 0.13 230);
-  --color-series-3: oklch(0.6 0.14 85);
-  --color-series-4: oklch(0.52 0.15 300);
-  --color-series-5: oklch(0.55 0.11 195);
-  --color-series-6: oklch(0.58 0.15 50);
+  /* Machine illustrations (Workers page): body, edges, screen glass. */
+  --color-machine-body: oklch(0.985 0 0);
+  --color-machine-deck: oklch(0.94 0 0);
+  --color-machine-edge: oklch(0.8 0 0);
+  --color-machine-screen: oklch(0.2 0 0);
+  --color-machine-screen-cell: oklch(1 0 0 / 11%);
+  --color-machine-screen-ink: oklch(1 0 0 / 62%);
+  --color-machine-led-off: oklch(0.86 0 0);
+  --color-machine-stage: oklch(0.975 0 0);
 
   color-scheme: light;
+}
+
+/* Dark: Paperclip's .dark semantic tokens. */
+:root[data-theme='dark'] {
+  --color-canvas: oklch(0.205 0 0);
+  --color-canvas-raised: oklch(0.269 0 0);
+  --color-canvas-overlay: oklch(0.24 0 0);
+  --color-surface: oklch(0.205 0 0);
+  --color-surface-inset: oklch(0.165 0 0);
+
+  --color-sidebar: oklch(0.18 0 0);
+  --color-sidebar-accent: oklch(0.3 0 0);
+
+  --color-hairline: oklch(1 0 0 / 10%);
+  --color-hairline-strong: oklch(1 0 0 / 16%);
+  --color-focus-ring: oklch(0.556 0 0);
+
+  --color-ink: oklch(0.985 0 0);
+  --color-ink-secondary: oklch(0.87 0 0);
+  --color-ink-muted: oklch(0.708 0 0);
+  --color-ink-faint: oklch(0.556 0 0);
+
+  --color-signal: oklch(0.922 0 0);
+  --color-signal-strong: oklch(0.985 0 0);
+  --color-signal-dim: oklch(1 0 0 / 10%);
+  --color-on-signal: oklch(0.205 0 0);
+
+  --color-status-success: #22c55e;
+  --color-status-running: #3b82f6;
+  --color-status-queued: #a8aeb2;
+  --color-status-failed: #ef4444;
+  --color-status-timeout: #f59e0b;
+
+  --color-series-1: #3b82f6;
+  --color-series-2: #22c55e;
+  --color-series-3: #f59e0b;
+  --color-series-4: #a78bfa;
+  --color-series-5: #22d3ee;
+  --color-series-6: #f472b6;
+
+  --color-machine-body: oklch(0.31 0 0);
+  --color-machine-deck: oklch(0.26 0 0);
+  --color-machine-edge: oklch(0.42 0 0);
+  --color-machine-screen: oklch(0.13 0 0);
+  --color-machine-screen-cell: oklch(1 0 0 / 9%);
+  --color-machine-screen-ink: oklch(1 0 0 / 55%);
+  --color-machine-led-off: oklch(0.4 0 0);
+  --color-machine-stage: oklch(0.185 0 0);
+
+  --shadow-popover: 0 8px 24px -8px oklch(0 0 0 / 55%);
+  --shadow-dialog: 0 20px 48px oklch(0 0 0 / 50%);
+
+  color-scheme: dark;
 }
 
 @layer base {
@@ -157,7 +194,6 @@
   }
 
   html {
-    color-scheme: dark;
     -webkit-font-smoothing: antialiased;
   }
 
@@ -165,8 +201,9 @@
     background-color: var(--color-canvas);
     color: var(--color-ink);
     font-family: var(--font-sans);
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.5;
+    font-feature-settings: "cv11", "ss01";
   }
 
   ::selection {
@@ -175,8 +212,8 @@
   }
 
   ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
   }
 
   ::-webkit-scrollbar-track {
@@ -186,12 +223,82 @@
   ::-webkit-scrollbar-thumb {
     background-color: var(--color-hairline-strong);
     border-radius: 999px;
-    border: 2px solid var(--color-canvas);
   }
 
   :focus-visible {
-    outline: 2px solid var(--color-focus-ring);
-    outline-offset: 2px;
+    outline: 1px solid var(--color-focus-ring);
+    outline-offset: 1px;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-focus-ring) 20%, transparent);
+  }
+}
+
+/* Workers page dispatch map (React Flow), re-skinned with dashboard tokens. */
+.worker-flow .react-flow,
+.worker-flow .react-flow.dark {
+  --xy-background-color: transparent;
+  --xy-background-pattern-color: var(--color-hairline-strong);
+  --xy-controls-button-background-color: var(--color-surface);
+  --xy-controls-button-background-color-hover: var(--color-canvas-raised);
+  --xy-controls-button-color: var(--color-ink-secondary);
+  --xy-controls-button-color-hover: var(--color-ink);
+  --xy-controls-button-border-color: var(--color-hairline);
+  --xy-controls-box-shadow: none;
+  --xy-attribution-background-color: transparent;
+}
+
+.worker-flow .react-flow__controls {
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.worker-flow .react-flow__attribution a {
+  color: var(--color-ink-faint);
+}
+
+/* Busy executor slots pulse in the machine drawings. */
+@keyframes machine-led {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.machine-led-busy {
+  animation: machine-led 1.6s ease-in-out infinite;
+}
+
+/* Build page: tasks travelling from the build to a busy worker. */
+@keyframes dispatch-flow {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+.dispatch-flow {
+  stroke-dasharray: 4 8;
+  animation: dispatch-flow 0.9s linear infinite;
+}
+
+@keyframes dispatch-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+}
+
+.dispatch-enter {
+  animation: dispatch-enter 0.35s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .machine-led-busy,
+  .dispatch-flow,
+  .dispatch-enter {
+    animation: none;
   }
 }
 

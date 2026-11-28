@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -194,4 +195,43 @@ func (c *Client) ReportCacheHit(ctx context.Context, hits int32) error {
 
 	_, err := c.client.ReportCacheHit(ctx, &pb.ReportCacheHitRequest{Hits: hits})
 	return err
+}
+
+// uploadChunkSize keeps each message well under gRPC's 4 MiB default.
+const uploadChunkSize = 256 << 10
+
+// UploadArtifact streams r to the coordinator as buildID/name. It uses
+// ctx as-is (no per-request timeout): a large binary on a slow link can
+// legitimately take longer than a compile.
+func (c *Client) UploadArtifact(ctx context.Context, buildID, name string, size int64, r io.Reader) (*pb.UploadArtifactResponse, error) {
+	stream, err := c.client.UploadArtifact(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open upload stream: %w", err)
+	}
+	buf := make([]byte, uploadChunkSize)
+	first := true
+	for {
+		n, readErr := r.Read(buf)
+		if n > 0 || first {
+			chunk := &pb.ArtifactChunk{Data: append([]byte(nil), buf[:n]...)}
+			if first {
+				chunk.BuildId, chunk.Name, chunk.SizeBytes, chunk.AuthToken = buildID, name, size, c.config.AuthToken
+				first = false
+			}
+			if err := stream.Send(chunk); err != nil {
+				// The server's reason (e.g. size limit) arrives on CloseAndRecv.
+				if _, recvErr := stream.CloseAndRecv(); recvErr != nil {
+					return nil, recvErr
+				}
+				return nil, fmt.Errorf("failed to send artifact chunk: %w", err)
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to read artifact: %w", readErr)
+		}
+	}
+	return stream.CloseAndRecv()
 }

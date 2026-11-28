@@ -10,7 +10,7 @@ const LABEL_KEY: Record<string, string> = {
 
 const COLOR: Record<string, string> = {
   connecting: 'var(--color-status-running)',
-  open: 'var(--color-signal)',
+  open: 'var(--color-status-success)',
   closed: 'var(--color-status-failed)',
 }
 
@@ -25,12 +25,15 @@ export function ConnectionStatus() {
       <span className="hidden font-mono text-[10px] text-(--color-ink-faint) sm:inline">
         {t('common.updated', { t: lastMessageAt ? formatClock(lastMessageAt) : t('common.never') })}
       </span>
-      <div className="flex items-center gap-1.5 rounded-full border border-(--color-hairline) px-2 py-1 text-[11px] font-medium text-(--color-ink-muted)">
+      <div
+        className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-(--color-hairline) px-2 py-1 text-[11px] font-medium text-(--color-ink-muted)"
+        title={t(LABEL_KEY[status])}
+      >
         <span
           className={cn('h-1.5 w-1.5 rounded-full', status === 'open' && 'animate-(--animate-heartbeat)')}
           style={{ backgroundColor: color }}
         />
-        {t(LABEL_KEY[status])}
+        <span className="hidden sm:inline">{t(LABEL_KEY[status])}</span>
       </div>
     </div>
   )

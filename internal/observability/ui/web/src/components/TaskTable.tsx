@@ -3,7 +3,7 @@ import { StatusDot } from '@/components/StatusBadge'
 import { useT } from '@/lib/i18n'
 import { normalizeStatus } from '@/lib/status'
 import type { TaskInfo } from '@/lib/types'
-import { cn, formatClock, formatDuration } from '@/lib/utils'
+import { cn, formatClock, formatDuration, taskLabel } from '@/lib/utils'
 
 interface TaskTableProps {
   tasks: TaskInfo[]
@@ -17,7 +17,8 @@ interface TaskTableProps {
 
 /**
  * The compile-unit table used by build detail, the Tasks page and the
- * worker page. Errors render inline under the task id, so a failing
+ * worker page. Rows lead with the source file (task id underneath);
+ * errors render inline below, so a failing
  * row explains itself without opening the console.
  */
 export function TaskTable({ tasks, selectedId, onSelect, showBuild = false, hideWorker = false }: TaskTableProps) {
@@ -150,11 +151,20 @@ function TaskRow({ task, selected, onSelect, showBuild, hideWorker }: TaskRowPro
 }
 
 function TaskIdCell({ task, selectable }: { task: TaskInfo; selectable: boolean }) {
-  const className = 'block max-w-full truncate text-left font-mono text-(--color-ink)'
+  const className = 'block max-w-full text-left font-mono text-(--color-ink)'
+  const title = task.command || task.id
+  const name = (
+    <>
+      <span className="block truncate">{taskLabel(task)}</span>
+      {task.source_file && (
+        <span className="block truncate text-[10px] text-(--color-ink-faint)">{task.id}</span>
+      )}
+    </>
+  )
   if (selectable) {
     return (
-      <button type="button" className={className} title={task.id}>
-        {task.id}
+      <button type="button" className={className} title={title}>
+        {name}
       </button>
     )
   }
@@ -165,9 +175,9 @@ function TaskIdCell({ task, selectable }: { task: TaskInfo; selectable: boolean 
         params={{ buildId: task.build_id }}
         search={{ task: task.id }}
         className={cn(className, 'hover:text-(--color-signal)')}
-        title={task.id}
+        title={title}
       >
-        {task.id}
+        {name}
       </Link>
     )
   }
@@ -176,9 +186,9 @@ function TaskIdCell({ task, selectable }: { task: TaskInfo; selectable: boolean 
       to="/tasks/$taskId/console"
       params={{ taskId: task.id }}
       className={cn(className, 'hover:text-(--color-signal)')}
-      title={task.id}
+      title={title}
     >
-      {task.id}
+      {name}
     </Link>
   )
 }

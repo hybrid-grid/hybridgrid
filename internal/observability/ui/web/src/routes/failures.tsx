@@ -9,6 +9,7 @@ import { groupFailures, isWorkerSpecific, type FailureGroup } from '@/lib/failur
 import { useT, useRelativeTime } from '@/lib/i18n'
 import { useTaskHistory, useWorkers } from '@/lib/queries'
 import type { WorkerInfo } from '@/lib/types'
+import { taskLabel } from '@/lib/utils'
 
 export const Route = createFileRoute('/failures')({
   component: FailuresPage,
@@ -144,11 +145,14 @@ function FailureCard({ group, workers }: { group: FailureGroup; workers: WorkerI
               params={{ buildId: group.sample.build_id }}
               search={{ task: group.sample.id }}
               className="font-mono text-(--color-ink-secondary) hover:text-(--color-signal)"
+              title={group.sample.id}
             >
-              {group.sample.id}
+              {taskLabel(group.sample)}
             </Link>
           ) : (
-            <span className="font-mono text-(--color-ink-secondary)">{group.sample.id}</span>
+            <span className="font-mono text-(--color-ink-secondary)" title={group.sample.id}>
+              {taskLabel(group.sample)}
+            </span>
           )}
         </span>
         <Button variant="ghost" size="sm" asChild>

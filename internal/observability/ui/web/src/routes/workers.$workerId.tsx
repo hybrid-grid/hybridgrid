@@ -7,6 +7,7 @@ import { Panel } from '@/components/Panel'
 import { StatStrip, type StatCell } from '@/components/StatStrip'
 import { CircuitBadge } from '@/components/StatusBadge'
 import { TaskTable } from '@/components/TaskTable'
+import { WorkerMachine } from '@/components/WorkerMachine'
 import { WorkerHeartbeat } from '@/components/WorkerHeartbeat'
 import { WorkerThroughputChart } from '@/components/WorkerThroughputChart'
 import { Button } from '@/components/ui/button'
@@ -59,6 +60,7 @@ function WorkerDetail() {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <Panel eyebrow={t('workerDetail.specsTitle')} title={<span className="font-mono text-[12px]">{workerId}</span>} padded={false}>
+          {worker && <WorkerMachine worker={worker} className="border-b border-(--color-hairline)" />}
           {worker ? <MachinePanel worker={worker} /> : <div className="p-4 text-(--color-ink-muted)">—</div>}
         </Panel>
         <Panel eyebrow={t('overview.workerFleetTitle')} className="xl:col-span-2">
@@ -109,7 +111,7 @@ function summaryCells(t: ReturnType<typeof useT>, tasks: TaskInfo[]): StatCell[]
     {
       label: t('workerDetail.summarySuccess'),
       value: formatPercent(stats.successRate, 1),
-      color: stats.failed > 0 ? 'var(--color-status-timeout)' : 'var(--color-signal)',
+      color: stats.failed > 0 ? 'var(--color-status-timeout)' : 'var(--color-status-success)',
       hint: stats.failed > 0 ? `${stats.failed} ${t('status.failed').toLowerCase()}` : undefined,
     },
     { label: t('workerDetail.summaryAvgCompile'), value: stats.avgCompileMs !== undefined ? formatDuration(stats.avgCompileMs) : '—' },

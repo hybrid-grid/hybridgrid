@@ -4,6 +4,9 @@ import (
 	"math"
 	"strings"
 	"testing"
+
+	coordserver "github.com/h3nr1-d14z/hybridgrid/internal/coordinator/server"
+	"github.com/h3nr1-d14z/hybridgrid/internal/telemetry"
 )
 
 func TestValidateDiscountFlags(t *testing.T) {
@@ -127,5 +130,24 @@ func TestValidateExperimentFlags(t *testing.T) {
 				t.Fatalf("validateExperimentFlags() = %v, want error containing %q", err, tt.wantError)
 			}
 		})
+	}
+}
+
+func TestTaskInfoFromEvent(t *testing.T) {
+	ev := &coordserver.TaskEvent{
+		ID: "t1", BuildType: "cpp", BuildID: "b1", Status: "completed", WorkerID: "w1",
+		StartedAtMs: 1, CompletedAtMs: 3, DurationMs: 2, QueueTimeMs: 4, CompileTimeMs: 5,
+		ExitCode: 7, FromCache: true, ErrorMessage: "boom",
+		SourceFile: "main.c", Command: "gcc -c",
+	}
+	got := taskInfoFromEvent(ev)
+	want := telemetry.TaskInfo{
+		ID: "t1", BuildType: "cpp", BuildID: "b1", Status: "completed", WorkerID: "w1",
+		StartedAtMs: 1, CompletedAtMs: 3, DurationMs: 2, QueueMs: 4, CompileMs: 5,
+		ExitCode: 7, FromCache: true, ErrorMessage: "boom",
+		SourceFile: "main.c", Command: "gcc -c",
+	}
+	if *got != want {
+		t.Fatalf("taskInfoFromEvent = %+v, want %+v", *got, want)
 	}
 }

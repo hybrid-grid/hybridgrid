@@ -37,7 +37,7 @@ function CachePage() {
         <Panel className="xl:col-span-2" eyebrow={t('cache.trendNote')} title={t('cache.trendTitle')}>
           <HitRateTrend samples={history} tall />
         </Panel>
-        <Panel eyebrow={t('cache.eyebrow')} title={t('cache.byTypeTitle')}>
+        <Panel title={t('cache.byTypeTitle')}>
           {stats ? <ByType stats={stats} /> : <div className="text-(--color-ink-muted)">—</div>}
         </Panel>
       </div>
@@ -148,7 +148,7 @@ function ShareChart({ shares }: { shares: BuildCacheShare[] }) {
               <span
                 role="tooltip"
                 className={cn(
-                  'pointer-events-none invisible absolute bottom-full z-20 mb-2 w-48 rounded-(--radius-md) border border-(--color-hairline-strong) bg-(--color-canvas-overlay) p-2.5 text-left opacity-0 shadow-[0_8px_24px_-8px_oklch(0_0_0/50%)] transition-opacity duration-150 group-hover:visible group-hover:opacity-100',
+                  'pointer-events-none invisible absolute bottom-full z-20 mb-2 w-48 rounded-(--radius-md) border border-(--color-hairline-strong) bg-(--color-canvas-overlay) p-2.5 text-left opacity-0 shadow-(--shadow-popover) transition-opacity duration-150 group-hover:visible group-hover:opacity-100',
                   i > shares.length / 2 ? 'right-0' : 'left-0',
                 )}
               >

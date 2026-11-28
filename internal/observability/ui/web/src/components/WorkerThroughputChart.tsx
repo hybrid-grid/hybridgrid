@@ -142,7 +142,7 @@ function Column({ start, end, total, heightPct, flip, segments }: ColumnProps) {
         <div
           role="tooltip"
           className={cn(
-            'pointer-events-none invisible absolute bottom-full z-20 mb-2 w-44 rounded-(--radius-md) border border-(--color-hairline-strong) bg-(--color-canvas-overlay) p-2.5 opacity-0 shadow-[0_8px_24px_-8px_oklch(0_0_0/50%)] transition-opacity duration-150 group-hover:visible group-hover:opacity-100',
+            'pointer-events-none invisible absolute bottom-full z-20 mb-2 w-44 rounded-(--radius-md) border border-(--color-hairline-strong) bg-(--color-canvas-overlay) p-2.5 opacity-0 shadow-(--shadow-popover) transition-opacity duration-150 group-hover:visible group-hover:opacity-100',
             flip ? 'right-0' : 'left-0',
           )}
         >

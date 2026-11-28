@@ -424,6 +424,27 @@ service BuildService {
 
   // Report client-side cache hit (for dashboard stats)
   rpc ReportCacheHit(ReportCacheHitRequest) returns (ReportCacheHitResponse);
+
+  // Store a build output (e.g. the linked binary `hgbuild make
+  // --artifact` produced) at the coordinator, so the dashboard can list
+  // and serve it. Streamed in chunks; the first chunk carries the header.
+  rpc UploadArtifact(stream ArtifactChunk) returns (UploadArtifactResponse);
+}
+
+// One piece of an artifact upload. Header fields are read from the first
+// chunk only; every chunk may carry data.
+message ArtifactChunk {
+  string build_id = 1;
+  string name = 2;                  // file name; reduced to its base name
+  int64 size_bytes = 3;             // declared total, informational
+  string auth_token = 4;            // required when the coordinator has a token
+  bytes data = 5;
+}
+
+message UploadArtifactResponse {
+  string name = 1;                  // stored (sanitized) name
+  int64 size_bytes = 2;
+  string sha256 = 3;
 }
 
 // Request to report client-side cache hit

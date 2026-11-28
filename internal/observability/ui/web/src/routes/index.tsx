@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { ArrowRight } from 'lucide-react'
 import { BuildDurationsChart } from '@/components/BuildDurationsChart'
@@ -12,6 +13,7 @@ import { CircuitBadge } from '@/components/StatusBadge'
 import { WorkerThroughputChart } from '@/components/WorkerThroughputChart'
 import { WorkerHeartbeat } from '@/components/WorkerHeartbeat'
 import { Button } from '@/components/ui/button'
+import { mergeLiveTasks } from '@/lib/dispatch'
 import { useT } from '@/lib/i18n'
 import { averageFinishedBuildMs, fleetCapacity, passRate } from '@/lib/metrics'
 import { useBuilds, useStats, useTasks, useWorkers } from '@/lib/queries'
@@ -23,7 +25,12 @@ export const Route = createFileRoute('/')({
   component: Overview,
 })
 
-const ACTIVITY_WINDOW = 200
+/**
+ * Recent tasks behind the activity view. A busy fleet runs hundreds of
+ * compiles per build (two concurrent builds here were 222 tasks), so a
+ * shallow window would cut the start of the latest burst off.
+ */
+const ACTIVITY_WINDOW = 1000
 const RECENT_BUILDS = 6
 
 function Overview() {
@@ -36,7 +43,12 @@ function Overview() {
   const clearEvents = useRealtimeStore((state) => state.clearEvents)
   const workers = workersData?.workers ?? []
   const builds = buildsData?.builds ?? []
-  const tasks = tasksData?.tasks ?? []
+  // Polled recent tasks plus live WebSocket frames, so the activity view
+  // moves the moment a compile is dispatched or finishes.
+  const tasks = useMemo(
+    () => mergeLiveTasks(tasksData?.tasks ?? [], events.map((event) => event.message)),
+    [tasksData, events],
+  )
 
   return (
     <div className="flex flex-col gap-4">
@@ -44,14 +56,13 @@ function Overview() {
 
       <StatStrip cells={overviewCells(t, stats, workers, builds)} />
 
-      <Panel eyebrow={t('overview.clusterActivityEyebrow')} title={t('overview.clusterActivityTitle')} padded={false}>
+      <Panel title={t('overview.clusterActivityTitle')} eyebrow={t('overview.clusterCaption')} padded={false}>
         <ClusterActivity tasks={tasks} workers={workers} />
       </Panel>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <Panel
           className="overflow-hidden xl:col-span-2"
-          eyebrow={t('overview.recentBuildsEyebrow')}
           title={t('overview.recentBuildsTitle')}
           action={
             <Button variant="ghost" size="sm" asChild>
@@ -73,13 +84,12 @@ function Overview() {
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <Panel
           className="xl:col-span-2"
-          eyebrow={t('overview.throughputEyebrow')}
           title={t('overview.throughputTitle')}
           padded={false}
         >
           <WorkerThroughputChart tasks={tasks} workers={workers} />
         </Panel>
-        <Panel eyebrow={t('overview.cacheStatsEyebrow')} title={t('overview.cacheStatsTitle')} padded={false}>
+        <Panel title={t('overview.cacheStatsTitle')} padded={false}>
           {stats ? <CacheStatsPanel stats={stats} /> : <div className="p-6 text-center text-(--color-ink-muted)">—</div>}
         </Panel>
       </div>
@@ -87,7 +97,6 @@ function Overview() {
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <Panel
           className="xl:col-span-2"
-          eyebrow={t('overview.workerFleetEyebrow')}
           title={t('overview.workerFleetTitle')}
           action={
             <Button variant="ghost" size="sm" asChild>
@@ -103,7 +112,6 @@ function Overview() {
         </Panel>
 
         <Panel
-          eyebrow={t('overview.activityEyebrow')}
           title={t('overview.eventLogTitle')}
           action={
             events.length > 0 && (
@@ -130,7 +138,7 @@ const RELIABILITY_WARN = 0.9
 
 function reliabilityColor(rate: number | undefined): string | undefined {
   if (rate === undefined) return undefined
-  if (rate >= RELIABILITY_GOOD) return 'var(--color-signal)'
+  if (rate >= RELIABILITY_GOOD) return 'var(--color-status-success)'
   if (rate >= RELIABILITY_WARN) return 'var(--color-status-timeout)'
   return 'var(--color-status-failed)'
 }

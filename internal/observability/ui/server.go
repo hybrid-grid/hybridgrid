@@ -59,6 +59,8 @@ type Client interface {
 	GetBuild(ctx context.Context, in *pb.GetTelemetryBuildRequest, opts ...grpc.CallOption) (*pb.GetTelemetryBuildResponse, error)
 	GetConsole(ctx context.Context, in *pb.GetTelemetryConsoleRequest, opts ...grpc.CallOption) (*pb.GetTelemetryConsoleResponse, error)
 	StreamEvents(ctx context.Context, in *pb.StreamTelemetryEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[pb.TelemetryEvent], error)
+	ListArtifacts(ctx context.Context, in *pb.ListTelemetryArtifactsRequest, opts ...grpc.CallOption) (*pb.ListTelemetryArtifactsResponse, error)
+	DownloadArtifact(ctx context.Context, in *pb.DownloadTelemetryArtifactRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[pb.TelemetryArtifactChunk], error)
 }
 
 // Config holds the standalone dashboard server's configuration.
@@ -147,6 +149,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/builds/{id}", s.handleBuildByID)
 	mux.HandleFunc("/api/v1/builds/{id}", s.handleBuildByID)
 	mux.HandleFunc("/api/v1/tasks/{id}/console", s.handleTaskConsole)
+	mux.HandleFunc("GET /api/v1/builds/{id}/artifacts", s.handleBuildArtifacts)
+	mux.HandleFunc("GET /api/v1/builds/{id}/artifacts/{name}", s.handleArtifactDownload)
 
 	mux.HandleFunc("/ws", s.handleWebSocket)
 

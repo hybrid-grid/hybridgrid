@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "github.com/h3nr1-d14z/hybridgrid/gen/go/hybridgrid/v1"
+	"github.com/h3nr1-d14z/hybridgrid/internal/artifacts"
 )
 
 // Service implements the gRPC TelemetryService over a Store and a
@@ -20,8 +21,9 @@ import (
 type Service struct {
 	pb.UnimplementedTelemetryServiceServer
 
-	store    *Store
-	provider StatsProvider
+	store     *Store
+	provider  StatsProvider
+	artifacts *artifacts.Store
 
 	Token string
 
@@ -37,40 +39,6 @@ func NewService(store *Store, provider StatsProvider) *Service {
 		provider: provider,
 		subs:     make(map[chan *pb.TelemetryEvent]struct{}),
 	}
-}
-
-// CreateEventNotifier creates task-event callbacks with the same
-// signatures the embedded dashboard's notifier uses, so the
-// coordinator can feed both from one hook. Timestamps are Unix
-// milliseconds.
-func (s *Service) CreateEventNotifier() (onStart func(id, buildID, buildType, status, workerID string, startedAtMs int64), onComplete func(id, buildID, buildType, status, workerID string, startedAtMs, completedAtMs, durationMs, queueMs, compileMs int64, exitCode int32, errorMsg string)) {
-	onStart = func(id, buildID, buildType, status, workerID string, startedAtMs int64) {
-		s.RecordAndNotify(&TaskInfo{
-			ID:          id,
-			BuildID:     buildID,
-			BuildType:   buildType,
-			Status:      status,
-			WorkerID:    workerID,
-			StartedAtMs: startedAtMs,
-		})
-	}
-	onComplete = func(id, buildID, buildType, status, workerID string, startedAtMs, completedAtMs, durationMs, queueMs, compileMs int64, exitCode int32, errorMsg string) {
-		s.RecordAndNotify(&TaskInfo{
-			ID:            id,
-			BuildID:       buildID,
-			BuildType:     buildType,
-			Status:        status,
-			WorkerID:      workerID,
-			StartedAtMs:   startedAtMs,
-			CompletedAtMs: completedAtMs,
-			DurationMs:    durationMs,
-			QueueMs:       queueMs,
-			CompileMs:     compileMs,
-			ExitCode:      exitCode,
-			ErrorMessage:  errorMsg,
-		})
-	}
-	return
 }
 
 // RunStatsLoop broadcasts a stats event to stream subscribers every
@@ -281,8 +249,8 @@ func (s *Service) StreamEvents(req *pb.StreamTelemetryEventsRequest, stream pb.T
 }
 
 // RecordAndNotify records a task state change and pushes it to
-// stream subscribers. The coordinator's event hooks call this via
-// CreateEventNotifier; exported for tests and future producers.
+// stream subscribers. hg-coord's eventNotifierWrapper calls it for
+// every coordinator task event.
 func (s *Service) RecordAndNotify(task *TaskInfo) {
 	s.store.RecordTask(task)
 	s.notifyTask(task)
@@ -363,6 +331,8 @@ func taskToProto(t *TaskInfo) *pb.TelemetryTask {
 		ExitCode:      t.ExitCode,
 		FromCache:     t.FromCache,
 		ErrorMessage:  t.ErrorMessage,
+		SourceFile:    t.SourceFile,
+		Command:       t.Command,
 	}
 }
 
